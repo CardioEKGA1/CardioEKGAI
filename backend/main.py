@@ -80,3 +80,14 @@ if os.path.exists(build_path):
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         return FileResponse(f"{build_path}/index.html")
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_build = os.path.join(os.path.dirname(__file__), "build")
+if os.path.exists(_build):
+    app.mount("/static", StaticFiles(directory=os.path.join(_build, "static")), name="static")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        return FileResponse(os.path.join(_build, "index.html"))
