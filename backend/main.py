@@ -68,3 +68,15 @@ async def chat(data: dict):
         messages=messages
     )
     return {"message": response.content[0].text}
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
+
+build_path = os.path.join(os.path.dirname(__file__), "../frontend/build")
+if os.path.exists(build_path):
+    app.mount("/static", StaticFiles(directory=f"{build_path}/static"), name="static")
+    
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        return FileResponse(f"{build_path}/index.html")
