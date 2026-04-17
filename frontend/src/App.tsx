@@ -64,7 +64,7 @@ const App: React.FC = () => {
       {screen==='landing' && <Landing onSignIn={()=>setScreen('login')} onSignUp={()=>setScreen('signup')}/>}
       {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={false}/>}
       {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={true}/>}
-      {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);setScreen('results');}} onPaywall={()=>setScreen('paywall')} onLogout={handleLogout}/>}
+      {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);setScreen('results');}} onPaywall={()=>setScreen('paywall')} onLogout={handleLogout} onSignUp={()=>setScreen('signup')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>setScreen('chat')} onBack={()=>setScreen('upload')}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={()=>setScreen('results')}/>}
       {screen==='paywall' && <Paywall onBack={()=>setScreen('upload')}/>}

@@ -1,15 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { EkgResult, User } from '../App';
 
-interface Props { API: string; token: string; user: User | null; onResult: (r: EkgResult, url: string) => void; onPaywall: () => void; onLogout: () => void; }
+interface Props { API: string; token: string; user: User | null; onResult: (r: EkgResult, url: string) => void; onPaywall: () => void; onLogout: () => void; onSignUp: () => void; }
 
-const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogout }) => {
+const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogout, onSignUp }) => {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const analyze = async (file: File) => {
+    if (!user) { onSignUp(); return; }
     setLoading(true); setError('');
     const url = URL.createObjectURL(file);
     const form = new FormData();
@@ -21,7 +22,7 @@ const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogo
         body: form
       });
       if (res.status === 402) { onPaywall(); return; }
-      if (res.status === 401) { setError('Please sign in to analyze EKGs.'); return; }
+      if (res.status === 401) { onSignUp(); return; }
       if (!res.ok) throw new Error('Analysis failed');
       const data = await res.json();
       onResult(data, url);
@@ -39,10 +40,11 @@ const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogo
             </div>
             <div>
               <div style={{fontSize:'18px',fontWeight:'800',color:'#1a2a4a'}}>EKGScan</div>
-              <div style={{fontSize:'11px',color:'#8aa0c0'}}>Signed in as {user?.email}</div>
+              {user ? <div style={{fontSize:'11px',color:'#8aa0c0'}}>Signed in as {user.email}</div>
+              : <div style={{fontSize:'11px',color:'#4a7ad0',cursor:'pointer',fontWeight:'600'}} onClick={onSignUp}>Sign up to analyze EKGs →</div>}
             </div>
           </div>
-          <button onClick={onLogout} style={{background:'none',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'8px',padding:'6px 12px',fontSize:'12px',color:'#8aa0c0',cursor:'pointer'}}>Sign Out</button>
+          {user && <button onClick={onLogout} style={{background:'none',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'8px',padding:'6px 12px',fontSize:'12px',color:'#8aa0c0',cursor:'pointer'}}>Sign Out</button>}
         </div>
 
         {user && !user.is_subscribed && (
@@ -52,8 +54,16 @@ const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogo
           </div>
         )}
 
+        {!user && (
+          <div style={{background:'rgba(122,176,240,0.1)',borderRadius:'12px',padding:'14px',marginBottom:'16px',textAlign:'center'}}>
+            <div style={{fontSize:'13px',color:'#4a7ad0',fontWeight:'600',marginBottom:'6px'}}>Create a free account to get started</div>
+            <div style={{fontSize:'12px',color:'#8aa0c0',marginBottom:'10px'}}>1 free EKG scan included</div>
+            <button onClick={onSignUp} style={{background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',border:'none',borderRadius:'10px',padding:'8px 20px',fontSize:'13px',fontWeight:'700',color:'white',cursor:'pointer'}}>Sign Up Free</button>
+          </div>
+        )}
+
         <div
-          onClick={() => inputRef.current?.click()}
+          onClick={() => user ? inputRef.current?.click() : onSignUp()}
           onDragOver={e => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if(f) analyze(f); }}
@@ -70,15 +80,13 @@ const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogo
               <div style={{fontSize:'36px',marginBottom:'12px'}}>📄</div>
               <div style={{fontSize:'15px',fontWeight:'700',color:'#1a2a4a',marginBottom:'6px'}}>Drop EKG image here</div>
               <div style={{fontSize:'12px',color:'#8aa0c0',marginBottom:'16px'}}>JPEG · PNG · PDF · up to 20MB</div>
-              <div style={{background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',color:'white',borderRadius:'12px',padding:'10px 24px',fontSize:'14px',fontWeight:'600',display:'inline-block'}}>Choose File</div>
+              <div style={{background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',color:'white',borderRadius:'12px',padding:'10px 24px',fontSize:'14px',fontWeight:'600',display:'inline-block'}}>{user ? 'Choose File' : 'Sign Up to Analyze'}</div>
             </div>
           )}
         </div>
 
         <input ref={inputRef} type="file" accept="image/*,.pdf" style={{display:'none'}} onChange={e => { const f = e.target.files?.[0]; if(f) analyze(f); }}/>
-
         {error && <div style={{background:'#fde8e8',border:'1px solid #f0b0b0',borderRadius:'10px',padding:'12px',fontSize:'13px',color:'#c04040',marginBottom:'16px'}}>{error}</div>}
-
         <div style={{background:'rgba(122,176,240,0.1)',borderRadius:'12px',padding:'12px',fontSize:'11px',color:'#6a8ab0',lineHeight:'1.6',textAlign:'center'}}>
           For decision support only. AI interpretation must be reviewed by a qualified clinician.
         </div>
