@@ -1,8 +1,8 @@
 import React from 'react';
 
-interface Props { onSignIn: () => void; onSignUp: () => void; }
+interface Props { onSignIn: () => void; onSignUp: () => void; onTerms: () => void; }
 
-const Landing: React.FC<Props> = ({ onSignIn, onSignUp }) => (
+const Landing: React.FC<Props> = ({ onSignIn, onSignUp, onTerms }) => (
   <div style={{minHeight:'100vh',display:'flex',flexDirection:'column'}}>
     <nav style={{padding:'16px 40px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(255,255,255,0.6)',backdropFilter:'blur(10px)',borderBottom:'1px solid rgba(122,176,240,0.2)'}}>
       <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
