@@ -1,7 +1,6 @@
 FROM python:3.11-slim
 WORKDIR /app
 COPY backend/requirements.txt .
-RUN pip install -r requirements.txt aiofiles
+RUN pip install -r requirements.txt
 COPY backend/ .
-COPY frontend/build ./build
 CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
