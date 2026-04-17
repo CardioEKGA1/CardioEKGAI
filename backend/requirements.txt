@@ -3,3 +3,7 @@ uvicorn
 anthropic
 python-multipart
 python-dotenv
+aiofiles
+sqlalchemy
+passlib[bcrypt]
+python-jose[cryptography]
