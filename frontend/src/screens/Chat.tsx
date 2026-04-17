@@ -22,7 +22,7 @@ const Chat: React.FC<Props> = ({ result, onBack }) => {
     setInput('');
     setLoading(true);
     try {
-      const res = await fetch('https://cardioekgai-production.up.railway.app/chat', {
+      const res = await fetch('https://ekgscan.com/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages })

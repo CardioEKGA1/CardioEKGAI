@@ -16,7 +16,7 @@ const Upload: React.FC<Props> = ({ onResult }) => {
     const form = new FormData();
     form.append('file', file);
     try {
-      const res = await fetch('https://cardioekgai-production.up.railway.app/analyze', { method: 'POST', body: form });
+      const res = await fetch('https://ekgscan.com/analyze', { method: 'POST', body: form });
       if (!res.ok) throw new Error('Analysis failed');
       const data = await res.json();
       onResult(data, url);
