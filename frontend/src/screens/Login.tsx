@@ -28,38 +28,6 @@ const Login: React.FC<Props> = ({ API, onAuth, onBack, isSignup }) => {
   return (
     <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
       <div style={{background:'rgba(255,255,255,0.85)',borderRadius:'24px',padding:'40px',maxWidth:'400px',width:'100%',boxShadow:'0 8px 32px rgba(100,130,200,0.12)'}}>
-        <button onClick={onBack} style={{background:'none',border:'none',c
-cat > ~/Desktop/CardioEKGAI/frontend/src/screens/Login.tsx << 'ENDOFFILE'
-import React, { useState } from 'react';
-
-interface Props { API: string; onAuth: (data: any) => void; onBack: () => void; isSignup: boolean; }
-
-const Login: React.FC<Props> = ({ API, onAuth, onBack, isSignup }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const submit = async () => {
-    setLoading(true); setError('');
-    const endpoint = isSignup ? '/auth/register' : '/auth/login';
-    try {
-      const res = await fetch(`${API}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed');
-      data.email = email;
-      onAuth(data);
-    } catch(e: any) { setError(e.message); }
-    finally { setLoading(false); }
-  };
-
-  return (
-    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-      <div style={{background:'rgba(255,255,255,0.85)',borderRadius:'24px',padding:'40px',maxWidth:'400px',width:'100%',boxShadow:'0 8px 32px rgba(100,130,200,0.12)'}}>
         <button onClick={onBack} style={{background:'none',border:'none',color:'#4a7ad0',fontSize:'13px',cursor:'pointer',marginBottom:'20px',padding:'0'}}>← Back</button>
         <div style={{fontSize:'24px',fontWeight:'800',color:'#1a2a4a',marginBottom:'6px'}}>{isSignup ? 'Create Account' : 'Welcome Back'}</div>
         <div style={{fontSize:'13px',color:'#8aa0c0',marginBottom:'28px'}}>{isSignup ? 'Sign up for 1 free EKG scan' : 'Sign in to your account'}</div>
