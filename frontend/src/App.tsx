@@ -5,6 +5,7 @@ import Upload from './screens/Upload';
 import Results from './screens/Results';
 import Chat from './screens/Chat';
 import Paywall from './screens/Paywall';
+import Terms from './screens/Terms';
 
 export interface EkgResult {
   rhythm: string;
@@ -25,7 +26,7 @@ export interface User {
   is_subscribed: boolean;
 }
 
-type Screen = 'landing' | 'login' | 'signup' | 'upload' | 'results' | 'chat' | 'paywall';
+type Screen = 'landing' | 'login' | 'signup' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms';
 
 const API = 'https://ekgscan.com';
 
@@ -61,13 +62,14 @@ const App: React.FC = () => {
 
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
-      {screen==='landing' && <Landing onSignIn={()=>setScreen('login')} onSignUp={()=>setScreen('signup')}/>}
+      {screen==='landing' && <Landing onSignIn={()=>setScreen('login')} onSignUp={()=>setScreen('signup')} onTerms={()=>setScreen('terms')}/>}
       {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={false}/>}
       {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={true}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);setScreen('results');}} onPaywall={()=>setScreen('paywall')} onLogout={handleLogout} onSignUp={()=>setScreen('signup')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>setScreen('chat')} onBack={()=>setScreen('upload')}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={()=>setScreen('results')}/>}
       {screen==='paywall' && <Paywall onBack={()=>setScreen('upload')}/>}
+      {screen==='terms' && <Terms onBack={()=>setScreen('landing')}/>}
     </div>
   );
 };
