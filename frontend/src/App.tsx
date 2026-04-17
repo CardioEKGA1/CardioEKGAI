@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Landing from './screens/Landing';
+import Login from './screens/Login';
 import Upload from './screens/Upload';
 import Results from './screens/Results';
 import Chat from './screens/Chat';
+import Paywall from './screens/Paywall';
 
 export interface EkgResult {
   rhythm: string;
@@ -17,18 +19,55 @@ export interface EkgResult {
   recommendation: string;
 }
 
-type Screen = 'landing' | 'upload' | 'results' | 'chat';
+export interface User {
+  email: string;
+  scan_count: number;
+  is_subscribed: boolean;
+}
+
+type Screen = 'landing' | 'login' | 'signup' | 'upload' | 'results' | 'chat' | 'paywall';
+
+const API = 'https://ekgscan.com';
 
 const App: React.FC = () => {
   const [screen, setScreen] = useState<Screen>('landing');
   const [result, setResult] = useState<EkgResult | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('');
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string>(localStorage.getItem('token') || '');
+
+  useEffect(() => {
+    if (token) {
+      fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(data => { if (data.email) { setUser(data); setScreen('upload'); } })
+        .catch(() => { localStorage.removeItem('token'); setToken(''); });
+    }
+  }, []);
+
+  const handleAuth = (data: any) => {
+    localStorage.setItem('token', data.access_token);
+    setToken(data.access_token);
+    setUser({ email: data.email || '', scan_count: data.scan_count, is_subscribed: data.is_subscribed });
+    setScreen('upload');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setToken('');
+    setUser(null);
+    setScreen('landing');
+  };
+
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
-      {screen==='landing' && <Landing onSignIn={()=>setScreen('upload')} onSignUp={()=>setScreen('upload')}/>}
-      {screen==='upload' && <Upload onResult={(r,url)=>{setResult(r);setImageUrl(url);setScreen('results');}}/>}
+      {screen==='landing' && <Landing onSignIn={()=>setScreen('login')} onSignUp={()=>setScreen('signup')}/>}
+      {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={false}/>}
+      {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={true}/>}
+      {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);setScreen('results');}} onPaywall={()=>setScreen('paywall')} onLogout={handleLogout}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>setScreen('chat')} onBack={()=>setScreen('upload')}/>}
-      {screen==='chat' && result && <Chat result={result} onBack={()=>setScreen('results')}/>}
+      {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={()=>setScreen('results')}/>}
+      {screen==='paywall' && <Paywall onBack={()=>setScreen('upload')}/>}
     </div>
   );
 };

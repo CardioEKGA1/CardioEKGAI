@@ -1,45 +1,56 @@
 import React, { useState, useRef } from 'react';
-import { EkgResult } from '../App';
+import { EkgResult, User } from '../App';
 
-interface Props { onResult: (r: EkgResult, url: string) => void; }
+interface Props { API: string; token: string; user: User | null; onResult: (r: EkgResult, url: string) => void; onPaywall: () => void; onLogout: () => void; }
 
-const Upload: React.FC<Props> = ({ onResult }) => {
+const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogout }) => {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const analyze = async (file: File) => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     const url = URL.createObjectURL(file);
     const form = new FormData();
     form.append('file', file);
     try {
-      const res = await fetch('https://ekgscan.com/analyze', { method: 'POST', body: form });
+      const res = await fetch(`${API}/analyze`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (res.status === 402) { onPaywall(); return; }
+      if (res.status === 401) { setError('Please sign in to analyze EKGs.'); return; }
       if (!res.ok) throw new Error('Analysis failed');
       const data = await res.json();
       onResult(data, url);
-    } catch {
-      setError('Analysis failed. Please check your API key and try again.');
-    } finally {
-      setLoading(false);
-    }
+    } catch { setError('Analysis failed. Please try again.'); }
+    finally { setLoading(false); }
   };
 
   return (
     <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'20px'}}>
       <div style={{background:'rgba(255,255,255,0.85)',borderRadius:'24px',padding:'40px',maxWidth:'520px',width:'100%',boxShadow:'0 8px 32px rgba(100,130,200,0.12)'}}>
-        <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'8px'}}>
-          <div style={{width:'40px',height:'40px',borderRadius:'12px',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <svg width="22" height="16" viewBox="0 0 22 16"><polyline points="0,8 4,8 6,2 8,14 10,4 12,12 14,8 22,8" fill="none" stroke="white" strokeWidth="2" strokeLinejoin="round"/></svg>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+            <div style={{width:'40px',height:'40px',borderRadius:'12px',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <svg width="22" height="16" viewBox="0 0 22 16"><polyline points="0,8 4,8 6,2 8,14 10,4 12,12 14,8 22,8" fill="none" stroke="white" strokeWidth="2" strokeLinejoin="round"/></svg>
+            </div>
+            <div>
+              <div style={{fontSize:'18px',fontWeight:'800',color:'#1a2a4a'}}>EKGScan</div>
+              <div style={{fontSize:'11px',color:'#8aa0c0'}}>Signed in as {user?.email}</div>
+            </div>
           </div>
-          <div>
-            <div style={{fontSize:'20px',fontWeight:'800',color:'#1a2a4a'}}>CardioEKGAI</div>
-            <div style={{fontSize:'11px',color:'#8aa0c0',letterSpacing:'1px',textTransform:'uppercase'}}>Clinical Decision Support</div>
-          </div>
+          <button onClick={onLogout} style={{background:'none',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'8px',padding:'6px 12px',fontSize:'12px',color:'#8aa0c0',cursor:'pointer'}}>Sign Out</button>
         </div>
-        <p style={{fontSize:'13px',color:'#8aa0c0',marginBottom:'28px',marginTop:'4px'}}>Upload an EKG image for instant AI-powered cardiac interpretation.</p>
+
+        {user && !user.is_subscribed && (
+          <div style={{background:'rgba(122,176,240,0.1)',borderRadius:'12px',padding:'10px 14px',marginBottom:'16px',fontSize:'12px',color:'#4a7ad0',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span>{user.scan_count === 0 ? '1 free scan remaining' : 'Free scan used — upgrade for unlimited'}</span>
+            {user.scan_count > 0 && <span onClick={onPaywall} style={{fontWeight:'700',cursor:'pointer'}}>Upgrade →</span>}
+          </div>
+        )}
 
         <div
           onClick={() => inputRef.current?.click()}
@@ -59,7 +70,7 @@ const Upload: React.FC<Props> = ({ onResult }) => {
               <div style={{fontSize:'36px',marginBottom:'12px'}}>📄</div>
               <div style={{fontSize:'15px',fontWeight:'700',color:'#1a2a4a',marginBottom:'6px'}}>Drop EKG image here</div>
               <div style={{fontSize:'12px',color:'#8aa0c0',marginBottom:'16px'}}>JPEG · PNG · PDF · up to 20MB</div>
-              <div style={{background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',color:'white',border:'none',borderRadius:'12px',padding:'10px 24px',fontSize:'14px',fontWeight:'600',cursor:'pointer',display:'inline-block'}}>Choose File</div>
+              <div style={{background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',color:'white',borderRadius:'12px',padding:'10px 24px',fontSize:'14px',fontWeight:'600',display:'inline-block'}}>Choose File</div>
             </div>
           )}
         </div>

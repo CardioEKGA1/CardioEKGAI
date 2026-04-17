@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { EkgResult } from '../App';
 
-interface Props { result: EkgResult; onBack: () => void; }
+interface Props { result: EkgResult; API: string; token: string; onBack: () => void; }
 interface Message { role: 'user' | 'assistant'; content: string; }
 
-const Chat: React.FC<Props> = ({ result, onBack }) => {
+const Chat: React.FC<Props> = ({ result, API, token, onBack }) => {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: `Hello! I have the EKG findings loaded. The key findings are: ${result.rhythm}, rate ${result.rate}, QTc ${result.qtc}. ${result.urgent_flags.length > 0 ? 'Urgent flags: ' + result.urgent_flags.join(', ') + '.' : ''} What would you like to know?` }
+    { role: 'assistant', content: `Hello! I have the EKG findings loaded. Key findings: ${result.rhythm}, rate ${result.rate}, QTc ${result.qtc}. ${result.urgent_flags.length > 0 ? 'Urgent: ' + result.urgent_flags.join(', ') + '.' : ''} What would you like to know?` }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,18 +22,16 @@ const Chat: React.FC<Props> = ({ result, onBack }) => {
     setInput('');
     setLoading(true);
     try {
-      const res = await fetch('https://ekgscan.com/chat', {
+      const res = await fetch(`${API}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ messages: newMessages })
       });
       const data = await res.json();
-      setMessages(m => [...m, { role: 'assistant', content: data.message }]);
+      setMessages(m => [...m, { role: 'assistant', content: data.message || 'Please upgrade to use chat.' }]);
     } catch {
-      setMessages(m => [...m, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
-    } finally {
-      setLoading(false);
-    }
+      setMessages(m => [...m, { role: 'assistant', content: 'Sorry, an error occurred.' }]);
+    } finally { setLoading(false); }
   };
 
   return (
@@ -45,7 +43,7 @@ const Chat: React.FC<Props> = ({ result, onBack }) => {
             <svg width="18" height="13" viewBox="0 0 18 13"><polyline points="0,6.5 3,6.5 5,1.5 7,11.5 9,3.5 11,9.5 13,6.5 18,6.5" fill="none" stroke="white" strokeWidth="1.8" strokeLinejoin="round"/></svg>
           </div>
           <div>
-            <div style={{fontSize:'15px',fontWeight:'700',color:'#1a2a4a'}}>Dr. CardioEKGAI</div>
+            <div style={{fontSize:'15px',fontWeight:'700',color:'#1a2a4a'}}>Dr. SoulMD</div>
             <div style={{fontSize:'11px',color:'#70b870'}}>● EKG context loaded</div>
           </div>
         </div>
@@ -73,20 +71,12 @@ const Chat: React.FC<Props> = ({ result, onBack }) => {
       </div>
 
       <div style={{padding:'12px 0 24px',display:'flex',gap:'10px'}}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key==='Enter' && send()}
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()}
           placeholder="Ask about the EKG findings..."
-          style={{flex:1,background:'rgba(255,255,255,0.85)',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'16px',padding:'14px 18px',fontSize:'14px',color:'#1a2a4a',outline:'none'}}
-        />
+          style={{flex:1,background:'rgba(255,255,255,0.85)',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'16px',padding:'14px 18px',fontSize:'14px',color:'#1a2a4a',outline:'none'}}/>
         <button onClick={send} disabled={loading} style={{width:'48px',height:'48px',borderRadius:'50%',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
           <span style={{color:'white',fontSize:'18px'}}>↑</span>
         </button>
-      </div>
-
-      <div style={{fontSize:'11px',color:'#8aa0c0',textAlign:'center',paddingBottom:'16px'}}>
-        Decision support only · Not a substitute for clinical judgment
       </div>
     </div>
   );
