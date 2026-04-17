@@ -32,16 +32,42 @@ const API = 'https://ekgscan.com';
 
 const App: React.FC = () => {
   const [screen, setScreen] = useState<Screen>('landing');
+  const [history, setHistory] = useState<Screen[]>(['landing']);
   const [result, setResult] = useState<EkgResult | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('');
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string>(localStorage.getItem('token') || '');
 
+  const navigate = (s: Screen) => {
+    setHistory(h => [...h, s]);
+    setScreen(s);
+    window.history.pushState({}, '', '/');
+  };
+
+  const goBack = () => {
+    setHistory(h => {
+      const newH = h.slice(0, -1);
+      setScreen(newH[newH.length - 1] || 'landing');
+      return newH;
+    });
+  };
+
+  useEffect(() => {
+    const handlePop = (e: PopStateEvent) => {
+      e.preventDefault();
+      goBack();
+      window.history.pushState({}, '', '/');
+    };
+    window.history.pushState({}, '', '/');
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, [history]);
+
   useEffect(() => {
     if (token) {
       fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
-        .then(data => { if (data.email) { setUser(data); setScreen('upload'); } })
+        .then(data => { if (data.email) { setUser(data); navigate('upload'); } })
         .catch(() => { localStorage.removeItem('token'); setToken(''); });
     }
   }, []);
@@ -50,26 +76,26 @@ const App: React.FC = () => {
     localStorage.setItem('token', data.access_token);
     setToken(data.access_token);
     setUser({ email: data.email || '', scan_count: data.scan_count, is_subscribed: data.is_subscribed });
-    setScreen('upload');
+    navigate('upload');
   };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     setToken('');
     setUser(null);
-    setScreen('landing');
+    navigate('landing');
   };
 
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
-      {screen==='landing' && <Landing onSignIn={()=>setScreen('login')} onSignUp={()=>setScreen('signup')} onTerms={()=>setScreen('terms')}/>}
-      {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={false}/>}
-      {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={()=>setScreen('landing')} isSignup={true}/>}
-      {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);setScreen('results');}} onPaywall={()=>setScreen('paywall')} onLogout={handleLogout} onSignUp={()=>setScreen('signup')}/>}
-      {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>setScreen('chat')} onBack={()=>setScreen('upload')}/>}
-      {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={()=>setScreen('results')}/>}
-      {screen==='paywall' && <Paywall onBack={()=>setScreen('upload')}/>}
-      {screen==='terms' && <Terms onBack={()=>setScreen('landing')}/>}
+      {screen==='landing' && <Landing onSignIn={()=>navigate('login')} onSignUp={()=>navigate('signup')} onTerms={()=>navigate('terms')}/>}
+      {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={false}/>}
+      {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={true}/>}
+      {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('signup')}/>}
+      {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
+      {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
+      {screen==='paywall' && <Paywall onBack={goBack}/>}
+      {screen==='terms' && <Terms onBack={goBack}/>}
     </div>
   );
 };
