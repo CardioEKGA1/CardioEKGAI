@@ -6,6 +6,7 @@ import Results from './screens/Results';
 import Chat from './screens/Chat';
 import Paywall from './screens/Paywall';
 import Terms from './screens/Terms';
+import Admin from './screens/Admin';
 
 export interface EkgResult {
   rhythm: string;
@@ -31,6 +32,7 @@ type Screen = 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall' | '
 const API = 'https://ekgscan.com';
 
 const App: React.FC = () => {
+  const [isAdminRoute] = useState(() => window.location.pathname.startsWith('/admin'));
   const [screen, setScreen] = useState<Screen>('landing');
   const [history, setHistory] = useState<Screen[]>(['landing']);
   const [result, setResult] = useState<EkgResult | null>(null);
@@ -54,6 +56,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (isAdminRoute) return;
     const handlePop = (e: PopStateEvent) => {
       e.preventDefault();
       goBack();
@@ -62,7 +65,7 @@ const App: React.FC = () => {
     window.history.pushState({}, '', '/');
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
-  }, [history]);
+  }, [history, isAdminRoute]);
 
   const handleAuth = (data: any) => {
     localStorage.setItem('token', data.access_token);
@@ -72,6 +75,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (isAdminRoute) return;
     if (initialMagicToken) {
       fetch(`${API}/auth/verify-token`, {
         method: 'POST',
@@ -97,6 +101,14 @@ const App: React.FC = () => {
     setUser(null);
     navigate('landing');
   };
+
+  if (isAdminRoute) {
+    return (
+      <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
+        <Admin API={API}/>
+      </div>
+    );
+  }
 
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>

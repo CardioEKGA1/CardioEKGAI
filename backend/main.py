@@ -7,7 +7,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
-from database import get_db, User
+from sqlalchemy import func
+from database import get_db, User, ToolUsage
 from auth import create_token, create_magic_token, decode_token
 from email_utils import send_verification_email
 from pydantic import BaseModel
@@ -18,6 +19,8 @@ import json
 import re
 import stripe
 import traceback
+import hmac
+from datetime import timedelta
 import sendgrid
 from sendgrid.helpers.mail import Mail
 from dotenv import load_dotenv
@@ -37,6 +40,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "chachodesertspaces@gmail.com")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +55,11 @@ class MagicLinkRequest(BaseModel):
 class TokenVerify(BaseModel):
     token: str
 
+class AdminUserUpdate(BaseModel):
+    subscription_tier: str | None = None
+    is_subscribed: bool | None = None
+    is_clinician: bool | None = None
+
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization or not authorization.startswith("Bearer "):
         return None
@@ -59,6 +68,13 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
     if not payload:
         return None
     return db.query(User).filter(User.email == payload.get("sub")).first()
+
+def verify_admin(x_admin_token: str = Header(None)):
+    if not ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="Admin disabled (ADMIN_TOKEN not configured)")
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    return True
 
 def check_and_update_spend(user, db):
     current_month = datetime.now().month
@@ -172,6 +188,7 @@ async def analyze_ekg(request: Request, file: UploadFile = File(...), current_us
     match = re.search(r"\{.*\}", text, re.DOTALL)
     result = json.loads(match.group() if match else text)
     current_user.scan_count += 1
+    db.add(ToolUsage(user_id=current_user.id, tool_slug="ekgscan", cost=COST_PER_SCAN))
     db.commit()
     return result
 
@@ -225,6 +242,155 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     user.subscription_tier = "free"
                     db.commit()
     return {"status": "ok"}
+
+@app.post("/admin/verify")
+def admin_verify(_: bool = Depends(verify_admin)):
+    return {"ok": True}
+
+@app.get("/admin/users")
+def admin_users(search: str = "", limit: int = 100, offset: int = 0, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    q = db.query(User)
+    if search:
+        q = q.filter(User.email.ilike(f"%{search}%"))
+    total = q.count()
+    rows = q.order_by(User.id.desc()).offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "users": [{
+            "id": u.id,
+            "email": u.email,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "subscription_tier": u.subscription_tier,
+            "is_subscribed": u.is_subscribed,
+            "is_verified": u.is_verified,
+            "is_clinician": bool(u.is_clinician),
+            "scan_count": u.scan_count,
+            "monthly_spend": round(u.monthly_spend or 0.0, 3),
+        } for u in rows],
+    }
+
+@app.patch("/admin/users/{user_id}")
+def admin_update_user(user_id: int, data: AdminUserUpdate, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if data.subscription_tier is not None:
+        user.subscription_tier = data.subscription_tier
+        user.is_subscribed = data.subscription_tier != "free"
+    if data.is_subscribed is not None:
+        user.is_subscribed = data.is_subscribed
+    if data.is_clinician is not None:
+        user.is_clinician = data.is_clinician
+        user.clinician_attested_at = datetime.utcnow() if data.is_clinician else None
+    db.commit()
+    return {"ok": True}
+
+@app.delete("/admin/users/{user_id}")
+def admin_delete_user(user_id: int, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.query(ToolUsage).filter(ToolUsage.user_id == user_id).delete()
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
+
+@app.get("/admin/stats")
+def admin_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    now = datetime.utcnow()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=7)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    total_users = db.query(User).count()
+    verified = db.query(User).filter(User.is_verified == True).count()
+    clinicians = db.query(User).filter(User.is_clinician == True).count()
+    subscribed = db.query(User).filter(User.is_subscribed == True).count()
+    monthly_subs = db.query(User).filter(User.subscription_tier == "monthly").count()
+    yearly_subs = db.query(User).filter(User.subscription_tier == "yearly").count()
+
+    scans_today = db.query(func.count(ToolUsage.id)).filter(ToolUsage.created_at >= today_start).scalar() or 0
+    scans_week = db.query(func.count(ToolUsage.id)).filter(ToolUsage.created_at >= week_start).scalar() or 0
+    scans_month = db.query(func.count(ToolUsage.id)).filter(ToolUsage.created_at >= month_start).scalar() or 0
+    scans_lifetime = db.query(func.sum(User.scan_count)).scalar() or 0
+
+    tool_breakdown_rows = db.query(ToolUsage.tool_slug, func.count(ToolUsage.id)).group_by(ToolUsage.tool_slug).all()
+    tool_breakdown = [{"tool": slug, "count": int(count)} for slug, count in tool_breakdown_rows]
+
+    ai_spend = db.query(func.sum(User.monthly_spend)).scalar() or 0.0
+    revenue_month_estimate = monthly_subs * 4.99 + (yearly_subs * 49.99 / 12)
+
+    top = db.query(User).order_by(User.scan_count.desc()).limit(10).all()
+    most_active = [{
+        "id": u.id, "email": u.email, "scan_count": u.scan_count,
+        "monthly_spend": round(u.monthly_spend or 0.0, 3),
+        "tier": u.subscription_tier,
+    } for u in top if u.scan_count > 0]
+
+    new_this_week = db.query(User).filter(User.created_at >= week_start).count() if hasattr(User, "created_at") else 0
+
+    return {
+        "users": {
+            "total": total_users, "verified": verified, "clinicians": clinicians,
+            "subscribed": subscribed, "new_this_week": new_this_week,
+        },
+        "subscriptions": {"monthly": monthly_subs, "yearly": yearly_subs, "free": total_users - subscribed},
+        "scans": {"today": int(scans_today), "this_week": int(scans_week), "this_month": int(scans_month), "lifetime": int(scans_lifetime)},
+        "tool_breakdown": tool_breakdown,
+        "ai_spend_month": round(float(ai_spend), 3),
+        "revenue_month_estimate": round(revenue_month_estimate, 2),
+        "most_active": most_active,
+    }
+
+@app.get("/admin/health")
+def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    from sqlalchemy import text as _text
+    checks = {}
+    try:
+        db.execute(_text("SELECT 1"))
+        checks["database"] = {"ok": True}
+    except Exception as e:
+        checks["database"] = {"ok": False, "error": str(e)[:200]}
+    checks["sendgrid"] = {"ok": bool(SENDGRID_API_KEY), "from_email": FROM_EMAIL}
+    checks["stripe"] = {"ok": bool(stripe.api_key), "webhook_configured": bool(STRIPE_WEBHOOK_SECRET)}
+    checks["anthropic"] = {"ok": bool(os.getenv("ANTHROPIC_API_KEY"))}
+    checks["admin_token_configured"] = bool(ADMIN_TOKEN)
+    return checks
+
+@app.get("/admin/moderation")
+def admin_moderation(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    now = datetime.utcnow()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    approaching = []
+    for u in db.query(User).filter(User.is_subscribed == True).all():
+        limit = MONTHLY_LIMIT.get(u.subscription_tier or "free", 0)
+        if limit > 0 and (u.monthly_spend or 0.0) >= 0.8 * limit:
+            approaching.append({
+                "id": u.id, "email": u.email, "tier": u.subscription_tier,
+                "spend": round(u.monthly_spend or 0.0, 3), "limit": limit,
+                "pct": round((u.monthly_spend or 0.0) / limit * 100, 1),
+            })
+
+    unverified_with_usage = [{
+        "id": u.id, "email": u.email, "scan_count": u.scan_count,
+    } for u in db.query(User).filter(User.is_verified == False, User.scan_count > 0).all()]
+
+    heavy_today_rows = db.query(ToolUsage.user_id, func.count(ToolUsage.id).label("c")).filter(
+        ToolUsage.created_at >= today_start
+    ).group_by(ToolUsage.user_id).having(func.count(ToolUsage.id) >= 10).all()
+    heavy_today = []
+    for uid, count in heavy_today_rows:
+        u = db.query(User).filter(User.id == uid).first()
+        if u:
+            heavy_today.append({"id": u.id, "email": u.email, "scans_today": int(count)})
+
+    return {
+        "approaching_limit": approaching,
+        "unverified_with_usage": unverified_with_usage,
+        "heavy_usage_today": heavy_today,
+        "failed_payments": {"note": "Not yet tracked. Requires Stripe invoice.payment_failed webhook handler."},
+    }
 
 _build = os.path.join(os.path.dirname(__file__), "build")
 if os.path.exists(_build):
