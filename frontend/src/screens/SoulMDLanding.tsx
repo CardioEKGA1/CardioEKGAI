@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import NephroIcon from './tools/NephroIcon';
 
 interface Props { onSignIn: () => void; onSignUp: () => void; }
 
@@ -8,7 +9,7 @@ interface LandingTool { slug: string; name: string; icon: React.ReactNode; desc:
 
 const TOOLS: LandingTool[] = [
   { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                      price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘',          desc: 'Comprehensive nephrology decision support',          price: '$9.99 / mo · $88.88 / yr' },
+  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroIcon/>, desc: 'Comprehensive nephrology decision support',          price: '$9.99 / mo · $88.88 / yr' },
   { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',          price: '$4.99 / mo · $44.44 / yr' },
   { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                  price: '$4.99 / mo · $44.44 / yr' },
   { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                     price: '$4.99 / mo · $44.44 / yr' },
@@ -51,8 +52,12 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
       </div>
     </nav>
 
-    <section style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'40px 20px', textAlign:'center'}}>
-      <img src="/soulmd_logo.svg" alt="SoulMD — AI Clinical Suite" style={{width:'100%', maxWidth:'560px', height:'auto', display:'block', marginBottom:'20px'}}/>
+    <section style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px 40px', textAlign:'center'}}>
+      <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'10px', marginBottom:'28px'}}>
+        <SoulMDLogo size={72}/>
+        <div style={{fontSize:'36px', fontWeight:'800', lineHeight:'1.1', letterSpacing:'-0.5px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
+        <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'4px'}}>AI CLINICAL SUITE</div>
+      </div>
       <h1 style={{fontSize:'44px', fontWeight:'900', color:'#1a2a4a', lineHeight:'1.1', marginBottom:'14px', maxWidth:'720px', letterSpacing:'-1.2px'}}>
         Specialist-grade AI<br/>
         <span style={GRAD_TEXT}>for every decision</span>

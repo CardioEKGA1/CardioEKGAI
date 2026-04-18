@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useEffect, useState, useCallback } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import NephroIcon from './tools/NephroIcon';
 import { User } from '../App';
 
 interface Props {
@@ -19,7 +20,7 @@ interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string
 
 const TOOLS: Tool[] = [
   { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀',              desc: '12-lead EKG interpretation in seconds',                 monthly: 4.99,  yearly: 44.44 },
-  { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘',              desc: 'Comprehensive nephrology decision support',             monthly: 9.99,  yearly: 88.88 },
+  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroIcon/>,     desc: 'Comprehensive nephrology decision support',             monthly: 9.99,  yearly: 88.88 },
   { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻',              desc: 'Structured radiology report from any X-ray image',     monthly: 4.99,  yearly: 44.44 },
   { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊',              desc: 'Full medication interaction safety check',             monthly: 4.99,  yearly: 44.44 },
   { slug: 'infectid',     name: 'InfectID',        icon: '🦠',              desc: 'IDSA-based antibiotic recommendations',                monthly: 4.99,  yearly: 44.44 },
