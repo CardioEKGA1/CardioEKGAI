@@ -24,11 +24,10 @@ const Paywall: React.FC<Props> = ({ onBack }) => (
           <div style={{fontSize:'28px',fontWeight:'900',color:'#1a2a4a'}}>$4.99</div>
           <div style={{fontSize:'11px',color:'#8aa0c0'}}>per month</div>
         </a>
-        <a href={YEARLY_LINK} style={{display:'block',background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))',border:'2px solid rgba(122,176,240,0.4)',borderRadius:'16px',padding:'20px 12px',textDecoration:'none',position:'relative'}}>
-          <div style={{position:'absolute',top:'-10px',left:'50%',transform:'translateX(-50%)',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',color:'white',fontSize:'10px',fontWeight:'700',padding:'3px 10px',borderRadius:'20px',whiteSpace:'nowrap'}}>BEST VALUE</div>
+        <a href={YEARLY_LINK} style={{display:'block',background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'16px',padding:'20px 12px',textDecoration:'none'}}>
           <div style={{fontSize:'11px',color:'#4a7ad0',textTransform:'uppercase',letterSpacing:'1px',marginBottom:'6px'}}>Yearly</div>
           <div style={{fontSize:'28px',fontWeight:'900',color:'#1a2a4a'}}>$49.99</div>
-          <div style={{fontSize:'11px',color:'#4a7ad0',fontWeight:'600'}}>2 months free!</div>
+          <div style={{fontSize:'11px',color:'#8aa0c0'}}>per year</div>
         </a>
       </div>
       <div style={{fontSize:'11px',color:'#a0b0c8',marginBottom:'20px'}}>Secure payment via Stripe · Cancel anytime</div>
