@@ -279,8 +279,7 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
             if is_soulmd:
                 send_email(user.email, "Welcome to SoulMD — here is your free EKGScan",
                     """<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:40px">
-                    <h1 style="color:#1a2a4a;margin-bottom:4px">SoulMD</h1>
-                    <div style="font-size:13px;color:#6a8ab0;font-style:italic;margin-bottom:24px">Where Science Meets Soul</div>
+                    <h1 style="color:#1a2a4a;margin-bottom:16px">SoulMD</h1>
                     <h2 style="color:#1a2a4a">Welcome aboard</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
                     <p style="color:#4a5e6a;line-height:1.7">From there you can unlock any single tool ($4.99/mo — NephroAI $9.99, ClinicalNote AI $29.99) or go all-in with the Suite ($88.88/mo, $888/yr).</p>

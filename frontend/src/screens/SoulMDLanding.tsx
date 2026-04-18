@@ -53,13 +53,15 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
     </nav>
 
     <section style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px 40px', textAlign:'center'}}>
+      <div style={{marginBottom:'24px'}}>
+        <SoulMDLogo size={72}/>
+      </div>
       <div style={{fontSize:'11px', fontWeight:'600', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'16px', background:'rgba(122,176,240,0.12)', padding:'6px 16px', borderRadius:'20px', display:'inline-block'}}>AI-Powered Clinical Decision Support</div>
       <h1 style={{fontSize:'52px', fontWeight:'900', color:'#1a2a4a', lineHeight:'1.1', marginBottom:'16px', maxWidth:'720px', letterSpacing:'-1.5px'}}>
         Specialist-grade AI<br/>
         <span style={GRAD_TEXT}>for every decision</span>
       </h1>
-      <p style={{fontSize:'16px', color:'#6a8ab0', lineHeight:'1.7', maxWidth:'560px', marginBottom:'10px'}}>Seven clinical tools, one login. Structured outputs, built for clinicians — powered by Claude.</p>
-      <p style={{fontSize:'13px', fontStyle:'italic', color:'#8aa0c0', marginBottom:'32px', letterSpacing:'0.5px'}}>Where Science Meets Soul</p>
+      <p style={{fontSize:'16px', color:'#6a8ab0', lineHeight:'1.7', maxWidth:'560px', marginBottom:'32px'}}>Seven clinical tools, one login. Structured outputs, built for clinicians — powered by Claude.</p>
       <div style={{display:'flex', gap:'12px', flexWrap:'wrap', justifyContent:'center', marginBottom:'10px'}}>
         <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'700', color:'white', cursor:'pointer'}}>Sign Up Free</button>
         <button onClick={onSignIn} style={{background:'rgba(255,255,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
