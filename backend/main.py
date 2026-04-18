@@ -17,6 +17,7 @@ import os
 import json
 import re
 import stripe
+import traceback
 import sendgrid
 from sendgrid.helpers.mail import Mail
 from dotenv import load_dotenv
@@ -87,25 +88,32 @@ def health():
 @app.post("/auth/magic-link")
 @limiter.limit("3/minute")
 def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(get_db)):
-    email = data.email.strip().lower()
-    if "@" not in email or "." not in email:
-        raise HTTPException(status_code=400, detail="Invalid email")
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        user = User(email=email, is_verified=False, subscription_tier="free")
-        db.add(user)
-        db.commit()
-    token = create_magic_token(email)
-    link = f"https://ekgscan.com/?token={token}"
-    send_email(email, "Your EKGScan sign-in link",
-        f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:40px">
-        <h1 style="color:#1a2a4a">EKGScan</h1>
-        <h2 style="color:#1a2a4a">Sign in to your account</h2>
-        <p style="color:#8aa0c0">Click below to sign in. This link expires in 15 minutes.</p>
-        <a href="{link}" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Sign In to EKGScan</a>
-        <p style="font-size:12px;color:#a0b0c8">If you did not request this, ignore this email.</p>
-        </div>""")
-    return {"message": "Check your email for a sign-in link."}
+    try:
+        email = data.email.strip().lower()
+        if "@" not in email or "." not in email:
+            raise HTTPException(status_code=400, detail="Invalid email")
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            user = User(email=email, hashed_password="", is_verified=False, subscription_tier="free")
+            db.add(user)
+            db.commit()
+        token = create_magic_token(email)
+        link = f"https://ekgscan.com/?token={token}"
+        send_email(email, "Your EKGScan sign-in link",
+            f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:40px">
+            <h1 style="color:#1a2a4a">EKGScan</h1>
+            <h2 style="color:#1a2a4a">Sign in to your account</h2>
+            <p style="color:#8aa0c0">Click below to sign in. This link expires in 15 minutes.</p>
+            <a href="{link}" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Sign In to EKGScan</a>
+            <p style="font-size:12px;color:#a0b0c8">If you did not request this, ignore this email.</p>
+            </div>""")
+        return {"message": "Check your email for a sign-in link."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"MAGIC_LINK_ERROR: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Could not send sign-in link. ({type(e).__name__})")
 
 @app.post("/auth/verify-token")
 @limiter.limit("10/minute")
