@@ -9,8 +9,11 @@ interface Props {
   user: User;
   onLogout: () => void;
   onOpenEkgscan: () => void;
+  onOpenTool: (slug: string) => void;
   checkoutResult: string | null;
 }
+
+const TEXT_TOOLS = new Set(['nephroai', 'rxcheck', 'infectid', 'clinicalnote']);
 
 const TOOLS = [
   { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                      monthly: 4.99,  yearly: 44.44 },
@@ -36,7 +39,7 @@ interface AccessResp {
   note_style_preference: string;
 }
 
-const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, checkoutResult }) => {
+const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, checkoutResult }) => {
   const [access, setAccess] = useState<AccessResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
@@ -107,7 +110,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       <nav style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'20px', flexWrap:'wrap', gap:'12px'}}>
         <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
           <SoulMDLogo size={32}/>
-          <div style={{fontSize:'18px', fontWeight:'900', color:'#1a2a4a'}}>SoulMD</div>
+          <div style={{fontSize:'18px', fontWeight:'900', letterSpacing:'-0.3px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
         </div>
         <div style={{display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap'}}>
           <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', fontSize:'11px', color:'#6a8ab0'}}>
@@ -152,6 +155,8 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
                 {active ? (
                   t.slug === 'ekgscan' ? (
                     <button onClick={onOpenEkgscan} style={{background:WORDMARK, border:'none', borderRadius:'12px', padding:'10px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Open →</button>
+                  ) : TEXT_TOOLS.has(t.slug) ? (
+                    <button onClick={()=>onOpenTool(t.slug)} style={{background:WORDMARK, border:'none', borderRadius:'12px', padding:'10px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Open →</button>
                   ) : (
                     <button disabled style={{background:'rgba(240,246,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'12px', padding:'10px', fontSize:'12px', fontWeight:'700', color:'#8aa0c0', cursor:'default'}}>UI launching soon</button>
                   )

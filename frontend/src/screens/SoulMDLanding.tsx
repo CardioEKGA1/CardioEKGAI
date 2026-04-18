@@ -33,7 +33,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
     <nav style={{padding:'16px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(255,255,255,0.6)', backdropFilter:'blur(10px)', borderBottom:'1px solid rgba(122,176,240,0.2)', flexWrap:'wrap', gap:'10px'}}>
       <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
         <SoulMDLogo size={32}/>
-        <div style={{fontSize:'18px', fontWeight:'900', color:'#1a2a4a', letterSpacing:'-0.3px'}}>SoulMD</div>
+        <div style={{fontSize:'18px', fontWeight:'900', letterSpacing:'-0.3px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
       </div>
       <div style={{display:'flex', gap:'8px'}}>
         <button onClick={onSignIn} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'8px 18px', fontSize:'13px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
@@ -42,10 +42,12 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
     </nav>
 
     <section style={{padding:'70px 20px 40px', textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center'}}>
-      <div style={{background:'rgba(255,255,255,0.7)', borderRadius:'28px', padding:'18px', marginBottom:'22px', boxShadow:'0 8px 32px rgba(100,130,200,0.12)', border:'1px solid rgba(255,255,255,0.9)'}}>
-        <SoulMDLogo size={90}/>
+      <div style={{background:'rgba(255,255,255,0.75)', borderRadius:'28px', padding:'22px', marginBottom:'22px', boxShadow:'0 8px 32px rgba(100,130,200,0.12)', border:'1px solid rgba(255,255,255,0.9)', backgroundImage:'linear-gradient(rgba(122,176,240,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(122,176,240,0.08) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.75), rgba(255,255,255,0.75))', backgroundSize:'18px 18px, 18px 18px, auto'}}>
+        <SoulMDLogo size={96}/>
       </div>
-      <div style={{fontSize:'52px', fontWeight:'900', color:'#1a2a4a', lineHeight:'1.05', marginBottom:'10px', letterSpacing:'-1.5px'}}>SoulMD</div>
+      <div style={{background:'rgba(255,255,255,0.8)', borderRadius:'40px', padding:'8px 24px', marginBottom:'16px', boxShadow:'0 4px 20px rgba(100,130,200,0.08)', border:'1px solid rgba(255,255,255,0.9)', display:'inline-block'}}>
+        <div style={{fontSize:'52px', fontWeight:'900', lineHeight:'1.05', letterSpacing:'-1.5px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
+      </div>
       <div style={{fontSize:'18px', fontWeight:'700', marginBottom:'8px', ...GRAD_TEXT}}>AI-Powered Clinical Decision Support</div>
       <div style={{fontSize:'14px', fontStyle:'italic', color:'#6a8ab0', marginBottom:'34px', letterSpacing:'0.5px'}}>Where Science Meets Soul</div>
       <div style={{display:'flex', gap:'12px', flexWrap:'wrap', justifyContent:'center'}}>
