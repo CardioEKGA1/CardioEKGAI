@@ -31,7 +31,7 @@ CATALOG = [
 
 def find_or_create_product(slug: str, name: str, description: str):
     for p in stripe.Product.list(limit=100, active=True).auto_paging_iter():
-        if p.metadata.get("slug") == slug:
+        if getattr(p.metadata, "slug", None) == slug:
             if p.name != name or p.description != description:
                 stripe.Product.modify(p.id, name=name, description=description)
             print(f"  [=] product: {p.id} ({name})")
@@ -44,11 +44,13 @@ def find_or_create_product(slug: str, name: str, description: str):
 def find_or_create_price(product_id: str, slug: str, tier: str, amount_cents: int):
     interval = "month" if tier == "monthly" else "year"
     for pr in stripe.Price.list(product=product_id, active=True, limit=100).auto_paging_iter():
-        if (pr.metadata.get("slug") == slug
-                and pr.metadata.get("tier") == tier
+        md_slug = getattr(pr.metadata, "slug", None)
+        md_tier = getattr(pr.metadata, "tier", None)
+        rec_interval = getattr(pr.recurring, "interval", None) if pr.recurring else None
+        if (md_slug == slug
+                and md_tier == tier
                 and pr.unit_amount == amount_cents
-                and pr.recurring
-                and pr.recurring["interval"] == interval):
+                and rec_interval == interval):
             print(f"    [=] price: {pr.id} ({tier} ${amount_cents/100:.2f})")
             return pr
     pr = stripe.Price.create(
