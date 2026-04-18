@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ToolShell, ToolResult, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL, WORDMARK } from './shared';
+import DictationButton from '../../DictationButton';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -34,53 +35,9 @@ const PalliativeMDTool: React.FC<Props> = ({ API, token, onBack }) => {
   const [text, setText] = useState('');
   const [template, setTemplate] = useState<Record<string, string>>({});
   const [templateOpen, setTemplateOpen] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [supported, setSupported] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<any>(null);
-  const recognitionRef = useRef<any>(null);
-  const interimRef = useRef<string>('');
-
-  useEffect(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) setSupported(false);
-    return () => { try { recognitionRef.current?.stop(); } catch {} };
-  }, []);
-
-  const startRecording = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setSupported(false); return; }
-    try {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = 'en-US';
-      interimRef.current = '';
-      rec.onresult = (event: any) => {
-        let finalChunk = '';
-        let interimChunk = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const t = event.results[i][0].transcript;
-          if (event.results[i].isFinal) finalChunk += t; else interimChunk += t;
-        }
-        if (finalChunk) {
-          setText(prev => (prev ? prev.trimEnd() + ' ' : '') + finalChunk.trim() + ' ');
-        }
-        interimRef.current = interimChunk;
-      };
-      rec.onerror = (e: any) => { setError(e.error === 'not-allowed' ? 'Microphone permission denied.' : 'Voice recognition error.'); setRecording(false); };
-      rec.onend = () => setRecording(false);
-      rec.start();
-      recognitionRef.current = rec;
-      setRecording(true); setError('');
-    } catch (e: any) { setError('Could not start voice input.'); setRecording(false); }
-  };
-
-  const stopRecording = () => {
-    try { recognitionRef.current?.stop(); } catch {}
-    setRecording(false);
-  };
 
   const updateField = (k: string, v: string) => setTemplate(t => ({ ...t, [k]: v }));
 
@@ -114,41 +71,30 @@ const PalliativeMDTool: React.FC<Props> = ({ API, token, onBack }) => {
       </div>
 
       <div style={{...CARD, background: WARM_BG}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-          <div style={LABEL}>Describe the case</div>
-          {supported ? (
-            <button onClick={recording ? stopRecording : startRecording} style={{
-              display:'flex', alignItems:'center', gap:'8px',
-              background: recording ? '#e89898' : WORDMARK,
-              border:'none', borderRadius:'999px', padding:'8px 16px',
-              fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer',
-              boxShadow: recording ? '0 0 0 4px rgba(232,152,152,0.25)' : 'none',
-            }}>
-              <span style={{fontSize:'14px'}}>{recording ? '■' : '🎙'}</span>
-              {recording ? 'Stop' : 'Dictate'}
-            </button>
-          ) : (
-            <span style={{fontSize:'11px', color:'#8aa0c0'}}>Voice input not supported in this browser</span>
-          )}
+        <div style={LABEL}>Describe the case</div>
+        <div style={{display:'flex', gap:'8px', alignItems:'flex-start'}}>
+          <textarea
+            value={text}
+            onChange={e=>setText(e.target.value)}
+            placeholder="e.g. 78 y/o with metastatic pancreatic ca, hospice discussed but family wants 'everything done'. Patient has capacity, says she's tired. Need to align family on patient's wishes tomorrow morning."
+            style={{...INPUT, minHeight:'180px', resize:'vertical', lineHeight:'1.6', flex:1}}
+          />
+          <DictationButton onTranscript={t => setText(prev => (prev ? prev.trimEnd() + ' ' : '') + t)}/>
         </div>
-        <textarea
-          value={text}
-          onChange={e=>setText(e.target.value)}
-          placeholder="e.g. 78 y/o with metastatic pancreatic ca, hospice discussed but family wants 'everything done'. Patient has capacity, says she's tired. Need to align family on patient's wishes tomorrow morning."
-          style={{...INPUT, minHeight:'160px', resize:'vertical', lineHeight:'1.6'}}
-        />
-        {recording && <div style={{fontSize:'11px', color:'#c04040', marginTop:'-4px', marginBottom:'6px'}}>● Listening… speak naturally, punctuation is optional.</div>}
 
-        <button onClick={()=>setTemplateOpen(v=>!v)} style={{background:'transparent', border:'none', color:'#4a7ad0', fontSize:'12px', fontWeight:'700', cursor:'pointer', padding:'4px 0', marginTop:'6px'}}>
+        <button onClick={()=>setTemplateOpen(v=>!v)} style={{background:'transparent', border:'none', color:'#4a7ad0', fontSize:'12px', fontWeight:'700', cursor:'pointer', padding:'4px 0', marginTop:'10px'}}>
           {templateOpen ? '▾ Hide case template' : '▸ Fill case template (optional)'}
         </button>
 
         {templateOpen && (
-          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'10px', marginTop:'10px'}}>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'10px', marginTop:'10px'}}>
             {TEMPLATE_FIELDS.map(f => (
               <div key={f.key}>
                 <div style={FIELD_LABEL}>{f.label}</div>
-                <input value={template[f.key]||''} onChange={e=>updateField(f.key, e.target.value)} placeholder={f.placeholder||''} style={INPUT}/>
+                <div style={{display:'flex', gap:'6px', alignItems:'center'}}>
+                  <input value={template[f.key]||''} onChange={e=>updateField(f.key, e.target.value)} placeholder={f.placeholder||''} style={{...INPUT, flex:1}}/>
+                  <DictationButton size={28} onTranscript={t => updateField(f.key, (template[f.key]||'') + t)}/>
+                </div>
               </div>
             ))}
           </div>

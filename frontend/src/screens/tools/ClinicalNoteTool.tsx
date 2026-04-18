@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useState } from 'react';
 import { ToolShell, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL } from './shared';
+import DictationButton from '../../DictationButton';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -62,7 +63,10 @@ const ClinicalNoteTool: React.FC<Props> = ({ API, token, onBack }) => {
           </div>
         </div>
         <div style={FIELD_LABEL}>Bullet points</div>
-        <textarea value={bullets} onChange={e=>setBullets(e.target.value)} placeholder={"- 62 y/o M with HTN, DM2, CKD3\n- Chest pain x 2h, non-radiating\n- BP 160/95, HR 92, SpO2 97% RA\n- Trop neg x1, ECG NSR, BNP 300\n- Plan: admit tele, serial trops, ASA, statin"} style={{...INPUT, minHeight:'200px', resize:'vertical', fontFamily:'ui-monospace, monospace', marginTop:'4px'}}/>
+        <div style={{display:'flex', gap:'8px', alignItems:'flex-start', marginTop:'4px'}}>
+          <textarea value={bullets} onChange={e=>setBullets(e.target.value)} placeholder={"- 62 y/o M with HTN, DM2, CKD3\n- Chest pain x 2h, non-radiating\n- BP 160/95, HR 92, SpO2 97% RA\n- Trop neg x1, ECG NSR, BNP 300\n- Plan: admit tele, serial trops, ASA, statin"} style={{...INPUT, minHeight:'200px', resize:'vertical', fontFamily:'ui-monospace, monospace', flex:1}}/>
+          <DictationButton onTranscript={t => setBullets(prev => (prev ? prev + '\n' : '') + t.trim())}/>
+        </div>
         <button onClick={generate} disabled={loading} style={{...BTN_PRIMARY, width:'100%', opacity: loading ? 0.6 : 1, marginTop:'10px'}}>{loading ? 'Generating note…' : 'Generate note'}</button>
       </div>
       {error && <div style={{background:'#fde8e8', border:'1px solid #f0b0b0', borderRadius:'12px', padding:'12px', fontSize:'13px', color:'#c04040', marginBottom:'14px'}}>{error}</div>}

@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useState } from 'react';
 import { ToolShell, ToolResult, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL, WORDMARK } from './shared';
+import DictationButton from '../../DictationButton';
 
 interface Props { API: string; token: string; onBack: () => void; }
 type TabId = 'aki' | 'ckd' | 'electrolytes' | 'acid_base' | 'glomerulonephritis' | 'nephrotic' | 'hypertension' | 'dialysis' | 'transplant' | 'stones';
@@ -112,10 +113,15 @@ const NephroAITool: React.FC<Props> = ({ API, token, onBack }) => {
                 <option value="">Select…</option>
                 {f.options.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
-            ) : f.multiline ? (
-              <textarea value={inputs[f.key]||''} onChange={e=>update(f.key, e.target.value)} placeholder={f.placeholder||''} style={{...INPUT, minHeight:'60px', resize:'vertical'}}/>
             ) : (
-              <input type={f.type||'text'} value={inputs[f.key]||''} onChange={e=>update(f.key, e.target.value)} placeholder={f.placeholder||''} style={INPUT}/>
+              <div style={{display:'flex', gap:'8px', alignItems:'flex-start'}}>
+                {f.multiline ? (
+                  <textarea value={inputs[f.key]||''} onChange={e=>update(f.key, e.target.value)} placeholder={f.placeholder||''} style={{...INPUT, minHeight:'60px', resize:'vertical', flex:1}}/>
+                ) : (
+                  <input type={f.type||'text'} value={inputs[f.key]||''} onChange={e=>update(f.key, e.target.value)} placeholder={f.placeholder||''} style={{...INPUT, flex:1}}/>
+                )}
+                <DictationButton onTranscript={t => setInputs(i => ({ ...i, [f.key]: (i[f.key] || '') + t }))}/>
+              </div>
             )}
           </div>
         ))}

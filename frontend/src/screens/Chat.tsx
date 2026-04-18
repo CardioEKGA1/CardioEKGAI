@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useState, useRef, useEffect } from 'react';
 import { EkgResult } from '../App';
+import DictationButton from '../DictationButton';
 
 interface Props { result: EkgResult; API: string; token: string; onBack: () => void; }
 interface Message { role: 'user' | 'assistant'; content: string; }
@@ -71,10 +72,11 @@ const Chat: React.FC<Props> = ({ result, API, token, onBack }) => {
         <div ref={bottomRef}/>
       </div>
 
-      <div style={{padding:'12px 0 24px',display:'flex',gap:'10px'}}>
+      <div style={{padding:'12px 0 24px',display:'flex',gap:'8px',alignItems:'center'}}>
         <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()}
           placeholder="Ask about the EKG findings..."
           style={{flex:1,background:'rgba(255,255,255,0.85)',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'16px',padding:'14px 18px',fontSize:'14px',color:'#1a2a4a',outline:'none'}}/>
+        <DictationButton size={40} onTranscript={t => setInput(prev => (prev ? prev.trimEnd() + ' ' : '') + t.trim())}/>
         <button onClick={send} disabled={loading} style={{width:'48px',height:'48px',borderRadius:'50%',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
           <span style={{color:'white',fontSize:'18px'}}>↑</span>
         </button>
