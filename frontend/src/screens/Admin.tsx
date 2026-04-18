@@ -316,6 +316,32 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
       </div>
 
       <div style={CARD}>
+        <div style={LABEL}>Most used tools this month</div>
+        {(data.most_used_month || []).length === 0 ? (
+          <div style={{fontSize:'13px',color:'#8aa0c0'}}>No usage yet this month.</div>
+        ) : (data.most_used_month || []).map((t:any) => (
+          <div key={t.tool} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'0.5px solid rgba(0,0,0,0.06)',fontSize:'13px'}}>
+            <span style={{color:'#1a2a4a',textTransform:'capitalize'}}>{t.tool}</span>
+            <span style={{fontWeight:'700',color:'#4a7ad0'}}>{t.count}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={CARD}>
+        <div style={LABEL}>Feedback per tool</div>
+        {(data.feedback_summary || []).length === 0 ? (
+          <div style={{fontSize:'13px',color:'#8aa0c0'}}>No feedback submitted yet.</div>
+        ) : (data.feedback_summary || []).map((f:any) => (
+          <div key={f.tool} style={{display:'grid',gridTemplateColumns:'1fr auto auto auto',gap:'12px',alignItems:'center',padding:'8px 0',borderBottom:'0.5px solid rgba(0,0,0,0.06)',fontSize:'13px'}}>
+            <span style={{color:'#1a2a4a',textTransform:'capitalize'}}>{f.tool}</span>
+            <span style={{color:'#70b870',fontWeight:'600'}}>👍 {f.up}</span>
+            <span style={{color:'#c04040',fontWeight:'600'}}>👎 {f.down}</span>
+            <span style={{color:'#4a7ad0',fontWeight:'700', minWidth:'50px', textAlign:'right'}}>{f.ratio}%</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={CARD}>
         <div style={LABEL}>Most active users</div>
         {data.most_active.length === 0 ? (
           <div style={{fontSize:'13px',color:'#8aa0c0'}}>No activity yet.</div>

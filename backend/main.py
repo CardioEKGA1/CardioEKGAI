@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db, User, ToolUsage, Subscription
+from database import get_db, User, ToolUsage, Subscription, ToolFeedback
 from auth import create_token, create_magic_token, decode_token
 from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
 from email_utils import send_verification_email
@@ -520,6 +520,10 @@ class ClinicalNoteRequest(BaseModel):
     style: str
     bullets: str
 
+class ToolFeedbackRequest(BaseModel):
+    tool_slug: str
+    rating: bool
+
 class PalliativeRequest(BaseModel):
     conversation_type: str
     text: str
@@ -669,6 +673,47 @@ def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user
     log_usage(current_user, f"palliativemd:{ct}", COST_PER_SCAN, db)
     return result
 
+@app.post("/tools/feedback")
+@limiter.limit("30/minute")
+def tool_feedback(request: Request, data: ToolFeedbackRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    base_slug = (data.tool_slug or "").split(":")[0]
+    if base_slug not in TOOL_SLUGS:
+        raise HTTPException(status_code=400, detail="Unknown tool")
+    db.add(ToolFeedback(user_id=current_user.id, tool_slug=base_slug, rating=bool(data.rating)))
+    db.commit()
+    return {"ok": True}
+
+@app.get("/tools/usage-stats")
+def tool_usage_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    per_tool: dict[str, int] = {}
+    rows = db.query(ToolUsage.tool_slug, func.count(ToolUsage.id)).filter(
+        ToolUsage.user_id == current_user.id,
+        ToolUsage.created_at >= month_start,
+    ).group_by(ToolUsage.tool_slug).all()
+    for slug, count in rows:
+        base = (slug or "").split(":")[0]
+        per_tool[base] = per_tool.get(base, 0) + int(count)
+
+    recent_rows = db.query(ToolUsage.tool_slug, func.max(ToolUsage.created_at).label("last_used")).filter(
+        ToolUsage.user_id == current_user.id,
+    ).group_by(ToolUsage.tool_slug).order_by(func.max(ToolUsage.created_at).desc()).limit(20).all()
+    seen: set[str] = set()
+    recent = []
+    for slug, last_used in recent_rows:
+        base = (slug or "").split(":")[0]
+        if base in seen:
+            continue
+        seen.add(base)
+        recent.append({"tool_slug": base, "last_used": last_used.isoformat() if last_used else None})
+        if len(recent) >= 3:
+            break
+    return {"per_tool_count": per_tool, "recent_tools": recent}
+
 @app.get("/tools/access")
 def tools_access(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Returns the user's tool entitlements + monthly budget + overage."""
@@ -680,9 +725,15 @@ def tools_access(current_user: User = Depends(get_current_user), db: Session = D
     spent = float(current_user.monthly_spend or 0.0)
     overage = float(current_user.overage_amount_this_month or 0.0)
     pct = (spent / budget * 100) if (budget and budget != float("inf") and budget > 0) else 0.0
+    active_subs = db.query(Subscription).filter(
+        Subscription.user_id == current_user.id,
+        Subscription.status == "active",
+    ).all()
+    tiers = {s.tool_slug: s.tier for s in active_subs}
     return {
         "is_superuser": bool(current_user.is_superuser),
         "access": access,
+        "tiers": tiers,
         "budget": None if budget == float("inf") else round(budget, 2),
         "spent": round(spent, 2),
         "overage": round(overage, 2),
@@ -809,7 +860,34 @@ def admin_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
         "subscription_mrr": round(subscription_mrr, 2),
         "overage_revenue_month": round(float(overage_revenue), 2),
         "most_active": most_active,
+        "feedback_summary": _feedback_summary(db),
+        "most_used_month": _most_used_month(db, month_start),
     }
+
+def _feedback_summary(db: Session):
+    rows = db.query(ToolFeedback.tool_slug, ToolFeedback.rating, func.count(ToolFeedback.id)).group_by(ToolFeedback.tool_slug, ToolFeedback.rating).all()
+    summary: dict[str, dict] = {}
+    for slug, rating, count in rows:
+        base = (slug or "").split(":")[0]
+        s = summary.setdefault(base, {"tool": base, "up": 0, "down": 0})
+        if rating:
+            s["up"] += int(count)
+        else:
+            s["down"] += int(count)
+    out = []
+    for s in summary.values():
+        total = s["up"] + s["down"]
+        s["total"] = total
+        s["ratio"] = round(s["up"] / total * 100, 1) if total else 0.0
+        out.append(s)
+    out.sort(key=lambda x: x["total"], reverse=True)
+    return out
+
+def _most_used_month(db: Session, month_start):
+    rows = db.query(ToolUsage.tool_slug, func.count(ToolUsage.id)).filter(
+        ToolUsage.created_at >= month_start
+    ).group_by(ToolUsage.tool_slug).order_by(func.count(ToolUsage.id).desc()).limit(15).all()
+    return [{"tool": (slug or "").split(":")[0], "count": int(c)} for slug, c in rows]
 
 @app.get("/admin/health")
 def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
