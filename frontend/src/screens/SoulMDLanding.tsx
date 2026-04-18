@@ -1,7 +1,6 @@
 // © 2026 SoulMD. All rights reserved.
 import React from 'react';
 import SoulMDLogo from '../SoulMDLogo';
-import NephroIcon from './tools/NephroIcon';
 
 interface Props { onSignIn: () => void; onSignUp: () => void; }
 
@@ -9,7 +8,7 @@ interface LandingTool { slug: string; name: string; icon: React.ReactNode; desc:
 
 const TOOLS: LandingTool[] = [
   { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                      price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroIcon/>, desc: 'Comprehensive nephrology decision support',          price: '$9.99 / mo · $88.88 / yr' },
+  { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘',          desc: 'Comprehensive nephrology decision support',          price: '$9.99 / mo · $88.88 / yr' },
   { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',          price: '$4.99 / mo · $44.44 / yr' },
   { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                  price: '$4.99 / mo · $44.44 / yr' },
   { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                     price: '$4.99 / mo · $44.44 / yr' },
