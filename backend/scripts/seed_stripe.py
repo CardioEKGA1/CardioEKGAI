@@ -14,6 +14,9 @@ import os
 import sys
 import json
 import stripe
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 if not stripe.api_key:
