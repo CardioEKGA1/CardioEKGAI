@@ -105,7 +105,7 @@ async def chat(data: dict, current_user: User = Depends(get_current_user)):
     response = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=1000,
-        system="You are Dr. SoulMD, an expert cardiologist providing clinical decision support. Be concise and clinically precise.",
+        system="You are Dr. SoulMD, an expert cardiologist providing clinical decision support. Respond in plain conversational prose — no markdown, no headers, no bullet points, no bold text, no tables. Write naturally as if speaking directly to a colleague. Be concise, warm, and clinically precise.",
         messages=messages
     )
     return {"message": response.content[0].text}
