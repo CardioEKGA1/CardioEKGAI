@@ -63,10 +63,24 @@ interface UsageStats {
   per_tool_count: Record<string, number>;
   recent_tools: { tool_slug: string; last_used: string | null }[];
 }
+interface ClinicalCase {
+  id: number; tool_slug: string; title: string; created_at: string;
+  inputs: any; result: any;
+}
+interface CasesResp {
+  cases: ClinicalCase[];
+  counts: Record<string, number>;
+  total: number;
+  max_total: number;
+  max_per_tool: number;
+  retention_days: number;
+}
 
 const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, checkoutResult }) => {
   const [access, setAccess] = useState<AccessResp | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
+  const [cases, setCases] = useState<CasesResp | null>(null);
+  const [caseFilter, setCaseFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [banner, setBanner] = useState<string>('');
@@ -79,8 +93,16 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
     Promise.all([
       fetch(`${API}/tools/access`, { headers: h }).then(r => r.ok ? r.json() : null),
       fetch(`${API}/tools/usage-stats`, { headers: h }).then(r => r.ok ? r.json() : null),
-    ]).then(([a, u]) => { if (a) setAccess(a); if (u) setUsage(u); }).catch(()=>{}).finally(()=>setLoading(false));
+      fetch(`${API}/cases`, { headers: h }).then(r => r.ok ? r.json() : null),
+    ]).then(([a, u, c]) => { if (a) setAccess(a); if (u) setUsage(u); if (c) setCases(c); }).catch(()=>{}).finally(()=>setLoading(false));
   }, [API, token]);
+
+  const deleteCase = async (id: number) => {
+    try {
+      await fetch(`${API}/cases/${id}`, { method:'DELETE', headers: { Authorization:`Bearer ${token}` } });
+      setCases(c => c ? { ...c, cases: c.cases.filter(x => x.id !== id), total: Math.max(0, c.total - 1), counts: {...c.counts, [c.cases.find(x=>x.id===id)?.tool_slug || '']: Math.max(0, (c.counts[c.cases.find(x=>x.id===id)?.tool_slug || ''] || 1) - 1)} } : c);
+    } catch {}
+  };
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -253,6 +275,46 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         <div style={{...CARD, padding:'12px 14px', marginBottom:'16px', background:'linear-gradient(135deg,rgba(122,176,240,0.12),rgba(155,143,232,0.12))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
           <div style={{fontSize:'13px', color:'#1a2a4a'}}>You have {lockedCount} tool{lockedCount===1?'':'s'} locked. Upgrade to Suite for $149.99/month and unlock everything.</div>
           <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_monthly' ? '…' : 'Unlock all 8'}</button>
+        </div>
+      )}
+
+      {cases && cases.total > 0 && (
+        <div style={{...CARD, marginBottom:'16px'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px', marginBottom:'10px'}}>
+            <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+              <div style={{fontSize:'14px', fontWeight:'800', color:'#1a2a4a'}}>Recent Cases</div>
+              <div title={`SoulMD saves your ${cases.max_per_tool} most recent cases per tool — ${cases.max_total} total`} style={{fontSize:'11px', color:'#4a7ad0', fontWeight:'700', background:'rgba(122,176,240,0.12)', padding:'2px 8px', borderRadius:'10px', cursor:'help'}}>
+                {cases.total} / {cases.max_total}
+              </div>
+            </div>
+            <div style={{fontSize:'10px', color:'#8aa0c0'}}>Private · auto-deleted after {cases.retention_days} days</div>
+          </div>
+          <div style={{display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'12px'}}>
+            <button onClick={()=>setCaseFilter('all')} style={{background: caseFilter==='all' ? WORDMARK : 'rgba(255,255,255,0.75)', color: caseFilter==='all' ? 'white' : '#4a7ad0', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'5px 12px', fontSize:'11px', fontWeight:'700', cursor:'pointer'}}>All ({cases.total})</button>
+            {TOOLS.map(t => {
+              const n = cases.counts[t.slug] || 0;
+              if (n === 0) return null;
+              const active = caseFilter === t.slug;
+              return (
+                <button key={t.slug} onClick={()=>setCaseFilter(t.slug)} style={{background: active ? WORDMARK : 'rgba(255,255,255,0.75)', color: active ? 'white' : '#4a7ad0', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'5px 12px', fontSize:'11px', fontWeight:'700', cursor:'pointer'}}>{t.name} ({n})</button>
+              );
+            })}
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'8px'}}>
+            {(caseFilter === 'all' ? cases.cases.slice(0, 3) : cases.cases.filter(c => c.tool_slug === caseFilter).slice(0, 3)).map(c => {
+              const t = TOOLS.find(x => x.slug === c.tool_slug);
+              return (
+                <div key={c.id} style={{background:'rgba(240,246,255,0.5)', border:'1px solid rgba(122,176,240,0.2)', borderRadius:'12px', padding:'12px', display:'flex', alignItems:'flex-start', gap:'8px'}}>
+                  <div style={{fontSize:'20px', display:'inline-flex', alignItems:'center', flexShrink:0}}>{t?.icon ?? '📋'}</div>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{fontSize:'12px', fontWeight:'700', color:'#1a2a4a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{c.title}</div>
+                    <div style={{fontSize:'10px', color:'#8aa0c0', marginTop:'2px'}}>{t?.name ?? c.tool_slug} · {timeAgo(c.created_at)}</div>
+                  </div>
+                  <button onClick={()=>deleteCase(c.id)} title="Delete case" style={{background:'transparent', border:'none', cursor:'pointer', color:'#c04040', fontSize:'14px', padding:'2px 4px', flexShrink:0}} aria-label="Delete">🗑</button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db, User, ToolUsage, Subscription, ToolFeedback
+from database import get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase
 from auth import create_token, create_magic_token, decode_token
 from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
 from email_utils import send_verification_email
@@ -136,6 +136,33 @@ def gate_tool(user, tool_slug: str, db: Session, cost: float):
     if not has_tool_access(user, tool_slug, db):
         raise HTTPException(status_code=402, detail=f"Subscribe to {tool_slug} or SoulMD Suite to use this tool.")
     # Soft overage model: never block on budget. Overage is tracked in log_usage.
+
+MAX_CASES_PER_TOOL = 3
+CASE_RETENTION_DAYS = 90
+
+def save_case(user_id: int, tool_slug: str, title: str, inputs: dict, result: dict, db: Session):
+    base = (tool_slug or "").split(":")[0]
+    if not base:
+        return
+    t = (title or "").strip()[:120] or "Untitled case"
+    try:
+        db.add(ClinicalCase(user_id=user_id, tool_slug=base, title=t, inputs=inputs, result=result))
+        db.commit()
+        keep_rows = db.query(ClinicalCase.id).filter(
+            ClinicalCase.user_id == user_id,
+            ClinicalCase.tool_slug == base,
+        ).order_by(ClinicalCase.created_at.desc()).limit(MAX_CASES_PER_TOOL).all()
+        keep_ids = [r.id for r in keep_rows]
+        if keep_ids:
+            db.query(ClinicalCase).filter(
+                ClinicalCase.user_id == user_id,
+                ClinicalCase.tool_slug == base,
+                ~ClinicalCase.id.in_(keep_ids),
+            ).delete(synchronize_session=False)
+            db.commit()
+    except Exception as e:
+        print(f"save_case error: {e}")
+        db.rollback()
 
 def log_usage(user: User, tool_slug: str, cost: float, db: Session):
     now = datetime.utcnow()
@@ -388,6 +415,8 @@ async def analyze_ekg(request: Request, file: UploadFile = File(...), current_us
     result = json.loads(match.group() if match else text)
     current_user.scan_count += 1
     log_usage(current_user, "ekgscan", COST_PER_SCAN, db)
+    rhythm = (result.get("rhythm") if isinstance(result, dict) else None) or "EKG"
+    save_case(current_user.id, "ekgscan", f"EKG · {str(rhythm)[:40]}", {"filename": file.filename}, result, db)
     return result
 
 @app.post("/chat")
@@ -592,6 +621,8 @@ def nephroai_analyze(request: Request, data: NephroRequest, current_user: User =
         print(f"nephroai[{sub}] error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, f"nephroai:{sub}", COST_PER_SCAN, db)
+    ctx = (data.inputs or {}).get("clinical_context") or (data.inputs or {}).get("clinical_picture") or (data.inputs or {}).get("clinical_scenario") or ""
+    save_case(current_user.id, "nephroai", f"{sub.upper()} · {str(ctx)[:60]}" if ctx else f"{sub.upper()} case", data.inputs or {}, result, db)
     return result
 
 @app.post("/tools/rxcheck/analyze")
@@ -608,6 +639,8 @@ def rxcheck_analyze(request: Request, data: RxCheckRequest, current_user: User =
         print(f"rxcheck error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, "rxcheck", COST_PER_SCAN, db)
+    title = f"{len(meds)} meds" + (f" · {meds[0][:30]}" if meds else "")
+    save_case(current_user.id, "rxcheck", title, {"medications": meds}, result, db)
     return result
 
 @app.post("/tools/infectid/analyze")
@@ -623,6 +656,7 @@ def infectid_analyze(request: Request, data: InfectIDRequest, current_user: User
         print(f"infectid error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, "infectid", COST_PER_SCAN, db)
+    save_case(current_user.id, "infectid", data.infection_site[:70], data.dict(exclude_none=True), result, db)
     return result
 
 @app.post("/tools/clinicalnote/generate")
@@ -643,6 +677,7 @@ def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_u
         print(f"clinicalnote error: {e}")
         raise HTTPException(status_code=502, detail="AI note generation failed. Please retry.")
     log_usage(current_user, "clinicalnote", COST_PER_SCAN, db)
+    save_case(current_user.id, "clinicalnote", f"{data.note_type} · {(data.bullets or '')[:50]}", {"note_type": data.note_type, "style": data.style, "bullets": data.bullets}, result, db)
     return result
 
 @app.post("/tools/xrayread/analyze")
@@ -661,6 +696,7 @@ async def xrayread_analyze(request: Request, file: UploadFile = File(...), curre
         print(f"xrayread error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, "xrayread", COST_PER_SCAN, db)
+    save_case(current_user.id, "xrayread", f"X-ray · {(file.filename or 'study')[:50]}", {"filename": file.filename}, result, db)
     return result
 
 @app.post("/tools/cerebralai/analyze")
@@ -717,6 +753,7 @@ async def cerebralai_analyze(request: Request, file: UploadFile = File(...), cur
     total_cost = COST_PER_SCAN * len(frames)
     if len(frames) == 1:
         log_usage(current_user, "cerebralai", total_cost, db)
+        save_case(current_user.id, "cerebralai", f"CerebralAI · {(file.filename or 'study')[:45]}", {"filename": file.filename, "type": ct, "frames": 1}, per_frame_results[0], db)
         return per_frame_results[0]
 
     try:
@@ -732,6 +769,7 @@ async def cerebralai_analyze(request: Request, file: UploadFile = File(...), cur
 
     consolidated.setdefault("frame_count", len(frames))
     log_usage(current_user, "cerebralai", total_cost, db)
+    save_case(current_user.id, "cerebralai", f"CerebralAI · {(file.filename or 'study')[:40]} ({len(frames)}f)", {"filename": file.filename, "type": ct, "frames": len(frames)}, consolidated, db)
     return consolidated
 
 PALLIATIVE_CONVERSATION_TYPES = {"goals_of_care", "prognosis", "code_status", "hospice", "family_meeting", "withdrawing_treatment", "pediatric"}
@@ -761,7 +799,57 @@ def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user
         print(f"palliativemd error: {e}")
         raise HTTPException(status_code=502, detail="AI guidance failed. Please retry.")
     log_usage(current_user, f"palliativemd:{ct}", COST_PER_SCAN, db)
+    save_case(current_user.id, "palliativemd", f"{ct.replace('_',' ')} · {(data.text or '')[:50]}", data.dict(exclude_none=True), result, db)
     return result
+
+@app.get("/cases")
+def list_cases(tool_slug: str = "", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    cutoff = datetime.utcnow() - timedelta(days=CASE_RETENTION_DAYS)
+    db.query(ClinicalCase).filter(
+        ClinicalCase.user_id == current_user.id,
+        ClinicalCase.created_at < cutoff,
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    q = db.query(ClinicalCase).filter(ClinicalCase.user_id == current_user.id)
+    if tool_slug:
+        q = q.filter(ClinicalCase.tool_slug == tool_slug)
+    rows = q.order_by(ClinicalCase.created_at.desc()).limit(MAX_CASES_PER_TOOL * 10).all()
+
+    counts: dict[str, int] = {}
+    for slug, cnt in db.query(ClinicalCase.tool_slug, func.count(ClinicalCase.id)).filter(
+        ClinicalCase.user_id == current_user.id,
+    ).group_by(ClinicalCase.tool_slug).all():
+        counts[slug] = int(cnt)
+
+    return {
+        "cases": [{
+            "id": c.id, "tool_slug": c.tool_slug, "title": c.title,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "inputs": c.inputs, "result": c.result,
+        } for c in rows],
+        "counts": counts,
+        "total": sum(counts.values()),
+        "max_total": MAX_CASES_PER_TOOL * len(TOOL_SLUGS - {"suite"}),
+        "max_per_tool": MAX_CASES_PER_TOOL,
+        "retention_days": CASE_RETENTION_DAYS,
+    }
+
+@app.delete("/cases/{case_id}")
+def delete_case(case_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    case = db.query(ClinicalCase).filter(
+        ClinicalCase.id == case_id,
+        ClinicalCase.user_id == current_user.id,
+    ).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    db.delete(case)
+    db.commit()
+    return {"ok": True}
 
 @app.post("/tools/feedback")
 @limiter.limit("30/minute")

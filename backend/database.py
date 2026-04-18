@@ -1,7 +1,7 @@
 # Copyright 2026 SoulMD Inc. All Rights Reserved.
 # Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
 
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, JSON, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -55,6 +55,16 @@ class ToolUsage(Base):
     user_id = Column(Integer, index=True)
     tool_slug = Column(String, index=True)
     cost = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class ClinicalCase(Base):
+    __tablename__ = "clinical_cases"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    tool_slug = Column(String, index=True)
+    title = Column(String)
+    inputs = Column(JSON)
+    result = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 class ToolFeedback(Base):
