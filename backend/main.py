@@ -904,6 +904,50 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
     checks["admin_token_configured"] = bool(ADMIN_TOKEN)
     return checks
 
+@app.get("/admin/billing/validate")
+def admin_billing_validate(_: bool = Depends(verify_admin)):
+    expected = [
+        ("ekgscan",      "monthly",    999), ("ekgscan",      "yearly",  11999),
+        ("xrayread",     "monthly",    999), ("xrayread",     "yearly",  11999),
+        ("rxcheck",      "monthly",    999), ("rxcheck",      "yearly",  11999),
+        ("infectid",     "monthly",    999), ("infectid",     "yearly",  11999),
+        ("cerebralai",   "monthly",    999), ("cerebralai",   "yearly",  11999),
+        ("nephroai",     "monthly",   2499), ("nephroai",     "yearly",  19900),
+        ("palliativemd", "monthly",   2499), ("palliativemd", "yearly",  19900),
+        ("clinicalnote", "monthly",   3499), ("clinicalnote", "yearly",  34900),
+        ("suite",        "monthly",  14999), ("suite",        "yearly", 119900),
+    ]
+    checks = []
+    for slug, tier, expected_cents in expected:
+        env_key = f"STRIPE_PRICE_{slug.upper()}_{tier.upper()}"
+        price_id = os.getenv(env_key, "")
+        row = {
+            "slug": slug, "tier": tier, "env_key": env_key,
+            "expected_cents": expected_cents,
+            "env_set": bool(price_id),
+            "price_id_tail": price_id[-8:] if price_id else None,
+            "stripe_ok": False, "stripe_amount_cents": None, "amount_matches": False,
+            "stripe_active": None, "error": None,
+        }
+        if price_id:
+            try:
+                pr = stripe.Price.retrieve(price_id)
+                row["stripe_ok"] = True
+                row["stripe_amount_cents"] = pr.unit_amount
+                row["amount_matches"] = pr.unit_amount == expected_cents
+                row["stripe_active"] = bool(pr.active)
+            except Exception as e:
+                row["error"] = str(e)[:160]
+        checks.append(row)
+    return {
+        "total": len(expected),
+        "env_set": sum(1 for r in checks if r["env_set"]),
+        "stripe_resolves": sum(1 for r in checks if r["stripe_ok"]),
+        "amount_matches": sum(1 for r in checks if r["amount_matches"] and r["stripe_active"]),
+        "all_green": all(r["env_set"] and r["stripe_ok"] and r["amount_matches"] and r["stripe_active"] for r in checks),
+        "checks": checks,
+    }
+
 @app.get("/admin/moderation")
 def admin_moderation(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     now = datetime.utcnow()
