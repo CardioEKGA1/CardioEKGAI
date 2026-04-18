@@ -35,7 +35,7 @@ const Login: React.FC<Props> = ({ API, onBack }) => {
             <div style={{fontSize:'24px',fontWeight:'800',color:'#1a2a4a',marginBottom:'6px'}}>Sign in to EKGScan</div>
             <div style={{fontSize:'13px',color:'#8aa0c0',marginBottom:'28px',lineHeight:'1.6'}}>Enter your email and we'll send you a sign-in link. New users get 1 free scan — no password required.</div>
             {error && <div style={{background:'#fde8e8',border:'1px solid #f0b0b0',borderRadius:'10px',padding:'12px',fontSize:'13px',color:'#c04040',marginBottom:'16px'}}>{error}</div>}
-            <input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()} style={s}/>
+            <input type="text" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()} style={s}/>
             <button onClick={submit} disabled={loading} style={{width:'100%',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',border:'none',borderRadius:'14px',padding:'14px',fontSize:'15px',fontWeight:'700',color:'white',cursor:'pointer'}}>
               {loading ? 'Sending...' : 'Send Sign-In Link'}
             </button>
