@@ -1,3 +1,4 @@
+// © 2026 SoulMD. All rights reserved.
 import React, { useState, useRef } from 'react';
 import { EkgResult, User } from '../App';
 

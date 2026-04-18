@@ -1,3 +1,4 @@
+// © 2026 SoulMD. All rights reserved.
 import React, { useEffect, useState, useCallback } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
 import { User } from '../App';

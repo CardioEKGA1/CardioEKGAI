@@ -1,3 +1,4 @@
+// © 2026 SoulMD. All rights reserved.
 import React, { useState } from 'react';
 
 interface Props { API: string; onBack: () => void; isSoulMD?: boolean; }

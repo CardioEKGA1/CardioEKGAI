@@ -1,3 +1,4 @@
+// © 2026 SoulMD. All rights reserved.
 import React, { useState, useEffect } from 'react';
 import Landing from './screens/Landing';
 import Login from './screens/Login';

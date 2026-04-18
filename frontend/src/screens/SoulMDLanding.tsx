@@ -1,3 +1,4 @@
+// © 2026 SoulMD. All rights reserved.
 import React from 'react';
 import SoulMDLogo from '../SoulMDLogo';
 
