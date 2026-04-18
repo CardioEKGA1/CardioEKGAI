@@ -14,7 +14,7 @@ interface Props {
   checkoutResult: string | null;
 }
 
-const TEXT_TOOLS = new Set(['nephroai', 'rxcheck', 'infectid', 'clinicalnote']);
+const OPEN_TOOLS = new Set(['nephroai', 'rxcheck', 'infectid', 'clinicalnote', 'xrayread', 'cerebralai']);
 
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; }
 
@@ -161,7 +161,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
                 {active ? (
                   t.slug === 'ekgscan' ? (
                     <button onClick={onOpenEkgscan} style={{background:WORDMARK, border:'none', borderRadius:'12px', padding:'10px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Open →</button>
-                  ) : TEXT_TOOLS.has(t.slug) ? (
+                  ) : OPEN_TOOLS.has(t.slug) ? (
                     <button onClick={()=>onOpenTool(t.slug)} style={{background:WORDMARK, border:'none', borderRadius:'12px', padding:'10px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Open →</button>
                   ) : (
                     <button disabled style={{background:'rgba(240,246,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'12px', padding:'10px', fontSize:'12px', fontWeight:'700', color:'#8aa0c0', cursor:'default'}}>UI launching soon</button>
