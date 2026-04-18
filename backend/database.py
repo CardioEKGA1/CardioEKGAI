@@ -33,6 +33,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     stripe_customer_id = Column(String, nullable=True, index=True)
     is_superuser = Column(Boolean, default=False)
+    overage_amount_this_month = Column(Float, default=0.0)
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -69,6 +70,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users(stripe_customer_id)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS overage_amount_this_month FLOAT DEFAULT 0.0"))
 
 try:
     with engine.begin() as conn:

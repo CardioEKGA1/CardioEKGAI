@@ -101,8 +101,9 @@ def has_tool_access(user: User, tool_slug: str, db: Session) -> bool:
             return True
     return False
 
-BUDGET_HIERARCHY = [("suite", 35.0), ("clinicalnote", 8.0), ("nephroai", 5.0), ("palliativemd", 5.0)]
+BUDGET_HIERARCHY = [("suite", 50.0), ("clinicalnote", 10.0), ("nephroai", 8.0), ("palliativemd", 8.0)]
 _OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
+OVERAGE_PER_CALL = 0.10
 
 def monthly_budget(user: User, db: Session) -> float:
     if user.is_superuser:
@@ -130,14 +131,20 @@ def gate_tool(user, tool_slug: str, db: Session, cost: float):
         return
     if not has_tool_access(user, tool_slug, db):
         raise HTTPException(status_code=402, detail=f"Subscribe to {tool_slug} or SoulMD Suite to use this tool.")
-    budget = monthly_budget(user, db)
-    if budget <= 0:
-        return
-    if current_month_spend(user.id, db) + cost > budget:
-        raise HTTPException(status_code=429, detail=f"Monthly AI usage budget (${budget:.2f}) reached. Resets on the 1st.")
+    # Soft overage model: never block on budget. Overage is tracked in log_usage.
 
-def log_usage(user_id: int, tool_slug: str, cost: float, db: Session):
-    db.add(ToolUsage(user_id=user_id, tool_slug=tool_slug, cost=cost))
+def log_usage(user: User, tool_slug: str, cost: float, db: Session):
+    now = datetime.utcnow()
+    if user.spend_reset_month != now.month:
+        user.monthly_spend = 0.0
+        user.overage_amount_this_month = 0.0
+        user.spend_reset_month = now.month
+    if not user.is_superuser:
+        budget = monthly_budget(user, db)
+        if budget != float("inf") and (user.monthly_spend or 0.0) >= budget:
+            user.overage_amount_this_month = (user.overage_amount_this_month or 0.0) + OVERAGE_PER_CALL
+    user.monthly_spend = (user.monthly_spend or 0.0) + cost
+    db.add(ToolUsage(user_id=user.id, tool_slug=tool_slug, cost=cost))
     db.commit()
 
 def _extract_json(text: str):
@@ -318,10 +325,7 @@ async def analyze_ekg(request: Request, file: UploadFile = File(...), current_us
         raise HTTPException(status_code=401, detail="Please sign in to analyze EKGs")
     if not current_user.is_subscribed and current_user.scan_count >= 1:
         raise HTTPException(status_code=402, detail="Free scan used. Please upgrade to continue.")
-    if current_user.is_subscribed:
-        allowed = check_and_update_spend(current_user, db)
-        if not allowed:
-            raise HTTPException(status_code=429, detail="Monthly AI usage limit reached. Resets on the 1st of next month.")
+    # Soft overage: never block on budget here.
     if file.content_type not in ["image/jpeg", "image/png", "image/jpg", "application/pdf"]:
         raise HTTPException(status_code=400, detail="Only JPEG PNG and PDF files are allowed")
     contents = await file.read()
@@ -341,8 +345,7 @@ async def analyze_ekg(request: Request, file: UploadFile = File(...), current_us
     match = re.search(r"\{.*\}", text, re.DOTALL)
     result = json.loads(match.group() if match else text)
     current_user.scan_count += 1
-    db.add(ToolUsage(user_id=current_user.id, tool_slug="ekgscan", cost=COST_PER_SCAN))
-    db.commit()
+    log_usage(current_user, "ekgscan", COST_PER_SCAN, db)
     return result
 
 @app.post("/chat")
@@ -542,7 +545,7 @@ def nephroai_analyze(request: Request, data: NephroRequest, current_user: User =
     except Exception as e:
         print(f"nephroai[{sub}] error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    log_usage(current_user.id, f"nephroai:{sub}", COST_PER_SCAN, db)
+    log_usage(current_user, f"nephroai:{sub}", COST_PER_SCAN, db)
     return result
 
 @app.post("/tools/rxcheck/analyze")
@@ -558,7 +561,7 @@ def rxcheck_analyze(request: Request, data: RxCheckRequest, current_user: User =
     except Exception as e:
         print(f"rxcheck error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    log_usage(current_user.id, "rxcheck", COST_PER_SCAN, db)
+    log_usage(current_user, "rxcheck", COST_PER_SCAN, db)
     return result
 
 @app.post("/tools/infectid/analyze")
@@ -573,7 +576,7 @@ def infectid_analyze(request: Request, data: InfectIDRequest, current_user: User
     except Exception as e:
         print(f"infectid error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    log_usage(current_user.id, "infectid", COST_PER_SCAN, db)
+    log_usage(current_user, "infectid", COST_PER_SCAN, db)
     return result
 
 @app.post("/tools/clinicalnote/generate")
@@ -593,7 +596,7 @@ def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_u
     except Exception as e:
         print(f"clinicalnote error: {e}")
         raise HTTPException(status_code=502, detail="AI note generation failed. Please retry.")
-    log_usage(current_user.id, "clinicalnote", COST_PER_SCAN, db)
+    log_usage(current_user, "clinicalnote", COST_PER_SCAN, db)
     return result
 
 @app.post("/tools/xrayread/analyze")
@@ -611,7 +614,7 @@ async def xrayread_analyze(request: Request, file: UploadFile = File(...), curre
     except Exception as e:
         print(f"xrayread error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    log_usage(current_user.id, "xrayread", COST_PER_SCAN, db)
+    log_usage(current_user, "xrayread", COST_PER_SCAN, db)
     return result
 
 @app.post("/tools/cerebralai/analyze")
@@ -634,7 +637,7 @@ async def cerebralai_analyze(request: Request, file: UploadFile = File(...), cur
     except Exception as e:
         print(f"cerebralai error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    log_usage(current_user.id, "cerebralai", COST_PER_SCAN, db)
+    log_usage(current_user, "cerebralai", COST_PER_SCAN, db)
     return result
 
 PALLIATIVE_CONVERSATION_TYPES = {"goals_of_care", "prognosis", "code_status", "hospice", "family_meeting", "withdrawing_treatment", "pediatric"}
@@ -663,23 +666,28 @@ def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user
     except Exception as e:
         print(f"palliativemd error: {e}")
         raise HTTPException(status_code=502, detail="AI guidance failed. Please retry.")
-    log_usage(current_user.id, f"palliativemd:{ct}", COST_PER_SCAN, db)
+    log_usage(current_user, f"palliativemd:{ct}", COST_PER_SCAN, db)
     return result
 
 @app.get("/tools/access")
 def tools_access(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Returns the user's tool entitlements + remaining monthly budget."""
+    """Returns the user's tool entitlements + monthly budget + overage."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
     tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd"]
     access = {t: has_tool_access(current_user, t, db) for t in tools}
     budget = monthly_budget(current_user, db)
-    spent = current_month_spend(current_user.id, db)
+    spent = float(current_user.monthly_spend or 0.0)
+    overage = float(current_user.overage_amount_this_month or 0.0)
+    pct = (spent / budget * 100) if (budget and budget != float("inf") and budget > 0) else 0.0
     return {
         "is_superuser": bool(current_user.is_superuser),
         "access": access,
         "budget": None if budget == float("inf") else round(budget, 2),
         "spent": round(spent, 2),
+        "overage": round(overage, 2),
+        "pct": round(pct, 1),
+        "overage_per_call": OVERAGE_PER_CALL,
         "note_style_preference": current_user.note_style_preference or "standard",
     }
 
@@ -761,7 +769,23 @@ def admin_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     tool_breakdown = [{"tool": slug, "count": int(count)} for slug, count in tool_breakdown_rows]
 
     ai_spend = db.query(func.sum(User.monthly_spend)).scalar() or 0.0
-    revenue_month_estimate = monthly_subs * 4.99 + (yearly_subs * 49.99 / 12)
+    overage_revenue = db.query(func.sum(User.overage_amount_this_month)).scalar() or 0.0
+
+    PRICE_PER_MONTH = {
+        ("ekgscan",      "monthly"):  9.99, ("ekgscan",      "yearly"): 119.99 / 12,
+        ("xrayread",     "monthly"):  9.99, ("xrayread",     "yearly"): 119.99 / 12,
+        ("rxcheck",      "monthly"):  9.99, ("rxcheck",      "yearly"): 119.99 / 12,
+        ("infectid",     "monthly"):  9.99, ("infectid",     "yearly"): 119.99 / 12,
+        ("cerebralai",   "monthly"):  9.99, ("cerebralai",   "yearly"): 119.99 / 12,
+        ("nephroai",     "monthly"): 24.99, ("nephroai",     "yearly"): 199.00 / 12,
+        ("palliativemd", "monthly"): 24.99, ("palliativemd", "yearly"): 199.00 / 12,
+        ("clinicalnote", "monthly"): 34.99, ("clinicalnote", "yearly"): 349.00 / 12,
+        ("suite",        "monthly"):149.99, ("suite",        "yearly"):1799.00 / 12,
+    }
+    subscription_mrr = 0.0
+    for sub in db.query(Subscription).filter(Subscription.status == "active").all():
+        subscription_mrr += PRICE_PER_MONTH.get((sub.tool_slug, sub.tier), 0.0)
+    revenue_month_estimate = round(subscription_mrr + float(overage_revenue), 2)
 
     top = db.query(User).order_by(User.scan_count.desc()).limit(10).all()
     most_active = [{
@@ -781,7 +805,9 @@ def admin_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
         "scans": {"today": int(scans_today), "this_week": int(scans_week), "this_month": int(scans_month), "lifetime": int(scans_lifetime)},
         "tool_breakdown": tool_breakdown,
         "ai_spend_month": round(float(ai_spend), 3),
-        "revenue_month_estimate": round(revenue_month_estimate, 2),
+        "revenue_month_estimate": revenue_month_estimate,
+        "subscription_mrr": round(subscription_mrr, 2),
+        "overage_revenue_month": round(float(overage_revenue), 2),
         "most_active": most_active,
     }
 

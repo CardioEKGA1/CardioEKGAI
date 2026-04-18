@@ -21,15 +21,15 @@ if not stripe.api_key:
     sys.exit(1)
 
 CATALOG = [
-    ("ekgscan",      "EKGScan",          "12-lead EKG interpretation in seconds",                     499, 4444),
-    ("nephroai",     "NephroAI",         "Comprehensive AI nephrology — 10 conditions, one platform", 999, 8888),
-    ("xrayread",     "XrayRead",         "Structured radiology report from any X-ray image",          499, 4444),
-    ("rxcheck",      "RxCheck",          "Full medication interaction safety check",                  499, 4444),
-    ("infectid",     "InfectID",         "IDSA-based antibiotic recommendations",                     499, 4444),
-    ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                 2999, 22200),
-    ("cerebralai",   "CerebralAI",       "Brain and spine MRI and CT interpretation",                 499, 4444),
-    ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings", 999, 8888),
-    ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",                8888, 88800),
+    ("ekgscan",      "EKGScan",          "12-lead EKG interpretation in seconds",                      999,  11999),
+    ("nephroai",     "NephroAI",         "Comprehensive nephrology decision support",                 2499,  19900),
+    ("xrayread",     "XrayRead",         "Structured radiology report from any X-ray image",          999,  11999),
+    ("rxcheck",      "RxCheck",          "Full medication interaction safety check",                  999,  11999),
+    ("infectid",     "InfectID",         "IDSA-based antibiotic recommendations",                     999,  11999),
+    ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                 3499,  34900),
+    ("cerebralai",   "CerebralAI",       "Brain and spine MRI and CT interpretation",                 999,  11999),
+    ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings", 2499, 19900),
+    ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",               14999, 179900),
 ]
 
 

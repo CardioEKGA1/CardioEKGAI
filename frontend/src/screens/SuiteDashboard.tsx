@@ -20,14 +20,14 @@ const OPEN_TOOLS = new Set(['nephroai', 'rxcheck', 'infectid', 'clinicalnote', '
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; }
 
 const TOOLS: Tool[] = [
-  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀',              desc: '12-lead EKG interpretation in seconds',                 monthly: 4.99,  yearly: 44.44 },
-  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroCardIcon/>, desc: 'Comprehensive nephrology decision support',             monthly: 9.99,  yearly: 88.88 },
-  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻',              desc: 'Structured radiology report from any X-ray image',     monthly: 4.99,  yearly: 44.44 },
-  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊',              desc: 'Full medication interaction safety check',             monthly: 4.99,  yearly: 44.44 },
-  { slug: 'infectid',     name: 'InfectID',        icon: '🦠',              desc: 'IDSA-based antibiotic recommendations',                monthly: 4.99,  yearly: 44.44 },
-  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝',              desc: 'SOAP notes from bullet points in seconds',             monthly: 29.99, yearly: 222.00 },
-  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠',              desc: 'Brain and spine MRI and CT interpretation',            monthly: 4.99,  yearly: 44.44 },
-  { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶',              desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', monthly: 9.99, yearly: 88.88 },
+  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀',              desc: '12-lead EKG interpretation in seconds',                                  monthly: 9.99,  yearly: 119.99 },
+  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroCardIcon/>, desc: 'Comprehensive nephrology decision support',                              monthly: 24.99, yearly: 199.00 },
+  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻',              desc: 'Structured radiology report from any X-ray image',                       monthly: 9.99,  yearly: 119.99 },
+  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊',              desc: 'Full medication interaction safety check',                               monthly: 9.99,  yearly: 119.99 },
+  { slug: 'infectid',     name: 'InfectID',        icon: '🦠',              desc: 'IDSA-based antibiotic recommendations',                                  monthly: 9.99,  yearly: 119.99 },
+  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝',              desc: 'SOAP notes from bullet points in seconds',                               monthly: 34.99, yearly: 349.00 },
+  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠',              desc: 'Brain and spine MRI and CT interpretation',                              monthly: 9.99,  yearly: 119.99 },
+  { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶',              desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', monthly: 24.99, yearly: 199.00 },
 ];
 
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
@@ -41,6 +41,9 @@ interface AccessResp {
   access: Record<string, boolean>;
   budget: number | null;
   spent: number;
+  overage: number;
+  pct: number;
+  overage_per_call: number;
   note_style_preference: string;
 }
 
@@ -105,9 +108,14 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const isSuper = !!access?.is_superuser;
   const hasAccess = (slug: string) => isSuper || !!access?.access?.[slug];
   const tierLabel = isSuper ? 'Superuser · Unlimited' : (user.is_subscribed ? 'Subscribed' : 'Free tier');
-  const budgetLine = access && access.budget !== null
-    ? `$${access.spent.toFixed(2)} / $${access.budget.toFixed(2)} this month`
-    : null;
+  const hasBudget = !!access && access.budget !== null && access.budget > 0;
+  const pct = access?.pct ?? 0;
+  const spent = access?.spent ?? 0;
+  const budget = access?.budget ?? 0;
+  const overage = access?.overage ?? 0;
+  const atOver = hasBudget && pct >= 100;
+  const atWarn = hasBudget && pct >= 80 && pct < 100;
+  const meterColor = atOver ? '#c04040' : atWarn ? '#d89030' : '#4a7ad0';
   const hasAnyPaidSub = access && !isSuper && access.budget !== null && access.budget > 0;
 
   return (
@@ -122,10 +130,18 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
           </div>
         </div>
         <div style={{display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap'}}>
-          <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', fontSize:'11px', color:'#6a8ab0'}}>
+          <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', fontSize:'11px', color:'#6a8ab0', gap:'3px'}}>
             <span style={{fontWeight:'600', color:'#1a2a4a', fontSize:'12px', maxWidth:'220px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{user.email}</span>
-            <span style={{background: isSuper ? WORDMARK : 'rgba(122,176,240,0.12)', color: isSuper ? 'white' : '#4a7ad0', borderRadius:'10px', padding:'3px 9px', fontWeight:'700', marginTop:'3px'}}>{tierLabel}</span>
-            {budgetLine && <span style={{marginTop:'3px', color:'#8aa0c0', fontSize:'10px'}}>{budgetLine}</span>}
+            <span style={{background: isSuper ? WORDMARK : 'rgba(122,176,240,0.12)', color: isSuper ? 'white' : '#4a7ad0', borderRadius:'10px', padding:'3px 9px', fontWeight:'700'}}>{tierLabel}</span>
+            {hasBudget && (
+              <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'2px', minWidth:'150px'}}>
+                <div style={{fontSize:'10px', color: meterColor, fontWeight:'600'}}>${spent.toFixed(2)} / ${budget.toFixed(2)} · {pct.toFixed(0)}%</div>
+                <div style={{width:'140px', height:'4px', background:'rgba(122,176,240,0.15)', borderRadius:'3px', overflow:'hidden'}}>
+                  <div style={{width: `${Math.min(100, pct)}%`, height:'100%', background: meterColor, transition:'width 0.3s'}}/>
+                </div>
+                {overage > 0 && <div style={{fontSize:'10px', color:'#c04040', fontWeight:'700'}}>Overage: ${overage.toFixed(2)}</div>}
+              </div>
+            )}
           </div>
           {hasAnyPaidSub && <button onClick={openPortal} style={{...BTN, flex:'none'}}>Manage billing</button>}
           <button onClick={onLogout} style={{background:'rgba(255,255,255,0.7)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'8px 14px', fontSize:'12px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign Out</button>
@@ -135,6 +151,18 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       {banner && (
         <div style={{...CARD, padding:'14px', marginBottom:'16px', background: banner.startsWith('Subscription activated') ? 'rgba(112,184,112,0.14)' : banner.startsWith('Checkout canceled') ? 'rgba(255,255,255,0.85)' : 'rgba(240,180,80,0.14)'}}>
           <div style={{fontSize:'13px', color:'#1a2a4a'}}>{banner}</div>
+        </div>
+      )}
+
+      {atOver && (
+        <div style={{...CARD, padding:'14px', marginBottom:'16px', background:'rgba(224,168,136,0.18)', border:'1px solid rgba(224,168,136,0.45)'}}>
+          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>You have reached your monthly AI budget — additional calls are ${(access?.overage_per_call ?? 0.10).toFixed(2)} each.</div>
+          <div style={{fontSize:'11px', color:'#6a8ab0', marginTop:'4px'}}>Overage is added to your next Stripe invoice. Budget resets on the 1st.</div>
+        </div>
+      )}
+      {atWarn && (
+        <div style={{...CARD, padding:'12px 14px', marginBottom:'16px', background:'rgba(240,180,80,0.12)', border:'1px solid rgba(240,180,80,0.35)'}}>
+          <div style={{fontSize:'12px', color:'#1a2a4a'}}>You're at {pct.toFixed(0)}% of your monthly AI budget. Calls above ${budget.toFixed(2)} will bill at ${(access?.overage_per_call ?? 0.10).toFixed(2)} each.</div>
         </div>
       )}
 
@@ -184,10 +212,10 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         <div style={{...CARD, marginTop:'20px', padding:'24px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'2px solid rgba(122,176,240,0.35)', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
           <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 8 tools</div>
-          <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>$35 / month AI budget · one login · cancel anytime</div>
+          <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>$50 / month AI budget · one login · cancel anytime</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
-            <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>
-            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $888'}</button>
+            <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $149.99'}</button>
+            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $1,799'}</button>
           </div>
         </div>
       )}

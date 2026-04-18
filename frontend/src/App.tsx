@@ -145,7 +145,7 @@ const App: React.FC = () => {
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
-      {screen==='paywall' && <Paywall onBack={goBack}/>}
+      {screen==='paywall' && <Paywall API={API} token={token} onBack={goBack}/>}
       {screen==='terms' && <Terms onBack={goBack}/>}
     </div>
   );

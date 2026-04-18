@@ -9,14 +9,14 @@ interface Props { onSignIn: () => void; onSignUp: () => void; }
 interface LandingTool { slug: string; name: string; icon: React.ReactNode; desc: string; price: string; }
 
 const TOOLS: LandingTool[] = [
-  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                      price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroCardIcon/>, desc: 'Comprehensive nephrology decision support',          price: '$9.99 / mo · $88.88 / yr' },
-  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',          price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                  price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                     price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes from bullet points in seconds',                  price: '$29.99 / mo · $222 / yr' },
-  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                 price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶', desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', price: '$9.99 / mo · $88.88 / yr' },
+  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                      price: '$9.99 / mo · $119.99 / yr' },
+  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroCardIcon/>, desc: 'Comprehensive nephrology decision support',          price: '$24.99 / mo · $199 / yr' },
+  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',          price: '$9.99 / mo · $119.99 / yr' },
+  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                  price: '$9.99 / mo · $119.99 / yr' },
+  { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                     price: '$9.99 / mo · $119.99 / yr' },
+  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes from bullet points in seconds',                  price: '$34.99 / mo · $349 / yr' },
+  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                 price: '$9.99 / mo · $119.99 / yr' },
+  { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶', desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', price: '$24.99 / mo · $199 / yr' },
 ];
 
 const ADVANTAGES = [
@@ -109,11 +109,11 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
         <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>Simple, transparent, clinician-fair</div>
       </div>
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
-        <PriceCard title="Any single tool"       subtitle="Pick one — cardiology, neph, ICU…" monthly="$4.99" yearly="$44.44" cta="Start single tool" onCta={onSignUp}/>
-        <PriceCard title="ClinicalNote AI"       subtitle="High-volume documentation"         monthly="$29.99" yearly="$222" cta="Start ClinicalNote AI" onCta={onSignUp}/>
-        <PriceCard title="SoulMD Suite"          subtitle="All 8 tools · one login"           monthly="$88.88" yearly="$888" cta="Start Suite" onCta={onSignUp} highlighted/>
+        <PriceCard title="Any single tool"       subtitle="Cardiology, radiology, ID, ICU…"   monthly="$9.99"   yearly="$119.99" cta="Start single tool" onCta={onSignUp}/>
+        <PriceCard title="Premium specialty"     subtitle="NephroAI · PalliativeMD · ClinicalNote AI" monthly="$24.99+" yearly="$199+"  cta="Start premium tool" onCta={onSignUp}/>
+        <PriceCard title="SoulMD Suite"          subtitle="All 8 tools · one login"           monthly="$149.99" yearly="$1,799"  cta="Start Suite" onCta={onSignUp} highlighted/>
       </div>
-      <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>All plans: Stripe billing · cancel anytime · yearly = ~2 months free.</div>
+      <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>All plans include a monthly AI budget. Additional calls beyond the budget are $0.10 each. Cancel anytime.</div>
     </section>
 
     <section style={{padding:'40px 20px 60px', maxWidth:'800px', margin:'0 auto', width:'100%', boxSizing:'border-box', textAlign:'center'}}>
