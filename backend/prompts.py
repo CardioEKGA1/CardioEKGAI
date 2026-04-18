@@ -1,3 +1,6 @@
+# Copyright 2026 SoulMD Inc. All Rights Reserved.
+# Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
+
 """
 Clinical AI system prompts for SoulMD tools.
 

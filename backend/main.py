@@ -1,3 +1,6 @@
+# Copyright 2026 SoulMD Inc. All Rights Reserved.
+# Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
+
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

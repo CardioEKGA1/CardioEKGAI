@@ -1,3 +1,6 @@
+# Copyright 2026 SoulMD Inc. All Rights Reserved.
+# Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
+
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
