@@ -1,63 +1,26 @@
-import React, { useState, useEffect } from 'react';
-
-interface Props { API: string; onAuth: (data: any) => void; onBack: () => void; isSignup: boolean; onForgotPassword?: () => void; }
-
+import React, { useState } from 'react';
+interface Props { API: string; onAuth: (data: any) => void; onBack: () => void; isSignup: boolean; onForgotPassword: () => void; }
 const Login: React.FC<Props> = ({ API, onAuth, onBack, isSignup, onForgotPassword }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [verifyPending, setVerifyPending] = useState(false);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    if (token) {
-      fetch(`${API}/auth/verify?token=${token}`)
-        .then(r => r.json())
-        .then(data => { if (data.access_token) { data.email = data.email || ''; onAuth(data); } })
-        .catch(() => setError('Verification failed. Please try again.'));
-    }
-  }, []);
-
   const submit = async () => {
     if (!email || !password) { setError('Please enter your email and password.'); return; }
     setLoading(true); setError('');
-    const endpoint = isSignup ? '/auth/register' : '/auth/login';
     try {
-      const res = await fetch(`${API}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(`${API}${isSignup ? '/auth/register' : '/auth/login'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed');
-      if (isSignup) {
-        setVerifyPending(true);
-      } else {
-        data.email = email.trim();
-        onAuth(data);
-      }
+      data.email = email.trim();
+      onAuth(data);
     } catch(e: any) { setError(e.message); }
     finally { setLoading(false); }
   };
-
-  if (verifyPending) {
-    return (
-      <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
-        <div style={{background:'rgba(255,255,255,0.85)',borderRadius:'24px',padding:'40px',maxWidth:'400px',width:'100%',boxShadow:'0 8px 32px rgba(100,130,200,0.12)',textAlign:'center'}}>
-          <div style={{fontSize:'48px',marginBottom:'16px'}}>📧</div>
-          <div style={{fontSize:'22px',fontWeight:'800',color:'#1a2a4a',marginBottom:'8px'}}>Check your email!</div>
-          <div style={{fontSize:'14px',color:'#8aa0c0',lineHeight:'1.6',marginBottom:'24px'}}>
-            We sent a verification link to <strong style={{color:'#1a2a4a'}}>{email}</strong>.<br/><br/>
-            Click the link in the email to verify your account and get your free EKG scan.
-          </div>
-          <button onClick={onBack} style={{background:'none',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'12px',padding:'10px 24px',fontSize:'13px',color:'#4a7ad0',cursor:'pointer'}}>Back to home</button>
-        </div>
-      </div>
-    );
-  }
-
+  const s = {width:'100%',padding:'14px',borderRadius:'12px',border:'1px solid rgba(122,176,240,0.3)',fontSize:'14px',color:'#1a2a4a',background:'rgba(240,246,255,0.5)',marginBottom:'12px',outline:'none',boxSizing:'border-box' as any};
   return (
     <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
       <div style={{background:'rgba(255,255,255,0.85)',borderRadius:'24px',padding:'40px',maxWidth:'400px',width:'100%',boxShadow:'0 8px 32px rgba(100,130,200,0.12)'}}>
@@ -65,20 +28,15 @@ const Login: React.FC<Props> = ({ API, onAuth, onBack, isSignup, onForgotPasswor
         <div style={{fontSize:'24px',fontWeight:'800',color:'#1a2a4a',marginBottom:'6px'}}>{isSignup ? 'Create Account' : 'Welcome Back'}</div>
         <div style={{fontSize:'13px',color:'#8aa0c0',marginBottom:'28px'}}>{isSignup ? 'Sign up for 1 free EKG scan' : 'Sign in to your account'}</div>
         {error && <div style={{background:'#fde8e8',border:'1px solid #f0b0b0',borderRadius:'10px',padding:'12px',fontSize:'13px',color:'#c04040',marginBottom:'16px'}}>{error}</div>}
-        <input type="text" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)}
-          style={{width:'100%',padding:'14px',borderRadius:'12px',border:'1px solid rgba(122,176,240,0.3)',fontSize:'14px',color:'#1a2a4a',background:'rgba(240,246,255,0.5)',marginBottom:'12px',outline:'none',boxSizing:'border-box'}}/>
-        <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)}
-          onKeyDown={e=>e.key==='Enter'&&submit()}
-          style={{width:'100%',padding:'14px',borderRadius:'12px',border:'1px solid rgba(122,176,240,0.3)',fontSize:'14px',color:'#1a2a4a',background:'rgba(240,246,255,0.5)',marginBottom:'20px',outline:'none',boxSizing:'border-box'}}/>
+        <input type="text" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} style={s}/>
+        <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()} style={{...s,marginBottom:'8px'}}/>
+        {!isSignup && <div style={{textAlign:'right',marginBottom:'16px'}}><span onClick={onForgotPassword} style={{fontSize:'12px',color:'#4a7ad0',cursor:'pointer'}}>Forgot password?</span></div>}
         <button onClick={submit} disabled={loading} style={{width:'100%',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',border:'none',borderRadius:'14px',padding:'14px',fontSize:'15px',fontWeight:'700',color:'white',cursor:'pointer',marginBottom:'16px'}}>
           {loading ? 'Please wait...' : isSignup ? 'Create Account' : 'Sign In'}
         </button>
-        <div style={{textAlign:'right',marginBottom:'16px'}}><span onClick={()=>window.sendToReset && window.sendToReset()} style={{fontSize:'12px',color:'#4a7ad0',cursor:'pointer'}}>Forgot password?</span></div>
         <div style={{textAlign:'center',fontSize:'13px',color:'#8aa0c0'}}>
           {isSignup ? 'Already have an account? ' : "Don't have an account? "}
-          <span onClick={onBack} style={{color:'#4a7ad0',cursor:'pointer',fontWeight:'600'}}>
-            {isSignup ? 'Sign In' : 'Sign Up'}
-          </span>
+          <span onClick={onBack} style={{color:'#4a7ad0',cursor:'pointer',fontWeight:'600'}}>{isSignup ? 'Sign In' : 'Sign Up'}</span>
         </div>
       </div>
     </div>
