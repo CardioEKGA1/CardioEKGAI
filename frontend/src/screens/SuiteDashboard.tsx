@@ -191,7 +191,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 
       {suiteMonthly && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'14px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px'}}>
-          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save $600/year — switch to yearly Suite for $1,799.</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save $600/year — switch to yearly Suite for $1,199.</div>
           <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '…' : 'Upgrade to yearly'}</button>
         </div>
       )}
@@ -321,7 +321,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
           <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>$50 / month AI budget · one login · cancel anytime</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
             <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $149.99'}</button>
-            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $1,799'}</button>
+            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $1,199'}</button>
           </div>
         </div>
       )}

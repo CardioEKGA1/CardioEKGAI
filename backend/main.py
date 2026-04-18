@@ -831,7 +831,7 @@ def admin_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
         ("nephroai",     "monthly"): 24.99, ("nephroai",     "yearly"): 199.00 / 12,
         ("palliativemd", "monthly"): 24.99, ("palliativemd", "yearly"): 199.00 / 12,
         ("clinicalnote", "monthly"): 34.99, ("clinicalnote", "yearly"): 349.00 / 12,
-        ("suite",        "monthly"):149.99, ("suite",        "yearly"):1799.00 / 12,
+        ("suite",        "monthly"):149.99, ("suite",        "yearly"):1199.00 / 12,
     }
     subscription_mrr = 0.0
     for sub in db.query(Subscription).filter(Subscription.status == "active").all():

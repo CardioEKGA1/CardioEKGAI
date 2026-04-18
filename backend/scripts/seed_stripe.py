@@ -29,7 +29,7 @@ CATALOG = [
     ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                 3499,  34900),
     ("cerebralai",   "CerebralAI",       "Brain and spine MRI and CT interpretation",                 999,  11999),
     ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings", 2499, 19900),
-    ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",               14999, 179900),
+    ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",               14999, 119900),
 ]
 
 
