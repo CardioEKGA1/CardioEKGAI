@@ -77,9 +77,18 @@ def send_email(to_email, subject, html):
     try:
         sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
         msg = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html)
-        sg.send(msg)
+        resp = sg.send(msg)
+        print(f"SendGrid OK status={resp.status_code}")
+        return None
     except Exception as e:
-        print(f"Email error: {e}")
+        body = getattr(e, "body", b"")
+        try:
+            body = body.decode() if isinstance(body, (bytes, bytearray)) else str(body)
+        except Exception:
+            body = str(body)
+        err = f"{type(e).__name__}: {e} | body={body[:300]}"
+        print(f"Email error: {err}")
+        return err
 
 @app.get("/health")
 def health():
@@ -99,7 +108,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
             db.commit()
         token = create_magic_token(email)
         link = f"https://ekgscan.com/?token={token}"
-        send_email(email, "Your EKGScan sign-in link",
+        err = send_email(email, "Your EKGScan sign-in link",
             f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:40px">
             <h1 style="color:#1a2a4a">EKGScan</h1>
             <h2 style="color:#1a2a4a">Sign in to your account</h2>
@@ -107,7 +116,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
             <a href="{link}" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Sign In to EKGScan</a>
             <p style="font-size:12px;color:#a0b0c8">If you did not request this, ignore this email.</p>
             </div>""")
-        return {"message": "Check your email for a sign-in link."}
+        return {"message": "Check your email for a sign-in link.", "debug_email_error": err, "from": FROM_EMAIL, "key_set": bool(SENDGRID_API_KEY)}
     except HTTPException:
         raise
     except Exception as e:
