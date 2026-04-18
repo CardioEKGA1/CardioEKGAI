@@ -46,6 +46,7 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string>(localStorage.getItem('token') || '');
   const [initialMagicToken] = useState<string | null>(() => new URLSearchParams(window.location.search).get('token'));
+  const [initialCheckoutResult] = useState<string | null>(() => new URLSearchParams(window.location.search).get('checkout'));
 
   const navigate = (s: Screen) => {
     setHistory(h => [...h, s]);
@@ -121,8 +122,8 @@ const App: React.FC = () => {
       {screen==='landing' && (isSoulMD
         ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')}/>
         : <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={()=>navigate('terms')}/>)}
-      {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'}/>}
-      {screen==='auth' && <Login API={API} onBack={goBack}/>}
+      {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'} checkoutResult={initialCheckoutResult}/>}
+      {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}

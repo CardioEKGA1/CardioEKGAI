@@ -53,6 +53,7 @@ app.add_middleware(
 
 class MagicLinkRequest(BaseModel):
     email: str
+    is_clinician: bool | None = None
 
 class TokenVerify(BaseModel):
     token: str
@@ -214,12 +215,25 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
         user = db.query(User).filter(User.email == email).first()
         if not user:
             is_super = bool(SUPERUSER_EMAIL) and email == SUPERUSER_EMAIL
-            user = User(email=email, hashed_password="", is_verified=False, subscription_tier="free", is_superuser=is_super)
+            user = User(
+                email=email, hashed_password="", is_verified=False,
+                subscription_tier="free", is_superuser=is_super,
+                is_clinician=bool(data.is_clinician),
+                clinician_attested_at=datetime.utcnow() if data.is_clinician else None,
+            )
             db.add(user)
             db.commit()
-        elif SUPERUSER_EMAIL and email == SUPERUSER_EMAIL and not user.is_superuser:
-            user.is_superuser = True
-            db.commit()
+        else:
+            changed = False
+            if SUPERUSER_EMAIL and email == SUPERUSER_EMAIL and not user.is_superuser:
+                user.is_superuser = True
+                changed = True
+            if data.is_clinician and not user.is_clinician:
+                user.is_clinician = True
+                user.clinician_attested_at = datetime.utcnow()
+                changed = True
+            if changed:
+                db.commit()
         token = create_magic_token(email)
         host = request.headers.get("origin") or request.headers.get("referer") or ""
         is_soulmd = "soulmd.us" in host
