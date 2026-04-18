@@ -106,11 +106,15 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const hasAnyPaidSub = access && !isSuper && access.budget !== null && access.budget > 0;
 
   return (
-    <div style={{minHeight:'100vh', padding:'20px 16px', maxWidth:'1200px', margin:'0 auto'}}>
+    <div style={{minHeight:'100vh', background:'linear-gradient(135deg, #dce8fb 0%, #ede8fb 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif'}}>
+    <div style={{padding:'20px 16px', maxWidth:'1200px', margin:'0 auto'}}>
       <nav style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'20px', flexWrap:'wrap', gap:'12px'}}>
         <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-          <SoulMDLogo size={32}/>
-          <div style={{fontSize:'18px', fontWeight:'900', letterSpacing:'-0.3px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
+          <SoulMDLogo size={40}/>
+          <div>
+            <div style={{fontSize:'20px', fontWeight:'800', lineHeight:'1.1'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
+            <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'4px'}}>AI CLINICAL SUITE</div>
+          </div>
         </div>
         <div style={{display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap'}}>
           <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', fontSize:'11px', color:'#6a8ab0'}}>
@@ -187,6 +191,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       <div style={{marginTop:'28px', padding:'16px', background:'rgba(122,176,240,0.08)', borderRadius:'14px', fontSize:'12px', color:'#6a8ab0', lineHeight:'1.6', textAlign:'center'}}>
         For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. In emergencies, call 911.
       </div>
+    </div>
     </div>
   );
 };

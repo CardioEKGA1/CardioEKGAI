@@ -12,12 +12,16 @@ export const FIELD_LABEL: React.CSSProperties = {fontSize:'11px', color:'#6a8ab0
 interface ShellProps { name: string; subtitle?: string; badge?: string; onBack: () => void; children: React.ReactNode; }
 
 export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, onBack, children }) => (
-  <div style={{minHeight:'100vh', padding:'20px 16px', maxWidth:'880px', margin:'0 auto'}}>
+  <div style={{minHeight:'100vh', background:'linear-gradient(135deg, #dce8fb 0%, #ede8fb 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif'}}>
+  <div style={{padding:'20px 16px', maxWidth:'880px', margin:'0 auto'}}>
     <nav style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px', flexWrap:'wrap'}}>
       <button onClick={onBack} style={{background:'rgba(255,255,255,0.7)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'8px 12px', fontSize:'12px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>← Back</button>
-      <SoulMDLogo size={26}/>
-      <div style={{fontSize:'13px', fontWeight:'800', letterSpacing:'-0.2px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
-      <div style={{fontSize:'12px', color:'#c0d4f0'}}>/</div>
+      <SoulMDLogo size={32}/>
+      <div>
+        <div style={{fontSize:'14px', fontWeight:'800', lineHeight:'1.1'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
+        <div style={{fontSize:'8px', color:'#8aa0c0', letterSpacing:'3px'}}>AI CLINICAL SUITE</div>
+      </div>
+      <div style={{fontSize:'12px', color:'#c0d4f0', marginLeft:'4px'}}>/</div>
       <div style={{fontSize:'14px', color:'#1a2a4a', fontWeight:'800'}}>{name}</div>
       {badge && <span style={{fontSize:'10px', fontWeight:'700', background:WORDMARK, color:'white', borderRadius:'8px', padding:'2px 8px'}}>{badge}</span>}
     </nav>
@@ -26,6 +30,7 @@ export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, onBack,
     <div style={{marginTop:'20px', padding:'14px', background:'rgba(122,176,240,0.08)', borderRadius:'12px', fontSize:'11px', color:'#6a8ab0', lineHeight:'1.6', textAlign:'center'}}>
       For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. In emergencies, call 911.
     </div>
+  </div>
   </div>
 );
 

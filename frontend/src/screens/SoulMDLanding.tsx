@@ -5,13 +5,13 @@ import SoulMDLogo from '../SoulMDLogo';
 interface Props { onSignIn: () => void; onSignUp: () => void; }
 
 const TOOLS = [
-  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',              price: '$4.99 / mo · $44.44 / yr' },
+  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                      price: '$4.99 / mo · $44.44 / yr' },
   { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘', desc: 'Comprehensive AI nephrology — 10 conditions, one platform', price: '$9.99 / mo · $88.88 / yr' },
-  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',   price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',           price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',              price: '$4.99 / mo · $44.44 / yr' },
-  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes from bullet points in seconds',           price: '$29.99 / mo · $222 / yr' },
-  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',          price: '$4.99 / mo · $44.44 / yr' },
+  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',          price: '$4.99 / mo · $44.44 / yr' },
+  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                  price: '$4.99 / mo · $44.44 / yr' },
+  { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                     price: '$4.99 / mo · $44.44 / yr' },
+  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes from bullet points in seconds',                  price: '$29.99 / mo · $222 / yr' },
+  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                 price: '$4.99 / mo · $44.44 / yr' },
 ];
 
 const ADVANTAGES = [
@@ -24,33 +24,40 @@ const ADVANTAGES = [
   { title: 'Decision support, not replacement',body: 'AI-powered second opinion available 24/7 — to support your judgment, not replace it.' },
 ];
 
+const BG: React.CSSProperties = {minHeight:'100vh', background:'linear-gradient(135deg, #dce8fb 0%, #ede8fb 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif'};
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 const GRAD_TEXT: React.CSSProperties = {background: WORDMARK, WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text'};
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'24px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)'};
 
+export const SoulMDBrand: React.FC<{size?: number}> = ({ size = 40 }) => (
+  <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+    <SoulMDLogo size={size}/>
+    <div>
+      <div style={{fontSize:'20px', fontWeight:'800', lineHeight:'1.1'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
+      <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'4px'}}>AI CLINICAL SUITE</div>
+    </div>
+  </div>
+);
+
 const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
-  <div style={{minHeight:'100vh', display:'flex', flexDirection:'column'}}>
+  <div style={{...BG, display:'flex', flexDirection:'column'}}>
     <nav style={{padding:'16px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(255,255,255,0.6)', backdropFilter:'blur(10px)', borderBottom:'1px solid rgba(122,176,240,0.2)', flexWrap:'wrap', gap:'10px'}}>
-      <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-        <SoulMDLogo size={32}/>
-        <div style={{fontSize:'18px', fontWeight:'900', letterSpacing:'-0.3px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
-      </div>
+      <SoulMDBrand/>
       <div style={{display:'flex', gap:'8px'}}>
         <button onClick={onSignIn} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'8px 18px', fontSize:'13px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
         <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'10px', padding:'8px 18px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Sign Up Free</button>
       </div>
     </nav>
 
-    <section style={{padding:'70px 20px 40px', textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center'}}>
-      <div style={{background:'rgba(255,255,255,0.75)', borderRadius:'28px', padding:'22px', marginBottom:'22px', boxShadow:'0 8px 32px rgba(100,130,200,0.12)', border:'1px solid rgba(255,255,255,0.9)', backgroundImage:'linear-gradient(rgba(122,176,240,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(122,176,240,0.08) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.75), rgba(255,255,255,0.75))', backgroundSize:'18px 18px, 18px 18px, auto'}}>
-        <SoulMDLogo size={96}/>
-      </div>
-      <div style={{background:'rgba(255,255,255,0.8)', borderRadius:'40px', padding:'8px 24px', marginBottom:'16px', boxShadow:'0 4px 20px rgba(100,130,200,0.08)', border:'1px solid rgba(255,255,255,0.9)', display:'inline-block'}}>
-        <div style={{fontSize:'52px', fontWeight:'900', lineHeight:'1.05', letterSpacing:'-1.5px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
-      </div>
-      <div style={{fontSize:'18px', fontWeight:'700', marginBottom:'8px', ...GRAD_TEXT}}>AI-Powered Clinical Decision Support</div>
-      <div style={{fontSize:'14px', fontStyle:'italic', color:'#6a8ab0', marginBottom:'34px', letterSpacing:'0.5px'}}>Where Science Meets Soul</div>
-      <div style={{display:'flex', gap:'12px', flexWrap:'wrap', justifyContent:'center'}}>
+    <section style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px 40px', textAlign:'center'}}>
+      <div style={{fontSize:'11px', fontWeight:'600', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'16px', background:'rgba(122,176,240,0.12)', padding:'6px 16px', borderRadius:'20px', display:'inline-block'}}>AI-Powered Clinical Decision Support</div>
+      <h1 style={{fontSize:'52px', fontWeight:'900', color:'#1a2a4a', lineHeight:'1.1', marginBottom:'16px', maxWidth:'720px', letterSpacing:'-1.5px'}}>
+        Specialist-grade AI<br/>
+        <span style={GRAD_TEXT}>for every decision</span>
+      </h1>
+      <p style={{fontSize:'16px', color:'#6a8ab0', lineHeight:'1.7', maxWidth:'560px', marginBottom:'10px'}}>Seven clinical tools, one login. Structured outputs, built for clinicians — powered by Claude.</p>
+      <p style={{fontSize:'13px', fontStyle:'italic', color:'#8aa0c0', marginBottom:'32px', letterSpacing:'0.5px'}}>Where Science Meets Soul</p>
+      <div style={{display:'flex', gap:'12px', flexWrap:'wrap', justifyContent:'center', marginBottom:'10px'}}>
         <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'700', color:'white', cursor:'pointer'}}>Sign Up Free</button>
         <button onClick={onSignIn} style={{background:'rgba(255,255,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
       </div>
@@ -58,7 +65,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
 
     <section style={{padding:'40px 20px', maxWidth:'1100px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
       <div style={{textAlign:'center', marginBottom:'28px'}}>
-        <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px'}}>Eight clinical tools</div>
+        <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px'}}>Seven clinical tools</div>
         <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>Specialist-grade AI for every decision</div>
       </div>
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'14px'}}>
@@ -96,7 +103,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
         <PriceCard title="Any single tool"       subtitle="Pick one — cardiology, neph, ICU…" monthly="$4.99" yearly="$44.44" cta="Start single tool" onCta={onSignUp}/>
         <PriceCard title="ClinicalNote AI"       subtitle="High-volume documentation"         monthly="$29.99" yearly="$222" cta="Start ClinicalNote AI" onCta={onSignUp}/>
-        <PriceCard title="SoulMD Suite"          subtitle="All 8 tools · one login"           monthly="$88.88" yearly="$888" cta="Start Suite" onCta={onSignUp} highlighted/>
+        <PriceCard title="SoulMD Suite"          subtitle="All 7 tools · one login"           monthly="$88.88" yearly="$888" cta="Start Suite" onCta={onSignUp} highlighted/>
       </div>
       <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>All plans: Stripe billing · cancel anytime · yearly = ~2 months free.</div>
     </section>
