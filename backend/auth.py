@@ -7,13 +7,13 @@ SECRET_KEY = os.getenv("SECRET_KEY", "ekgscan-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
 def verify_password(plain, hashed):
-    return pwd_context.verify(plain, hashed)
+    return pwd_context.verify(plain[:72], hashed)
 
 def hash_password(password):
-    return pwd_context.hash(password)
+    return pwd_context.hash(password[:72])
 
 def create_token(data: dict):
     to_encode = data.copy()
