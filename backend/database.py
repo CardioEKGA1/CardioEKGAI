@@ -28,6 +28,21 @@ class User(Base):
     clinician_attested_at = Column(DateTime, nullable=True)
     note_style_preference = Column(String, default="standard")
     created_at = Column(DateTime, default=datetime.utcnow)
+    stripe_customer_id = Column(String, nullable=True, index=True)
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    tool_slug = Column(String, index=True)
+    tier = Column(String)
+    status = Column(String, default="active", index=True)
+    stripe_subscription_id = Column(String, unique=True, index=True, nullable=True)
+    stripe_price_id = Column(String, nullable=True)
+    stripe_customer_id = Column(String, index=True, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 class ToolUsage(Base):
     __tablename__ = "tool_usage"
@@ -47,6 +62,23 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS clinician_attested_at TIMESTAMP"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS note_style_preference VARCHAR DEFAULT 'standard'"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users(stripe_customer_id)"))
+
+try:
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO subscriptions (user_id, tool_slug, tier, status, created_at, updated_at)
+            SELECT id, 'ekgscan', subscription_tier, 'active', NOW(), NOW()
+            FROM users
+            WHERE is_subscribed = TRUE
+              AND subscription_tier IN ('monthly', 'yearly')
+              AND NOT EXISTS (
+                SELECT 1 FROM subscriptions s WHERE s.user_id = users.id AND s.tool_slug = 'ekgscan'
+              )
+        """))
+except Exception as e:
+    print(f"Grandfather migration skipped: {e}")
 
 def get_db():
     db = SessionLocal()

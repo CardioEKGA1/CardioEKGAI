@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db, User, ToolUsage
+from database import get_db, User, ToolUsage, Subscription
 from auth import create_token, create_magic_token, decode_token
 from email_utils import send_verification_email
 from pydantic import BaseModel
@@ -59,6 +59,19 @@ class AdminUserUpdate(BaseModel):
     subscription_tier: str | None = None
     is_subscribed: bool | None = None
     is_clinician: bool | None = None
+
+class CheckoutRequest(BaseModel):
+    tool_slug: str
+    tier: str
+
+TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "suite"}
+
+def get_price_id(tool_slug: str, tier: str) -> str:
+    key = f"STRIPE_PRICE_{tool_slug.upper()}_{tier.upper()}"
+    price_id = os.getenv(key, "")
+    if not price_id:
+        raise HTTPException(status_code=500, detail=f"Price not configured for {tool_slug}/{tier}. Set env var {key}.")
+    return price_id
 
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -114,13 +127,17 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
             db.add(user)
             db.commit()
         token = create_magic_token(email)
-        link = f"https://ekgscan.com/?token={token}"
-        send_email(email, "Your EKGScan sign-in link",
+        host = request.headers.get("origin") or request.headers.get("referer") or ""
+        is_soulmd = "soulmd.us" in host
+        brand = "SoulMD" if is_soulmd else "EKGScan"
+        link_base = "https://soulmd.us" if is_soulmd else "https://ekgscan.com"
+        link = f"{link_base}/?token={token}"
+        send_email(email, f"Your {brand} sign-in link",
             f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:40px">
-            <h1 style="color:#1a2a4a">EKGScan</h1>
+            <h1 style="color:#1a2a4a">{brand}</h1>
             <h2 style="color:#1a2a4a">Sign in to your account</h2>
             <p style="color:#8aa0c0">Click below to sign in. This link expires in 15 minutes.</p>
-            <a href="{link}" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Sign In to EKGScan</a>
+            <a href="{link}" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Sign In to {brand}</a>
             <p style="font-size:12px;color:#a0b0c8">If you did not request this, ignore this email.</p>
             </div>""")
         return {"message": "Check your email for a sign-in link."}
@@ -206,6 +223,44 @@ async def chat(request: Request, data: dict, current_user: User = Depends(get_cu
     )
     return {"message": response.content[0].text}
 
+@app.post("/billing/checkout-session")
+def create_checkout(data: CheckoutRequest, current_user: User = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if data.tool_slug not in TOOL_SLUGS:
+        raise HTTPException(status_code=400, detail="Unknown tool")
+    if data.tier not in ("monthly", "yearly"):
+        raise HTTPException(status_code=400, detail="Invalid tier")
+    price_id = get_price_id(data.tool_slug, data.tier)
+    try:
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            customer_email=current_user.email,
+            success_url="https://soulmd.us/?checkout=success",
+            cancel_url="https://soulmd.us/?checkout=cancel",
+            metadata={"user_id": str(current_user.id), "tool_slug": data.tool_slug, "tier": data.tier},
+            subscription_data={"metadata": {"user_id": str(current_user.id), "tool_slug": data.tool_slug, "tier": data.tier}},
+        )
+        return {"url": session.url}
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=502, detail=f"Stripe error: {str(e)[:200]}")
+
+@app.post("/billing/portal")
+def create_portal(current_user: User = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if not current_user.stripe_customer_id:
+        raise HTTPException(status_code=404, detail="No billing account on file yet. Subscribe to a plan first.")
+    try:
+        session = stripe.billing_portal.Session.create(
+            customer=current_user.stripe_customer_id,
+            return_url="https://soulmd.us/",
+        )
+        return {"url": session.url}
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=502, detail=f"Stripe error: {str(e)[:200]}")
+
 @app.post("/webhook/stripe")
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
@@ -214,33 +269,95 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid webhook")
-    if event["type"] in ["checkout.session.completed", "customer.subscription.created"]:
-        customer_email = None
-        obj = event["data"]["object"]
-        if event["type"] == "checkout.session.completed":
-            customer_email = obj.get("customer_email") or obj.get("customer_details", {}).get("email")
-        elif event["type"] == "customer.subscription.created":
-            customer_id = obj.get("customer")
-            if customer_id:
-                customer = stripe.Customer.retrieve(customer_id)
-                customer_email = customer.get("email")
-        if customer_email:
-            user = db.query(User).filter(User.email == customer_email).first()
-            if user:
-                user.is_subscribed = True
-                user.subscription_tier = "monthly"
-                db.commit()
-    elif event["type"] == "customer.subscription.deleted":
-        customer_id = event["data"]["object"].get("customer")
+
+    event_type = event["type"]
+    obj = event["data"]["object"]
+
+    def _resolve_user(customer_id, email, user_id_meta):
+        u = None
+        if user_id_meta:
+            try:
+                u = db.query(User).filter(User.id == int(user_id_meta)).first()
+            except ValueError:
+                pass
+        if not u and customer_id:
+            u = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+        if not u and email:
+            u = db.query(User).filter(User.email == email).first()
+        return u
+
+    if event_type == "checkout.session.completed":
+        customer_id = obj.get("customer")
+        metadata = obj.get("metadata") or {}
+        tool_slug = metadata.get("tool_slug") or "ekgscan"
+        tier = metadata.get("tier") or "monthly"
+        email = obj.get("customer_email") or (obj.get("customer_details") or {}).get("email")
+        user = _resolve_user(customer_id, email, metadata.get("user_id"))
+        if not user:
+            return {"status": "ignored"}
         if customer_id:
-            customer = stripe.Customer.retrieve(customer_id)
-            email = customer.get("email")
-            if email:
-                user = db.query(User).filter(User.email == email).first()
+            user.stripe_customer_id = customer_id
+        if tool_slug == "ekgscan":
+            user.is_subscribed = True
+            user.subscription_tier = tier
+        stripe_sub_id = obj.get("subscription")
+        existing = db.query(Subscription).filter(Subscription.stripe_subscription_id == stripe_sub_id).first() if stripe_sub_id else None
+        if existing:
+            existing.status = "active"
+            existing.stripe_customer_id = customer_id
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.add(Subscription(
+                user_id=user.id, tool_slug=tool_slug, tier=tier, status="active",
+                stripe_subscription_id=stripe_sub_id, stripe_customer_id=customer_id,
+            ))
+        db.commit()
+
+    elif event_type in ("customer.subscription.updated", "customer.subscription.created"):
+        stripe_sub_id = obj.get("id")
+        metadata = obj.get("metadata") or {}
+        tool_slug = metadata.get("tool_slug") or "ekgscan"
+        tier = metadata.get("tier") or "monthly"
+        status = obj.get("status", "active")
+        customer_id = obj.get("customer")
+        period_end = obj.get("current_period_end")
+
+        sub = db.query(Subscription).filter(Subscription.stripe_subscription_id == stripe_sub_id).first()
+        if not sub:
+            user = _resolve_user(customer_id, None, metadata.get("user_id"))
+            if user:
+                sub = Subscription(
+                    user_id=user.id, tool_slug=tool_slug, tier=tier, status=status,
+                    stripe_subscription_id=stripe_sub_id, stripe_customer_id=customer_id,
+                )
+                db.add(sub)
+        if sub:
+            sub.status = status
+            sub.stripe_customer_id = customer_id or sub.stripe_customer_id
+            if period_end:
+                sub.current_period_end = datetime.utcfromtimestamp(period_end)
+            sub.updated_at = datetime.utcnow()
+            if sub.tool_slug == "ekgscan":
+                user = db.query(User).filter(User.id == sub.user_id).first()
+                if user:
+                    user.is_subscribed = status == "active"
+                    if status == "active":
+                        user.subscription_tier = sub.tier
+        db.commit()
+
+    elif event_type == "customer.subscription.deleted":
+        stripe_sub_id = obj.get("id")
+        sub = db.query(Subscription).filter(Subscription.stripe_subscription_id == stripe_sub_id).first()
+        if sub:
+            sub.status = "canceled"
+            sub.updated_at = datetime.utcnow()
+            if sub.tool_slug == "ekgscan":
+                user = db.query(User).filter(User.id == sub.user_id).first()
                 if user:
                     user.is_subscribed = False
                     user.subscription_tier = "free"
-                    db.commit()
+            db.commit()
+
     return {"status": "ok"}
 
 @app.post("/admin/verify")

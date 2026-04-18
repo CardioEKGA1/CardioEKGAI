@@ -7,6 +7,8 @@ import Chat from './screens/Chat';
 import Paywall from './screens/Paywall';
 import Terms from './screens/Terms';
 import Admin from './screens/Admin';
+import SoulMDLanding from './screens/SoulMDLanding';
+import SuiteDashboard from './screens/SuiteDashboard';
 
 export interface EkgResult {
   rhythm: string;
@@ -27,12 +29,16 @@ export interface User {
   is_subscribed: boolean;
 }
 
-type Screen = 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms';
+type Screen = 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms' | 'dashboard';
 
 const API = 'https://ekgscan.com';
 
 const App: React.FC = () => {
   const [isAdminRoute] = useState(() => window.location.pathname.startsWith('/admin'));
+  const [isSoulMD] = useState(() => {
+    const h = window.location.host.toLowerCase();
+    return h === 'soulmd.us' || h === 'www.soulmd.us' || h.endsWith('.soulmd.us');
+  });
   const [screen, setScreen] = useState<Screen>('landing');
   const [history, setHistory] = useState<Screen[]>(['landing']);
   const [result, setResult] = useState<EkgResult | null>(null);
@@ -71,7 +77,7 @@ const App: React.FC = () => {
     localStorage.setItem('token', data.access_token);
     setToken(data.access_token);
     setUser({ email: data.email || '', scan_count: data.scan_count, is_subscribed: data.is_subscribed });
-    navigate('upload');
+    navigate(isSoulMD ? 'dashboard' : 'upload');
   };
 
   useEffect(() => {
@@ -90,7 +96,7 @@ const App: React.FC = () => {
     if (token) {
       fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
-        .then(data => { if (data.email) { setUser(data); navigate('upload'); } })
+        .then(data => { if (data.email) { setUser(data); navigate(isSoulMD ? 'dashboard' : 'upload'); } })
         .catch(() => { localStorage.removeItem('token'); setToken(''); });
     }
   }, []);
@@ -112,7 +118,10 @@ const App: React.FC = () => {
 
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
-      {screen==='landing' && <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={()=>navigate('terms')}/>}
+      {screen==='landing' && (isSoulMD
+        ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')}/>
+        : <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={()=>navigate('terms')}/>)}
+      {screen==='dashboard' && user && <SuiteDashboard user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'}/>}
       {screen==='auth' && <Login API={API} onBack={goBack}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
