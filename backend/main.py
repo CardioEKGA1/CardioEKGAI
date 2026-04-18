@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db, User, ToolUsage, Subscription, ToolFeedback
 from auth import create_token, create_magic_token, decode_token
-from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
+from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
 from email_utils import send_verification_email
 from pydantic import BaseModel
 from datetime import datetime
@@ -24,6 +24,10 @@ import re
 import stripe
 import traceback
 import hmac
+import io
+import subprocess
+import tempfile
+from pathlib import Path
 from datetime import timedelta
 import sendgrid
 from sendgrid.helpers.mail import Mail
@@ -160,6 +164,44 @@ def call_claude_json_text(system_prompt: str, user_input: str, max_tokens: int =
         messages=[{"role": "user", "content": user_input}],
     )
     return _extract_json(response.content[0].text)
+
+VIDEO_MAX_FRAMES = 15
+VIDEO_FRAMES_PER_MINUTE = 5
+VIDEO_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+def extract_video_frames(video_bytes: bytes) -> list[bytes]:
+    """Extract JPEG frames via ffmpeg at 5/min, capped at VIDEO_MAX_FRAMES."""
+    interval = 60.0 / VIDEO_FRAMES_PER_MINUTE
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        input_path = tmp / "input.bin"
+        input_path.write_bytes(video_bytes)
+        output_pattern = str(tmp / "frame_%04d.jpg")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(input_path), "-vf", f"fps=1/{interval}", "-vframes", str(VIDEO_MAX_FRAMES), "-q:v", "4", output_pattern],
+            check=True, capture_output=True, timeout=120,
+        )
+        frames = [p.read_bytes() for p in sorted(tmp.glob("frame_*.jpg"))[:VIDEO_MAX_FRAMES]]
+        return frames
+
+def dicom_to_jpeg(dicom_bytes: bytes) -> bytes:
+    """Convert a DICOM file into a single JPEG (middle slice if 3D)."""
+    import pydicom
+    from PIL import Image
+    import numpy as np
+    ds = pydicom.dcmread(io.BytesIO(dicom_bytes))
+    arr = ds.pixel_array
+    if arr.ndim == 3:
+        arr = arr[arr.shape[0] // 2]
+    arr = arr.astype("float32")
+    mn, mx = float(arr.min()), float(arr.max())
+    if mx > mn:
+        arr = ((arr - mn) / (mx - mn) * 255.0)
+    arr = np.clip(arr, 0, 255).astype("uint8")
+    img = Image.fromarray(arr).convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
 
 def call_claude_json_image(system_prompt: str, image_bytes: bytes, media_type: str, user_note: str = "Interpret this study.", max_tokens: int = 2000) -> dict:
     b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
@@ -627,22 +669,70 @@ async def cerebralai_analyze(request: Request, file: UploadFile = File(...), cur
     gate_tool(current_user, "cerebralai", db, COST_PER_SCAN)
     ct = (file.content_type or "").lower()
     name = (file.filename or "").lower()
-    is_video = ct.startswith("video/") or name.endswith((".mp4", ".mov", ".m4v"))
-    is_dicom = ct in ("application/dicom", "application/octet-stream") and name.endswith((".dcm", ".dicom"))
-    if is_video or is_dicom:
-        raise HTTPException(status_code=501, detail="Video and DICOM support launching in the next update. Please upload a JPEG, PNG, or PDF slice for now.")
-    if ct not in ("image/jpeg", "image/jpg", "image/png", "application/pdf"):
-        raise HTTPException(status_code=400, detail="JPEG, PNG, or PDF only.")
+    is_video = ct.startswith("video/") or name.endswith((".mp4", ".mov", ".m4v", ".webm"))
+    is_dicom = ct == "application/dicom" or name.endswith((".dcm", ".dicom"))
+    is_image_or_pdf = ct in ("image/jpeg", "image/jpg", "image/png", "application/pdf")
+
     contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:
+    if is_video and len(contents) > VIDEO_MAX_BYTES:
+        raise HTTPException(status_code=400, detail=f"Video too large. Max {VIDEO_MAX_BYTES // (1024*1024)}MB.")
+    if not is_video and len(contents) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large. Max 10MB.")
+
+    frames: list[tuple[bytes, str]] = []
+    if is_video:
+        try:
+            frame_bytes = extract_video_frames(contents)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=400, detail="Video processing timed out. Submit a shorter clip.")
+        except subprocess.CalledProcessError as e:
+            print(f"ffmpeg error: {e.stderr[:400] if e.stderr else ''}")
+            raise HTTPException(status_code=400, detail="Could not decode video. Try MP4 or MOV.")
+        if not frame_bytes:
+            raise HTTPException(status_code=400, detail="No frames could be extracted.")
+        frames = [(fb, "image/jpeg") for fb in frame_bytes]
+    elif is_dicom:
+        try:
+            jpeg = dicom_to_jpeg(contents)
+        except Exception as e:
+            print(f"dicom error: {e}")
+            raise HTTPException(status_code=400, detail="Could not read DICOM file.")
+        frames = [(jpeg, "image/jpeg")]
+    elif is_image_or_pdf:
+        frames = [(contents, ct)]
+    else:
+        raise HTTPException(status_code=400, detail="JPEG, PNG, PDF, MP4/MOV video, or DICOM only.")
+
+    per_frame_results: list[dict] = []
+    for i, (fb, mt) in enumerate(frames):
+        try:
+            per_frame_results.append(call_claude_json_image(
+                CEREBRALAI_PROMPT, fb, mt,
+                user_note=f"Interpret this frame ({i+1} of {len(frames)}).",
+            ))
+        except Exception as e:
+            print(f"cerebralai frame {i+1} error: {e}")
+            per_frame_results.append({"error": f"Frame {i+1} analysis failed."})
+
+    total_cost = COST_PER_SCAN * len(frames)
+    if len(frames) == 1:
+        log_usage(current_user, "cerebralai", total_cost, db)
+        return per_frame_results[0]
+
     try:
-        result = call_claude_json_image(CEREBRALAI_PROMPT, contents, ct)
+        consolidated = call_claude_json_text(
+            CEREBRALAI_CONSOLIDATE_PROMPT,
+            json.dumps({"frame_count": len(frames), "frames": per_frame_results}, indent=2),
+            max_tokens=3000,
+        )
+        total_cost += COST_PER_SCAN
     except Exception as e:
-        print(f"cerebralai error: {e}")
-        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    log_usage(current_user, "cerebralai", COST_PER_SCAN, db)
-    return result
+        print(f"cerebralai consolidation error: {e}")
+        consolidated = {"frame_count": len(frames), "frames": per_frame_results, "error": "Consolidation step failed; see individual frame results."}
+
+    consolidated.setdefault("frame_count", len(frames))
+    log_usage(current_user, "cerebralai", total_cost, db)
+    return consolidated
 
 PALLIATIVE_CONVERSATION_TYPES = {"goals_of_care", "prognosis", "code_status", "hospice", "family_meeting", "withdrawing_treatment", "pediatric"}
 
@@ -903,6 +993,60 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
     checks["anthropic"] = {"ok": bool(os.getenv("ANTHROPIC_API_KEY"))}
     checks["admin_token_configured"] = bool(ADMIN_TOKEN)
     return checks
+
+@app.get("/admin/charts")
+def admin_charts(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    now = datetime.utcnow()
+    thirty_days_ago = now - timedelta(days=30)
+    today = now.date()
+
+    # Signups per day (last 30 days), backfill zeros
+    row_signups = db.query(User.created_at).filter(User.created_at >= thirty_days_ago).all()
+    signup_map: dict[str, int] = {}
+    for (ts,) in row_signups:
+        if ts:
+            signup_map[ts.date().isoformat()] = signup_map.get(ts.date().isoformat(), 0) + 1
+    signups_by_day = []
+    for i in range(30, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        signups_by_day.append({"date": d, "count": signup_map.get(d, 0)})
+
+    # AI spend per day (last 30 days)
+    row_spend = db.query(ToolUsage.created_at, ToolUsage.cost).filter(ToolUsage.created_at >= thirty_days_ago).all()
+    spend_map: dict[str, float] = {}
+    for ts, cost in row_spend:
+        if ts:
+            key = ts.date().isoformat()
+            spend_map[key] = spend_map.get(key, 0.0) + float(cost or 0.0)
+    ai_spend_by_day = []
+    for i in range(30, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        ai_spend_by_day.append({"date": d, "spend": round(spend_map.get(d, 0.0), 3)})
+
+    # NephroAI tab breakdown (lifetime)
+    nephro_rows = db.query(ToolUsage.tool_slug, func.count(ToolUsage.id)).filter(
+        ToolUsage.tool_slug.like("nephroai:%")
+    ).group_by(ToolUsage.tool_slug).order_by(func.count(ToolUsage.id).desc()).all()
+    nephro_breakdown = [{"tab": (slug or "").split(":", 1)[1], "count": int(c)} for slug, c in nephro_rows]
+
+    # Subscriptions started per month (last 6 months)
+    six_months_ago = now - timedelta(days=180)
+    sub_rows = db.query(Subscription.created_at, Subscription.tool_slug, Subscription.tier).filter(
+        Subscription.created_at >= six_months_ago
+    ).all()
+    sub_month_map: dict[str, int] = {}
+    for ts, slug, tier in sub_rows:
+        if ts:
+            ym = ts.strftime("%Y-%m")
+            sub_month_map[ym] = sub_month_map.get(ym, 0) + 1
+    subs_by_month = [{"month": k, "count": v} for k, v in sorted(sub_month_map.items())]
+
+    return {
+        "signups_by_day": signups_by_day,
+        "ai_spend_by_day": ai_spend_by_day,
+        "nephro_breakdown": nephro_breakdown,
+        "subs_by_month": subs_by_month,
+    }
 
 @app.get("/admin/billing/validate")
 def admin_billing_validate(_: bool = Depends(verify_admin)):

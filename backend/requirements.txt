@@ -12,3 +12,6 @@ psycopg2-binary
 stripe
 sendgrid
 slowapi
+pydicom
+Pillow
+numpy

@@ -257,8 +257,28 @@ const Field: React.FC<{label: string; children: React.ReactNode}> = ({label, chi
   </div>
 );
 
+const BarChart: React.FC<{rows: {label: string; value: number}[]; height?: number; valueSuffix?: string}> = ({rows, height = 140, valueSuffix = ''}) => {
+  if (!rows.length) return <div style={{textAlign:'center', color:'#8aa0c0', fontSize:'13px', padding:'20px'}}>No data yet.</div>;
+  const max = Math.max(...rows.map(r => r.value), 1);
+  return (
+    <div style={{display:'flex', alignItems:'flex-end', gap:'3px', height: `${height}px`, paddingTop:'22px', overflowX:'auto'}}>
+      {rows.map((r, i) => {
+        const h = Math.max(2, Math.round((r.value / max) * (height - 40)));
+        return (
+          <div key={i} title={`${r.label}: ${r.value}${valueSuffix}`} style={{flex:'1 0 20px', minWidth:'20px', display:'flex', flexDirection:'column', alignItems:'center', gap:'3px'}}>
+            <div style={{fontSize:'9px', color:'#4a7ad0', fontWeight:'700', minHeight:'11px'}}>{r.value ? `${r.value}${valueSuffix}` : ''}</div>
+            <div style={{width:'100%', height: `${h}px`, background:'linear-gradient(180deg,#7ab0f0,#9b8fe8)', borderRadius:'4px 4px 0 0'}}/>
+            <div style={{fontSize:'8px', color:'#8aa0c0', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'100%', textAlign:'center'}}>{r.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
   const [data, setData] = useState<any>(null);
+  const [charts, setCharts] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const af = useAuthedFetch(onUnauthorized);
@@ -267,9 +287,13 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
     (async () => {
       setLoading(true); setError('');
       try {
-        const res = await af(`${API}/admin/stats`, { headers });
-        if (!res.ok) throw new Error('Failed to load stats');
-        setData(await res.json());
+        const [sRes, cRes] = await Promise.all([
+          af(`${API}/admin/stats`, { headers }),
+          af(`${API}/admin/charts`, { headers }),
+        ]);
+        if (!sRes.ok) throw new Error('Failed to load stats');
+        setData(await sRes.json());
+        if (cRes.ok) setCharts(await cRes.json());
       } catch(e:any) { setError(e.message); }
       finally { setLoading(false); }
     })();
@@ -302,6 +326,27 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
         <Stat label="Monthly subs" value={data.subscriptions.monthly}/>
         <Stat label="Yearly subs" value={data.subscriptions.yearly}/>
       </div>
+
+      {charts && (
+        <>
+          <div style={CARD}>
+            <div style={LABEL}>New signups · last 30 days</div>
+            <BarChart rows={(charts.signups_by_day || []).map((d:any)=>({label: d.date.slice(5), value: d.count}))}/>
+          </div>
+          <div style={CARD}>
+            <div style={LABEL}>AI spend · last 30 days ($)</div>
+            <BarChart rows={(charts.ai_spend_by_day || []).map((d:any)=>({label: d.date.slice(5), value: Math.round(d.spend * 100) / 100}))} valueSuffix=""/>
+          </div>
+          <div style={CARD}>
+            <div style={LABEL}>New subscriptions per month</div>
+            <BarChart rows={(charts.subs_by_month || []).map((d:any)=>({label: d.month, value: d.count}))}/>
+          </div>
+          <div style={CARD}>
+            <div style={LABEL}>NephroAI tab usage</div>
+            <BarChart rows={(charts.nephro_breakdown || []).map((d:any)=>({label: d.tab, value: d.count}))}/>
+          </div>
+        </>
+      )}
 
       <div style={CARD}>
         <div style={LABEL}>Tool usage breakdown</div>

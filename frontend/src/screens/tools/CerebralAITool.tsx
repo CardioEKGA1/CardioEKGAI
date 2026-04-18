@@ -17,14 +17,14 @@ const CerebralAITool: React.FC<Props> = ({ API, token, onBack }) => {
     setResult(null); setError('');
     if (!f) return;
     const name = f.name.toLowerCase();
-    if (f.type.startsWith('video/') || name.endsWith('.mp4') || name.endsWith('.mov') || name.endsWith('.dcm') || name.endsWith('.dicom')) {
-      setError('Video and DICOM support is launching in the next update. Please upload a JPEG, PNG, or PDF slice for now.');
-      return;
+    const isVideo = f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(name);
+    const isDicom = f.type === 'application/dicom' || /\.(dcm|dicom)$/i.test(name);
+    const isImageOrPdf = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'].includes(f.type);
+    if (!isVideo && !isDicom && !isImageOrPdf) {
+      setError('JPEG, PNG, PDF, MP4/MOV video, or DICOM only.'); return;
     }
-    if (!['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'].includes(f.type)) {
-      setError('JPEG, PNG, or PDF only.'); return;
-    }
-    if (f.size > 10 * 1024 * 1024) { setError('File too large. Max 10MB.'); return; }
+    const limit = isVideo ? 50 : 10;
+    if (f.size > limit * 1024 * 1024) { setError(`File too large. Max ${limit}MB.`); return; }
     setFile(f);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(f.type.startsWith('image/') ? URL.createObjectURL(f) : '');
@@ -60,17 +60,17 @@ const CerebralAITool: React.FC<Props> = ({ API, token, onBack }) => {
           style={{border:`2px dashed ${dragging?'#7ab0f0':'#c0d4f0'}`, borderRadius:'14px', padding:'32px 20px', textAlign:'center', cursor:'pointer', background: dragging?'rgba(122,176,240,0.08)':'rgba(240,246,255,0.5)', transition:'all 0.2s', marginBottom:'12px'}}
         >
           <div style={{fontSize:'32px', marginBottom:'8px'}}>🧠</div>
-          <div style={{fontSize:'14px', fontWeight:'700', color:'#1a2a4a', marginBottom:'4px'}}>{file ? file.name : 'Drop MRI / CT slice here'}</div>
-          <div style={{fontSize:'11px', color:'#8aa0c0'}}>JPEG · PNG · PDF · up to 10MB</div>
+          <div style={{fontSize:'14px', fontWeight:'700', color:'#1a2a4a', marginBottom:'4px'}}>{file ? file.name : 'Drop MRI / CT slice, video, or DICOM here'}</div>
+          <div style={{fontSize:'11px', color:'#8aa0c0'}}>JPEG · PNG · PDF up to 10MB · MP4/MOV up to 50MB · DICOM</div>
         </div>
-        <input ref={inputRef} type="file" accept="image/*,.pdf" style={{display:'none'}} onChange={e => pickFile(e.target.files?.[0])}/>
+        <input ref={inputRef} type="file" accept="image/*,.pdf,.mp4,.mov,.m4v,.webm,.dcm,.dicom,video/*,application/dicom" style={{display:'none'}} onChange={e => pickFile(e.target.files?.[0])}/>
         {previewUrl && (
           <div style={{marginBottom:'12px'}}>
             <img src={previewUrl} alt="Neuroimaging preview" style={{maxWidth:'100%', maxHeight:'360px', borderRadius:'12px', border:'1px solid rgba(122,176,240,0.2)', display:'block', margin:'0 auto'}}/>
           </div>
         )}
         <button onClick={analyze} disabled={!file || loading} style={{...BTN_PRIMARY, width:'100%', opacity: (!file || loading) ? 0.6 : 1}}>{loading ? 'Interpreting study…' : 'Interpret study'}</button>
-        <div style={{fontSize:'11px', color:'#8aa0c0', marginTop:'10px', textAlign:'center', lineHeight:'1.6'}}>Video (MP4/MOV) and DICOM upload coming soon. For now upload a single exported slice as JPEG/PNG/PDF.</div>
+        <div style={{fontSize:'11px', color:'#8aa0c0', marginTop:'10px', textAlign:'center', lineHeight:'1.6'}}>Videos are sampled at 5 frames per minute (up to 15 frames). DICOM studies render the middle slice.</div>
       </div>
       {error && <div style={{background:'#fde8e8', border:'1px solid #f0b0b0', borderRadius:'12px', padding:'12px', fontSize:'13px', color:'#c04040', marginBottom:'14px'}}>{error}</div>}
       {result && <ToolResult data={result}/>}
