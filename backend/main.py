@@ -113,7 +113,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
     except Exception as e:
         print(f"MAGIC_LINK_ERROR: {type(e).__name__}: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Could not send sign-in link. ({type(e).__name__})")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)[:400]}")
 
 @app.post("/auth/verify-token")
 @limiter.limit("10/minute")
