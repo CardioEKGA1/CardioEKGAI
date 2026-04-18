@@ -9,9 +9,9 @@ export const INPUT: React.CSSProperties = {width:'100%', padding:'10px 12px', bo
 export const BTN_PRIMARY: React.CSSProperties = {background:WORDMARK, border:'none', borderRadius:'12px', padding:'12px 18px', fontSize:'14px', fontWeight:'700', color:'white', cursor:'pointer'};
 export const FIELD_LABEL: React.CSSProperties = {fontSize:'11px', color:'#6a8ab0', fontWeight:'600', marginBottom:'4px'};
 
-interface ShellProps { name: string; subtitle?: string; badge?: string; onBack: () => void; children: React.ReactNode; }
+interface ShellProps { name: string; subtitle?: string; badge?: string; icon?: React.ReactNode; onBack: () => void; children: React.ReactNode; }
 
-export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, onBack, children }) => (
+export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, icon, onBack, children }) => (
   <div style={{minHeight:'100vh', background:'linear-gradient(135deg, #dce8fb 0%, #ede8fb 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif'}}>
   <div style={{padding:'20px 16px', maxWidth:'880px', margin:'0 auto'}}>
     <nav style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px', flexWrap:'wrap'}}>
@@ -22,6 +22,7 @@ export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, onBack,
         <div style={{fontSize:'8px', color:'#8aa0c0', letterSpacing:'3px'}}>AI CLINICAL SUITE</div>
       </div>
       <div style={{fontSize:'12px', color:'#c0d4f0', marginLeft:'4px'}}>/</div>
+      {icon && <span style={{display:'inline-flex', alignItems:'center'}}>{icon}</span>}
       <div style={{fontSize:'14px', color:'#1a2a4a', fontWeight:'800'}}>{name}</div>
       {badge && <span style={{fontSize:'10px', fontWeight:'700', background:WORDMARK, color:'white', borderRadius:'8px', padding:'2px 8px'}}>{badge}</span>}
     </nav>
