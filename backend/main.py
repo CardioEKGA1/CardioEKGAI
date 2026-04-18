@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db, User, ToolUsage, Subscription
 from auth import create_token, create_magic_token, decode_token
+from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
 from email_utils import send_verification_email
 from pydantic import BaseModel
 from datetime import datetime
@@ -41,6 +42,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "chachodesertspaces@gmail.com")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+SUPERUSER_EMAIL = os.getenv("SUPERUSER_EMAIL", "").strip().lower()
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,6 +61,7 @@ class AdminUserUpdate(BaseModel):
     subscription_tier: str | None = None
     is_subscribed: bool | None = None
     is_clinician: bool | None = None
+    is_superuser: bool | None = None
 
 class CheckoutRequest(BaseModel):
     tool_slug: str
@@ -72,6 +75,93 @@ def get_price_id(tool_slug: str, tier: str) -> str:
     if not price_id:
         raise HTTPException(status_code=500, detail=f"Price not configured for {tool_slug}/{tier}. Set env var {key}.")
     return price_id
+
+def _has_active_sub(user_id: int, tool_slug: str, db: Session) -> bool:
+    return db.query(Subscription).filter(
+        Subscription.user_id == user_id,
+        Subscription.tool_slug == tool_slug,
+        Subscription.status == "active",
+    ).first() is not None
+
+def has_tool_access(user: User, tool_slug: str, db: Session) -> bool:
+    if user.is_superuser:
+        return True
+    if _has_active_sub(user.id, "suite", db):
+        return True
+    if _has_active_sub(user.id, tool_slug, db):
+        return True
+    if tool_slug == "ekgscan":
+        if user.is_subscribed:
+            return True
+        if (user.scan_count or 0) < 1:
+            return True
+    return False
+
+BUDGET_HIERARCHY = [("suite", 35.0), ("clinicalnote", 8.0), ("nephroai", 5.0)]
+_OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
+
+def monthly_budget(user: User, db: Session) -> float:
+    if user.is_superuser:
+        return float("inf")
+    for slug, budget in BUDGET_HIERARCHY:
+        if _has_active_sub(user.id, slug, db):
+            return budget
+    for slug in _OTHER_TOOLS:
+        if _has_active_sub(user.id, slug, db):
+            return 3.0
+    return 0.0
+
+def current_month_spend(user_id: int, db: Session) -> float:
+    month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    total = db.query(func.sum(ToolUsage.cost)).filter(
+        ToolUsage.user_id == user_id,
+        ToolUsage.created_at >= month_start,
+    ).scalar()
+    return float(total or 0.0)
+
+def gate_tool(user, tool_slug: str, db: Session, cost: float):
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if user.is_superuser:
+        return
+    if not has_tool_access(user, tool_slug, db):
+        raise HTTPException(status_code=402, detail=f"Subscribe to {tool_slug} or SoulMD Suite to use this tool.")
+    budget = monthly_budget(user, db)
+    if budget <= 0:
+        return
+    if current_month_spend(user.id, db) + cost > budget:
+        raise HTTPException(status_code=429, detail=f"Monthly AI usage budget (${budget:.2f}) reached. Resets on the 1st.")
+
+def log_usage(user_id: int, tool_slug: str, cost: float, db: Session):
+    db.add(ToolUsage(user_id=user_id, tool_slug=tool_slug, cost=cost))
+    db.commit()
+
+def _extract_json(text: str):
+    text = text.strip()
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    return json.loads(match.group() if match else text)
+
+def call_claude_json_text(system_prompt: str, user_input: str, max_tokens: int = 2000) -> dict:
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_input}],
+    )
+    return _extract_json(response.content[0].text)
+
+def call_claude_json_image(system_prompt: str, image_bytes: bytes, media_type: str, user_note: str = "Interpret this study.", max_tokens: int = 2000) -> dict:
+    b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+            {"type": "text", "text": user_note},
+        ]}],
+    )
+    return _extract_json(response.content[0].text)
 
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -123,8 +213,12 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
             raise HTTPException(status_code=400, detail="Invalid email")
         user = db.query(User).filter(User.email == email).first()
         if not user:
-            user = User(email=email, hashed_password="", is_verified=False, subscription_tier="free")
+            is_super = bool(SUPERUSER_EMAIL) and email == SUPERUSER_EMAIL
+            user = User(email=email, hashed_password="", is_verified=False, subscription_tier="free", is_superuser=is_super)
             db.add(user)
+            db.commit()
+        elif SUPERUSER_EMAIL and email == SUPERUSER_EMAIL and not user.is_superuser:
+            user.is_superuser = True
             db.commit()
         token = create_magic_token(email)
         host = request.headers.get("origin") or request.headers.get("referer") or ""
@@ -360,6 +454,152 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     return {"status": "ok"}
 
+class NephroRequest(BaseModel):
+    sub_tool: str
+    inputs: dict
+
+class RxCheckRequest(BaseModel):
+    medications: list[str]
+
+class InfectIDRequest(BaseModel):
+    infection_site: str
+    organism: str | None = None
+    allergies: str | None = None
+    crcl: float | None = None
+    weight_kg: float | None = None
+    age: int | None = None
+    notes: str | None = None
+
+class ClinicalNoteRequest(BaseModel):
+    note_type: str
+    style: str
+    bullets: str
+
+@app.post("/tools/nephroai/analyze")
+@limiter.limit("10/minute")
+def nephroai_analyze(request: Request, data: NephroRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "nephroai", db, COST_PER_SCAN)
+    sub = data.sub_tool.lower().replace("-", "_")
+    if sub not in NEPHRO_SUBTOOLS:
+        raise HTTPException(status_code=400, detail=f"Unknown sub_tool '{data.sub_tool}'. Valid: {sorted(NEPHRO_SUBTOOLS.keys())}")
+    user_input = "Inputs:\n" + json.dumps(data.inputs or {}, indent=2)
+    try:
+        result = call_claude_json_text(NEPHRO_SUBTOOLS[sub], user_input)
+    except Exception as e:
+        print(f"nephroai[{sub}] error: {e}")
+        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
+    log_usage(current_user.id, f"nephroai:{sub}", COST_PER_SCAN, db)
+    return result
+
+@app.post("/tools/rxcheck/analyze")
+@limiter.limit("10/minute")
+def rxcheck_analyze(request: Request, data: RxCheckRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "rxcheck", db, COST_PER_SCAN)
+    meds = [m.strip() for m in (data.medications or []) if m and m.strip()]
+    if not meds:
+        raise HTTPException(status_code=400, detail="Provide at least one medication.")
+    user_input = "Medications:\n" + "\n".join(f"- {m}" for m in meds)
+    try:
+        result = call_claude_json_text(RXCHECK_PROMPT, user_input)
+    except Exception as e:
+        print(f"rxcheck error: {e}")
+        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
+    log_usage(current_user.id, "rxcheck", COST_PER_SCAN, db)
+    return result
+
+@app.post("/tools/infectid/analyze")
+@limiter.limit("10/minute")
+def infectid_analyze(request: Request, data: InfectIDRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "infectid", db, COST_PER_SCAN)
+    if not data.infection_site or not data.infection_site.strip():
+        raise HTTPException(status_code=400, detail="infection_site is required.")
+    user_input = "Clinical inputs:\n" + json.dumps(data.dict(), indent=2)
+    try:
+        result = call_claude_json_text(INFECTID_PROMPT, user_input)
+    except Exception as e:
+        print(f"infectid error: {e}")
+        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
+    log_usage(current_user.id, "infectid", COST_PER_SCAN, db)
+    return result
+
+@app.post("/tools/clinicalnote/generate")
+@limiter.limit("10/minute")
+def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "clinicalnote", db, COST_PER_SCAN)
+    if not data.bullets or not data.bullets.strip():
+        raise HTTPException(status_code=400, detail="Bullet points are required.")
+    style_key = (data.style or "standard").lower().replace("-", "_").replace(" ", "_")
+    if style_key in CLINICALNOTE_STYLE and current_user.note_style_preference != style_key:
+        current_user.note_style_preference = style_key
+        db.commit()
+    prompt = clinicalnote_prompt(data.note_type or "SOAP note", data.style or "standard")
+    user_input = "Bullet points to expand:\n\n" + data.bullets
+    try:
+        result = call_claude_json_text(prompt, user_input, max_tokens=3000)
+    except Exception as e:
+        print(f"clinicalnote error: {e}")
+        raise HTTPException(status_code=502, detail="AI note generation failed. Please retry.")
+    log_usage(current_user.id, "clinicalnote", COST_PER_SCAN, db)
+    return result
+
+@app.post("/tools/xrayread/analyze")
+@limiter.limit("5/minute")
+async def xrayread_analyze(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "xrayread", db, COST_PER_SCAN)
+    ct = (file.content_type or "").lower()
+    if ct not in ("image/jpeg", "image/jpg", "image/png", "application/pdf"):
+        raise HTTPException(status_code=400, detail="JPEG, PNG, or PDF only.")
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Max 10MB.")
+    try:
+        result = call_claude_json_image(XRAYREAD_PROMPT, contents, ct)
+    except Exception as e:
+        print(f"xrayread error: {e}")
+        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
+    log_usage(current_user.id, "xrayread", COST_PER_SCAN, db)
+    return result
+
+@app.post("/tools/cerebralai/analyze")
+@limiter.limit("3/minute")
+async def cerebralai_analyze(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "cerebralai", db, COST_PER_SCAN)
+    ct = (file.content_type or "").lower()
+    name = (file.filename or "").lower()
+    is_video = ct.startswith("video/") or name.endswith((".mp4", ".mov", ".m4v"))
+    is_dicom = ct in ("application/dicom", "application/octet-stream") and name.endswith((".dcm", ".dicom"))
+    if is_video or is_dicom:
+        raise HTTPException(status_code=501, detail="Video and DICOM support launching in the next update. Please upload a JPEG, PNG, or PDF slice for now.")
+    if ct not in ("image/jpeg", "image/jpg", "image/png", "application/pdf"):
+        raise HTTPException(status_code=400, detail="JPEG, PNG, or PDF only.")
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Max 10MB.")
+    try:
+        result = call_claude_json_image(CEREBRALAI_PROMPT, contents, ct)
+    except Exception as e:
+        print(f"cerebralai error: {e}")
+        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
+    log_usage(current_user.id, "cerebralai", COST_PER_SCAN, db)
+    return result
+
+@app.get("/tools/access")
+def tools_access(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Returns the user's tool entitlements + remaining monthly budget."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai"]
+    access = {t: has_tool_access(current_user, t, db) for t in tools}
+    budget = monthly_budget(current_user, db)
+    spent = current_month_spend(current_user.id, db)
+    return {
+        "is_superuser": bool(current_user.is_superuser),
+        "access": access,
+        "budget": None if budget == float("inf") else round(budget, 2),
+        "spent": round(spent, 2),
+        "note_style_preference": current_user.note_style_preference or "standard",
+    }
+
 @app.post("/admin/verify")
 def admin_verify(_: bool = Depends(verify_admin)):
     return {"ok": True}
@@ -381,6 +621,7 @@ def admin_users(search: str = "", limit: int = 100, offset: int = 0, db: Session
             "is_subscribed": u.is_subscribed,
             "is_verified": u.is_verified,
             "is_clinician": bool(u.is_clinician),
+            "is_superuser": bool(getattr(u, "is_superuser", False)),
             "scan_count": u.scan_count,
             "monthly_spend": round(u.monthly_spend or 0.0, 3),
         } for u in rows],
@@ -399,6 +640,8 @@ def admin_update_user(user_id: int, data: AdminUserUpdate, db: Session = Depends
     if data.is_clinician is not None:
         user.is_clinician = data.is_clinician
         user.clinician_attested_at = datetime.utcnow() if data.is_clinician else None
+    if data.is_superuser is not None:
+        user.is_superuser = data.is_superuser
     db.commit()
     return {"ok": True}
 

@@ -124,6 +124,7 @@ const UsersTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
   const [editing, setEditing] = useState<number | null>(null);
   const [pendingTier, setPendingTier] = useState('');
   const [pendingClinician, setPendingClinician] = useState(false);
+  const [pendingSuperuser, setPendingSuperuser] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const af = useAuthedFetch(onUnauthorized);
 
@@ -143,7 +144,7 @@ const UsersTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
 
   const saveUser = async (id: number) => {
     try {
-      const res = await af(`${API}/admin/users/${id}`, {method:'PATCH', headers, body: JSON.stringify({subscription_tier: pendingTier, is_clinician: pendingClinician})});
+      const res = await af(`${API}/admin/users/${id}`, {method:'PATCH', headers, body: JSON.stringify({subscription_tier: pendingTier, is_clinician: pendingClinician, is_superuser: pendingSuperuser})});
       if (!res.ok) throw new Error('Update failed');
       setEditing(null);
       load();
@@ -185,7 +186,7 @@ const UsersTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
                 </>
               ) : (
                 <>
-                  <button onClick={()=>{setEditing(u.id); setPendingTier(u.subscription_tier||'free'); setPendingClinician(!!u.is_clinician);}} style={{...BTN}}>Edit</button>
+                  <button onClick={()=>{setEditing(u.id); setPendingTier(u.subscription_tier||'free'); setPendingClinician(!!u.is_clinician); setPendingSuperuser(!!u.is_superuser);}} style={{...BTN}}>Edit</button>
                   <button onClick={()=>setConfirmDelete(u.id)} style={{...BTN_DANGER}}>Delete</button>
                 </>
               )}
@@ -214,6 +215,16 @@ const UsersTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
                 </label>
               ) : (
                 <span style={{color:u.is_clinician?'#4a7ad0':'#8aa0c0',fontWeight:'600'}}>{u.is_clinician ? 'Yes' : 'No'}</span>
+              )}
+            </Field>
+            <Field label="Superuser">
+              {editing===u.id ? (
+                <label style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'12px',cursor:'pointer'}}>
+                  <input type="checkbox" checked={pendingSuperuser} onChange={e=>setPendingSuperuser(e.target.checked)}/>
+                  <span>{pendingSuperuser ? 'Yes' : 'No'}</span>
+                </label>
+              ) : (
+                <span style={{color:u.is_superuser?'#c04040':'#8aa0c0',fontWeight:'700'}}>{u.is_superuser ? 'YES' : 'No'}</span>
               )}
             </Field>
             <Field label="Scans"><span style={{fontWeight:'700',color:'#1a2a4a'}}>{u.scan_count}</span></Field>

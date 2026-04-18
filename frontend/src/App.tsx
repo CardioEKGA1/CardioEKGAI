@@ -121,7 +121,7 @@ const App: React.FC = () => {
       {screen==='landing' && (isSoulMD
         ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')}/>
         : <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={()=>navigate('terms')}/>)}
-      {screen==='dashboard' && user && <SuiteDashboard user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'}/>}
+      {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'}/>}
       {screen==='auth' && <Login API={API} onBack={goBack}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}

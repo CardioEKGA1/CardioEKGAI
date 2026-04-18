@@ -29,6 +29,7 @@ class User(Base):
     note_style_preference = Column(String, default="standard")
     created_at = Column(DateTime, default=datetime.utcnow)
     stripe_customer_id = Column(String, nullable=True, index=True)
+    is_superuser = Column(Boolean, default=False)
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -64,6 +65,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users(stripe_customer_id)"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE"))
 
 try:
     with engine.begin() as conn:
