@@ -90,8 +90,8 @@ const App: React.FC = () => {
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
       {screen==='landing' && <Landing onSignIn={()=>navigate('login')} onSignUp={()=>navigate('signup')} onTerms={()=>navigate('terms')}/>}
-      {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={false}/>}
-      {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={true}/>}
+      {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={false} onForgotPassword={()=>navigate('reset')}/>}
+      {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={true} onForgotPassword={()=>navigate('reset')}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('signup')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}

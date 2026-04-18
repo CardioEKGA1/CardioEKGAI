@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 
-interface Props { API: string; onAuth: (data: any) => void; onBack: () => void; isSignup: boolean; }
+interface Props { API: string; onAuth: (data: any) => void; onBack: () => void; isSignup: boolean; onForgotPassword?: () => void; }
 
-const Login: React.FC<Props> = ({ API, onAuth, onBack, isSignup }) => {
+const Login: React.FC<Props> = ({ API, onAuth, onBack, isSignup, onForgotPassword }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -73,7 +73,7 @@ const Login: React.FC<Props> = ({ API, onAuth, onBack, isSignup }) => {
         <button onClick={submit} disabled={loading} style={{width:'100%',background:'linear-gradient(135deg,#7ab0f0,#9b8fe8)',border:'none',borderRadius:'14px',padding:'14px',fontSize:'15px',fontWeight:'700',color:'white',cursor:'pointer',marginBottom:'16px'}}>
           {loading ? 'Please wait...' : isSignup ? 'Create Account' : 'Sign In'}
         </button>
-        <div style={{textAlign:'right',marginBottom:'16px'}}><span onClick={()=>window.location.href='/#/reset'} style={{fontSize:'12px',color:'#4a7ad0',cursor:'pointer'}}>Forgot password?</span></div>
+        <div style={{textAlign:'right',marginBottom:'16px'}}><span onClick={()=>window.sendToReset && window.sendToReset()} style={{fontSize:'12px',color:'#4a7ad0',cursor:'pointer'}}>Forgot password?</span></div>
         <div style={{textAlign:'center',fontSize:'13px',color:'#8aa0c0'}}>
           {isSignup ? 'Already have an account? ' : "Don't have an account? "}
           <span onClick={onBack} style={{color:'#4a7ad0',cursor:'pointer',fontWeight:'600'}}>
