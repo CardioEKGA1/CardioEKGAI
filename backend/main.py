@@ -88,7 +88,7 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     return {"access_token": auth_token, "scan_count": user.scan_count, "is_subscribed": user.is_subscribed, "email": user.email}
 
 @app.post("/auth/login")
-@limiter.limit("10/minute")
+@limiter.limit("2/minute")
 def login(request: Request, data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not verify_password(data.password[:72], user.hashed_password):
@@ -105,7 +105,7 @@ def me(current_user: User = Depends(get_current_user)):
     return {"email": current_user.email, "scan_count": current_user.scan_count, "is_subscribed": current_user.is_subscribed}
 
 @app.post("/analyze")
-@limiter.limit("10/minute")
+@limiter.limit("2/minute")
 async def analyze_ekg(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Please sign in to analyze EKGs")
