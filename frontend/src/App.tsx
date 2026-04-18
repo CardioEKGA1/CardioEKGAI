@@ -6,6 +6,7 @@ import Results from './screens/Results';
 import Chat from './screens/Chat';
 import Paywall from './screens/Paywall';
 import Terms from './screens/Terms';
+import ResetPassword from './screens/ResetPassword';
 
 export interface EkgResult {
   rhythm: string;
@@ -26,7 +27,7 @@ export interface User {
   is_subscribed: boolean;
 }
 
-type Screen = 'landing' | 'login' | 'signup' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms';
+type Screen = 'landing' | 'login' | 'signup' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms' | 'reset';
 
 const API = 'https://ekgscan.com';
 
@@ -96,6 +97,7 @@ const App: React.FC = () => {
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
       {screen==='paywall' && <Paywall onBack={goBack}/>}
       {screen==='terms' && <Terms onBack={goBack}/>}
+      {screen==='reset' && <ResetPassword API={API} onBack={goBack} onDone={()=>navigate('login')}/>}
     </div>
   );
 };

@@ -211,6 +211,58 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     db.commit()
     return {"status": "ok"}
 
+
+class PasswordReset(BaseModel):
+    email: str
+
+class NewPassword(BaseModel):
+    token: str
+    password: str
+
+@app.post("/auth/forgot-password")
+@limiter.limit("3/minute")
+def forgot_password(request: Request, data: PasswordReset, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+    if user:
+        token = secrets.token_urlsafe(32)
+        user.verification_token = token
+        db.commit()
+        reset_url = f"https://ekgscan.com/reset?token={token}"
+        from email_utils import send_verification_email
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
+        import os
+        sg = sendgrid.SendGridAPIClient(api_key=os.getenv("SENDGRID_API_KEY"))
+        message = Mail(
+            from_email=os.getenv("FROM_EMAIL", "chachodesertspaces@gmail.com"),
+            to_emails=data.email,
+            subject="Reset your EKGScan password",
+            html_content=f"""
+            <div style="font-family:-apple-system,sans-serif;max-width:500px;margin:0 auto;padding:40px 20px">
+              <h1 style="font-size:24px;font-weight:800;color:#1a2a4a">EKGScan</h1>
+              <h2 style="font-size:20px;color:#1a2a4a">Reset your password</h2>
+              <p style="color:#8aa0c0;line-height:1.6">Click the button below to reset your password. This link expires in 1 hour.</p>
+              <a href="{reset_url}" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px 24px;font-size:15px;font-weight:700;text-align:center;margin:24px 0">Reset Password</a>
+              <p style="font-size:12px;color:#a0b0c8">If you did not request this, ignore this email.</p>
+            </div>
+            """
+        )
+        try:
+            sg.send(message)
+        except Exception as e:
+            print(f"Email error: {e}")
+    return {"message": "If that email exists, a reset link has been sent."}
+
+@app.post("/auth/reset-password")
+def reset_password(data: NewPassword, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.verification_token == data.token).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    user.hashed_password = hash_password(data.password[:72])
+    user.verification_token = None
+    db.commit()
+    return {"message": "Password reset successful. Please sign in."}
+
 _build = os.path.join(os.path.dirname(__file__), "build")
 if os.path.exists(_build):
     app.mount("/static", StaticFiles(directory=os.path.join(_build, "static")), name="static")
