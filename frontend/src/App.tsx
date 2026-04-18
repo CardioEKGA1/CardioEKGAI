@@ -6,7 +6,6 @@ import Results from './screens/Results';
 import Chat from './screens/Chat';
 import Paywall from './screens/Paywall';
 import Terms from './screens/Terms';
-import ResetPassword from './screens/ResetPassword';
 
 export interface EkgResult {
   rhythm: string;
@@ -27,7 +26,7 @@ export interface User {
   is_subscribed: boolean;
 }
 
-type Screen = 'landing' | 'login' | 'signup' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms' | 'reset';
+type Screen = 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms';
 
 const API = 'https://ekgscan.com';
 
@@ -38,6 +37,7 @@ const App: React.FC = () => {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string>(localStorage.getItem('token') || '');
+  const [initialMagicToken] = useState<string | null>(() => new URLSearchParams(window.location.search).get('token'));
 
   const navigate = (s: Screen) => {
     setHistory(h => [...h, s]);
@@ -64,7 +64,25 @@ const App: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePop);
   }, [history]);
 
+  const handleAuth = (data: any) => {
+    localStorage.setItem('token', data.access_token);
+    setToken(data.access_token);
+    setUser({ email: data.email || '', scan_count: data.scan_count, is_subscribed: data.is_subscribed });
+    navigate('upload');
+  };
+
   useEffect(() => {
+    if (initialMagicToken) {
+      fetch(`${API}/auth/verify-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: initialMagicToken })
+      })
+        .then(r => r.json())
+        .then(data => { if (data.access_token) handleAuth(data); })
+        .catch(() => {});
+      return;
+    }
     if (token) {
       fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
@@ -72,13 +90,6 @@ const App: React.FC = () => {
         .catch(() => { localStorage.removeItem('token'); setToken(''); });
     }
   }, []);
-
-  const handleAuth = (data: any) => {
-    localStorage.setItem('token', data.access_token);
-    setToken(data.access_token);
-    setUser({ email: data.email || '', scan_count: data.scan_count, is_subscribed: data.is_subscribed });
-    navigate('upload');
-  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -89,15 +100,13 @@ const App: React.FC = () => {
 
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
-      {screen==='landing' && <Landing onSignIn={()=>navigate('login')} onSignUp={()=>navigate('signup')} onTerms={()=>navigate('terms')}/>}
-      {screen==='login' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={false} onForgotPassword={()=>navigate('reset')}/>}
-      {screen==='signup' && <Login API={API} onAuth={handleAuth} onBack={goBack} isSignup={true} onForgotPassword={()=>navigate('reset')}/>}
-      {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('signup')}/>}
+      {screen==='landing' && <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={()=>navigate('terms')}/>}
+      {screen==='auth' && <Login API={API} onBack={goBack}/>}
+      {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
       {screen==='paywall' && <Paywall onBack={goBack}/>}
       {screen==='terms' && <Terms onBack={goBack}/>}
-      {screen==='reset' && <ResetPassword API={API} onBack={goBack} onDone={()=>navigate('login')}/>}
     </div>
   );
 };

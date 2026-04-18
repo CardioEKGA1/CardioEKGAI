@@ -21,6 +21,10 @@ def create_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+def create_magic_token(email: str):
+    expire = datetime.utcnow() + timedelta(minutes=15)
+    return jwt.encode({"sub": email, "purpose": "magic", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+
 def decode_token(token: str):
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
