@@ -28,6 +28,7 @@ CATALOG = [
     ("infectid",     "InfectID",         "IDSA-based antibiotic recommendations",                     499, 4444),
     ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                 2999, 22200),
     ("cerebralai",   "CerebralAI",       "Brain and spine MRI and CT interpretation",                 499, 4444),
+    ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings", 999, 8888),
     ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",                8888, 88800),
 ]
 

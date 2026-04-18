@@ -14,7 +14,7 @@ interface Props {
   checkoutResult: string | null;
 }
 
-const OPEN_TOOLS = new Set(['nephroai', 'rxcheck', 'infectid', 'clinicalnote', 'xrayread', 'cerebralai']);
+const OPEN_TOOLS = new Set(['nephroai', 'rxcheck', 'infectid', 'clinicalnote', 'xrayread', 'cerebralai', 'palliativemd']);
 
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; }
 
@@ -26,6 +26,7 @@ const TOOLS: Tool[] = [
   { slug: 'infectid',     name: 'InfectID',        icon: '🦠',              desc: 'IDSA-based antibiotic recommendations',                monthly: 4.99,  yearly: 44.44 },
   { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝',              desc: 'SOAP notes from bullet points in seconds',             monthly: 29.99, yearly: 222.00 },
   { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠',              desc: 'Brain and spine MRI and CT interpretation',            monthly: 4.99,  yearly: 44.44 },
+  { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶',              desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', monthly: 9.99, yearly: 88.88 },
 ];
 
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
@@ -181,7 +182,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       {!loading && !isSuper && (
         <div style={{...CARD, marginTop:'20px', padding:'24px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'2px solid rgba(122,176,240,0.35)', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
-          <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 7 tools</div>
+          <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 8 tools</div>
           <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>$35 / month AI budget · one login · cancel anytime</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
             <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>

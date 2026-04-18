@@ -15,6 +15,7 @@ const TOOLS: LandingTool[] = [
   { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                     price: '$4.99 / mo · $44.44 / yr' },
   { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes from bullet points in seconds',                  price: '$29.99 / mo · $222 / yr' },
   { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                 price: '$4.99 / mo · $44.44 / yr' },
+  { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶', desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', price: '$9.99 / mo · $88.88 / yr' },
 ];
 
 const ADVANTAGES = [
@@ -22,7 +23,7 @@ const ADVANTAGES = [
   { title: 'Built for clinicians',             body: 'Structured outputs designed for clinical workflows — not chatbot transcripts.' },
   { title: 'Powered by the most advanced AI',  body: 'Runs on Claude by Anthropic, the frontier model for nuanced clinical reasoning.' },
   { title: 'Structured input, better output',  body: 'Guided forms ensure the AI sees the right clinical context every time.' },
-  { title: 'One platform, seven tools',        body: 'One login covers every specialty — cardiology, nephrology, radiology and more.' },
+  { title: 'One platform, eight tools',        body: 'One login covers every specialty — cardiology, nephrology, radiology, palliative care and more.' },
   { title: 'Always improving',                 body: 'Continuously updated with the latest clinical guidelines and best practices.' },
   { title: 'Decision support, not replacement',body: 'AI-powered second opinion available 24/7 — to support your judgment, not replace it.' },
 ];
@@ -62,7 +63,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
         Specialist-grade AI<br/>
         <span style={GRAD_TEXT}>for every decision</span>
       </h1>
-      <p style={{fontSize:'16px', color:'#6a8ab0', lineHeight:'1.7', maxWidth:'560px', marginBottom:'28px'}}>Seven clinical tools, one login. Structured outputs, built for clinicians — powered by Claude.</p>
+      <p style={{fontSize:'16px', color:'#6a8ab0', lineHeight:'1.7', maxWidth:'560px', marginBottom:'28px'}}>Eight clinical tools, one login. Structured outputs, built for clinicians — powered by Claude.</p>
       <div style={{display:'flex', gap:'12px', flexWrap:'wrap', justifyContent:'center', marginBottom:'10px'}}>
         <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'700', color:'white', cursor:'pointer'}}>Sign Up Free</button>
         <button onClick={onSignIn} style={{background:'rgba(255,255,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
@@ -71,7 +72,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
 
     <section style={{padding:'40px 20px', maxWidth:'1100px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
       <div style={{textAlign:'center', marginBottom:'28px'}}>
-        <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px'}}>Seven clinical tools</div>
+        <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px'}}>Eight clinical tools</div>
         <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>Specialist-grade AI for every decision</div>
       </div>
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'14px'}}>
@@ -109,7 +110,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
         <PriceCard title="Any single tool"       subtitle="Pick one — cardiology, neph, ICU…" monthly="$4.99" yearly="$44.44" cta="Start single tool" onCta={onSignUp}/>
         <PriceCard title="ClinicalNote AI"       subtitle="High-volume documentation"         monthly="$29.99" yearly="$222" cta="Start ClinicalNote AI" onCta={onSignUp}/>
-        <PriceCard title="SoulMD Suite"          subtitle="All 7 tools · one login"           monthly="$88.88" yearly="$888" cta="Start Suite" onCta={onSignUp} highlighted/>
+        <PriceCard title="SoulMD Suite"          subtitle="All 8 tools · one login"           monthly="$88.88" yearly="$888" cta="Start Suite" onCta={onSignUp} highlighted/>
       </div>
       <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>All plans: Stripe billing · cancel anytime · yearly = ~2 months free.</div>
     </section>

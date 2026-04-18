@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db, User, ToolUsage, Subscription
 from auth import create_token, create_magic_token, decode_token
-from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
+from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
 from email_utils import send_verification_email
 from pydantic import BaseModel
 from datetime import datetime
@@ -71,7 +71,7 @@ class CheckoutRequest(BaseModel):
     tool_slug: str
     tier: str
 
-TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "suite"}
+TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd", "suite"}
 
 def get_price_id(tool_slug: str, tier: str) -> str:
     key = f"STRIPE_PRICE_{tool_slug.upper()}_{tier.upper()}"
@@ -101,7 +101,7 @@ def has_tool_access(user: User, tool_slug: str, db: Session) -> bool:
             return True
     return False
 
-BUDGET_HIERARCHY = [("suite", 35.0), ("clinicalnote", 8.0), ("nephroai", 5.0)]
+BUDGET_HIERARCHY = [("suite", 35.0), ("clinicalnote", 8.0), ("nephroai", 5.0), ("palliativemd", 5.0)]
 _OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
 
 def monthly_budget(user: User, db: Session) -> float:
@@ -517,6 +517,18 @@ class ClinicalNoteRequest(BaseModel):
     style: str
     bullets: str
 
+class PalliativeRequest(BaseModel):
+    conversation_type: str
+    text: str
+    patient_age: str | None = None
+    diagnosis: str | None = None
+    prognosis: str | None = None
+    functional_status: str | None = None
+    family_context: str | None = None
+    known_wishes: str | None = None
+    conversation_goal: str | None = None
+    cultural_context: str | None = None
+
 @app.post("/tools/nephroai/analyze")
 @limiter.limit("10/minute")
 def nephroai_analyze(request: Request, data: NephroRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -625,12 +637,41 @@ async def cerebralai_analyze(request: Request, file: UploadFile = File(...), cur
     log_usage(current_user.id, "cerebralai", COST_PER_SCAN, db)
     return result
 
+PALLIATIVE_CONVERSATION_TYPES = {"goals_of_care", "prognosis", "code_status", "hospice", "family_meeting", "withdrawing_treatment", "pediatric"}
+
+@app.post("/tools/palliativemd/analyze")
+@limiter.limit("10/minute")
+def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "palliativemd", db, COST_PER_SCAN)
+    ct = (data.conversation_type or "").lower().replace("-", "_").replace(" ", "_")
+    if ct not in PALLIATIVE_CONVERSATION_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown conversation_type. Valid: {sorted(PALLIATIVE_CONVERSATION_TYPES)}")
+    if not (data.text and data.text.strip()):
+        raise HTTPException(status_code=400, detail="Case description is required.")
+    parts = [f"Conversation type: {ct.replace('_', ' ')}"]
+    for label, val in (("Patient age", data.patient_age), ("Diagnosis", data.diagnosis),
+                       ("Prognosis", data.prognosis), ("Functional status", data.functional_status),
+                       ("Family / surrogate", data.family_context), ("Known patient wishes", data.known_wishes),
+                       ("Conversation goal", data.conversation_goal), ("Cultural context", data.cultural_context)):
+        if val and val.strip():
+            parts.append(f"{label}: {val.strip()}")
+    parts.append("")
+    parts.append("Case description from clinician:")
+    parts.append(data.text.strip())
+    try:
+        result = call_claude_json_text(PALLIATIVE_PROMPT, "\n".join(parts), max_tokens=3500)
+    except Exception as e:
+        print(f"palliativemd error: {e}")
+        raise HTTPException(status_code=502, detail="AI guidance failed. Please retry.")
+    log_usage(current_user.id, f"palliativemd:{ct}", COST_PER_SCAN, db)
+    return result
+
 @app.get("/tools/access")
 def tools_access(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Returns the user's tool entitlements + remaining monthly budget."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai"]
+    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd"]
     access = {t: has_tool_access(current_user, t, db) for t in tools}
     budget = monthly_budget(current_user, db)
     spent = current_month_spend(current_user.id, db)
