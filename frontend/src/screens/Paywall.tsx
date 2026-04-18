@@ -2,8 +2,8 @@ import React from 'react';
 
 interface Props { onBack: () => void; }
 
-const MONTHLY_LINK = 'https://buy.stripe.com/test_aFa14fai12RHdDx1RMcV201';
-const YEARLY_LINK = 'https://buy.stripe.com/test_00w8wHdud0Jz7f97c6cV200';
+const MONTHLY_LINK = 'https://buy.stripe.com/bJeaEP27xcXY1xd1BFafS01';
+const YEARLY_LINK = 'https://buy.stripe.com/00w3cn13t1fg6Rx0xBafS00';
 
 const Paywall: React.FC<Props> = ({ onBack }) => (
   <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
