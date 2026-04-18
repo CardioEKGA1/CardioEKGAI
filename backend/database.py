@@ -1,10 +1,9 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ekgscan.db")
-
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -21,6 +20,9 @@ class User(Base):
     is_subscribed = Column(Boolean, default=False)
     is_verified = Column(Boolean, default=False)
     verification_token = Column(String, nullable=True)
+    subscription_tier = Column(String, default="free")
+    monthly_spend = Column(Float, default=0.0)
+    spend_reset_month = Column(Integer, default=0)
 
 Base.metadata.create_all(bind=engine)
 

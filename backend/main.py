@@ -17,9 +17,13 @@ import json
 import re
 import secrets
 import stripe
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
+
+COST_PER_SCAN = 0.05
+MONTHLY_LIMIT = {"free": 0, "monthly": 10.0, "yearly": 10.0}
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="EKGScan")
@@ -44,6 +48,20 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+
+def check_and_update_spend(user, db):
+    current_month = __import__("datetime").datetime.now().month
+    if user.spend_reset_month != current_month:
+        user.monthly_spend = 0.0
+        user.spend_reset_month = current_month
+        db.commit()
+    limit = MONTHLY_LIMIT.get(user.subscription_tier or "free", 0)
+    if user.monthly_spend + COST_PER_SCAN > limit:
+        return False
+    user.monthly_spend += COST_PER_SCAN
+    db.commit()
+    return True
 
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -116,6 +134,10 @@ async def analyze_ekg(request: Request, file: UploadFile = File(...), current_us
         raise HTTPException(status_code=401, detail="Please sign in to analyze EKGs")
     if not current_user.is_subscribed and current_user.scan_count >= 1:
         raise HTTPException(status_code=402, detail="Free scan used. Please upgrade to continue.")
+    if current_user.is_subscribed:
+        allowed = check_and_update_spend(current_user, db)
+        if not allowed:
+            raise HTTPException(status_code=429, detail="Monthly AI usage limit reached. Resets on the 1st of next month.")
     if file.content_type not in ["image/jpeg", "image/png", "image/jpg", "application/pdf"]:
         raise HTTPException(status_code=400, detail="Only JPEG, PNG and PDF files are allowed")
     contents = await file.read()
