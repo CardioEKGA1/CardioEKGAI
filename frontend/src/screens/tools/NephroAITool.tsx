@@ -25,7 +25,7 @@ const TABS: {id: TabId; name: string; fields: Field[]}[] = [
     {key:'units', label:'Units', placeholder:'mEq/L, mg/dL, etc.'},
     {key:'clinical_context', label:'Clinical context', multiline:true},
   ]},
-  { id:'acid_base', name:'Acid–Base', fields:[
+  { id:'acid_base', name:'Acid-Base', fields:[
     {key:'ph', label:'pH', type:'number'},
     {key:'paco2', label:'PaCO₂', type:'number'},
     {key:'pao2', label:'PaO₂', type:'number'},
@@ -96,7 +96,7 @@ const NephroAITool: React.FC<Props> = ({ API, token, onBack }) => {
   const update = (k: string, v: string) => setInputs(i => ({ ...i, [k]: v }));
 
   return (
-    <ToolShell name="NephroAI" badge="10 conditions" subtitle="Comprehensive AI nephrology across 10 clinical conditions." onBack={onBack}>
+    <ToolShell name="NephroAI" subtitle="Comprehensive nephrology decision support." onBack={onBack}>
       <div style={{display:'flex', gap:'6px', marginBottom:'16px', flexWrap:'wrap'}}>
         {TABS.map(t => (
           <button key={t.id} onClick={()=>switchTab(t.id)} style={{background: tab===t.id ? WORDMARK : 'rgba(255,255,255,0.75)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'6px 12px', fontSize:'12px', fontWeight:'700', color: tab===t.id ? 'white' : '#4a7ad0', cursor:'pointer'}}>{t.name}</button>

@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useEffect, useState, useCallback } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import NephroIcon from './tools/NephroIcon';
 import { User } from '../App';
 
 interface Props {
@@ -15,14 +16,16 @@ interface Props {
 
 const TEXT_TOOLS = new Set(['nephroai', 'rxcheck', 'infectid', 'clinicalnote']);
 
-const TOOLS = [
-  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                      monthly: 4.99,  yearly: 44.44 },
-  { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘', desc: 'Comprehensive AI nephrology — 10 conditions, one platform', monthly: 9.99,  yearly: 88.88 },
-  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',          monthly: 4.99,  yearly: 44.44 },
-  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                  monthly: 4.99,  yearly: 44.44 },
-  { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                     monthly: 4.99,  yearly: 44.44 },
-  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes from bullet points in seconds',                  monthly: 29.99, yearly: 222.00 },
-  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                 monthly: 4.99,  yearly: 44.44 },
+interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; }
+
+const TOOLS: Tool[] = [
+  { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀',              desc: '12-lead EKG interpretation in seconds',                 monthly: 4.99,  yearly: 44.44 },
+  { slug: 'nephroai',     name: 'NephroAI',        icon: <NephroIcon/>,     desc: 'Comprehensive nephrology decision support',             monthly: 9.99,  yearly: 88.88 },
+  { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻',              desc: 'Structured radiology report from any X-ray image',     monthly: 4.99,  yearly: 44.44 },
+  { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊',              desc: 'Full medication interaction safety check',             monthly: 4.99,  yearly: 44.44 },
+  { slug: 'infectid',     name: 'InfectID',        icon: '🦠',              desc: 'IDSA-based antibiotic recommendations',                monthly: 4.99,  yearly: 44.44 },
+  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝',              desc: 'SOAP notes from bullet points in seconds',             monthly: 29.99, yearly: 222.00 },
+  { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠',              desc: 'Brain and spine MRI and CT interpretation',            monthly: 4.99,  yearly: 44.44 },
 ];
 
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
@@ -152,7 +155,6 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
                 <div style={{fontSize:'32px', filter: active ? 'none' : 'grayscale(0.5)'}}>{t.icon}</div>
                 <div style={{display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap'}}>
                   <div style={{fontSize:'16px', fontWeight:'800', color:'#1a2a4a'}}>{t.name}</div>
-                  {t.slug === 'nephroai' && <span style={{fontSize:'10px', fontWeight:'700', background:WORDMARK, color:'white', borderRadius:'8px', padding:'2px 8px'}}>10 conditions</span>}
                   {!active && <span style={{fontSize:'10px', color:'#8aa0c0'}}>🔒</span>}
                 </div>
                 <div style={{fontSize:'13px', color:'#6a8ab0', lineHeight:'1.55', flex:1}}>{t.desc}</div>
