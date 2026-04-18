@@ -74,7 +74,14 @@ def register(request: Request, data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     send_verification_email(data.email, token)
-    return {"message": "Account created! Please check your email to verify your account.", "email": data.email}
+    auth_token = create_token({"sub": user.email})
+    return {
+        "access_token": auth_token,
+        "scan_count": user.scan_count,
+        "is_subscribed": user.is_subscribed,
+        "email": user.email,
+        "message": "Account created! Check your email to verify your account."
+    }
 
 @app.get("/auth/verify")
 def verify_email(token: str, db: Session = Depends(get_db)):
@@ -88,13 +95,11 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     return {"access_token": auth_token, "scan_count": user.scan_count, "is_subscribed": user.is_subscribed, "email": user.email}
 
 @app.post("/auth/login")
-@limiter.limit("2/minute")
+@limiter.limit("10/minute")
 def login(request: Request, data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not verify_password(data.password[:72], user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if not user.is_verified:
-        raise HTTPException(status_code=403, detail="Please verify your email before signing in.")
     token = create_token({"sub": user.email})
     return {"access_token": token, "scan_count": user.scan_count, "is_subscribed": user.is_subscribed}
 
