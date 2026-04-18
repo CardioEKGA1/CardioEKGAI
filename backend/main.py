@@ -2,6 +2,9 @@ from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header, R
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
 from database import get_db, User
@@ -18,7 +21,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="EKGScan")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -52,7 +59,8 @@ def health():
     return {"status": "ok"}
 
 @app.post("/auth/register")
-def register(data: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, data: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     token = secrets.token_urlsafe(32)
@@ -80,7 +88,8 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     return {"access_token": auth_token, "scan_count": user.scan_count, "is_subscribed": user.is_subscribed, "email": user.email}
 
 @app.post("/auth/login")
-def login(data: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not verify_password(data.password[:72], user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -96,7 +105,8 @@ def me(current_user: User = Depends(get_current_user)):
     return {"email": current_user.email, "scan_count": current_user.scan_count, "is_subscribed": current_user.is_subscribed}
 
 @app.post("/analyze")
-async def analyze_ekg(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def analyze_ekg(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Please sign in to analyze EKGs")
     if not current_user.is_subscribed and current_user.scan_count >= 1:
@@ -126,7 +136,8 @@ async def analyze_ekg(file: UploadFile = File(...), current_user: User = Depends
     return result
 
 @app.post("/chat")
-async def chat(data: dict, current_user: User = Depends(get_current_user)):
+@limiter.limit("20/minute")
+async def chat(request: Request, data: dict, current_user: User = Depends(get_current_user)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Please sign in")
     messages = data.get("messages", [])
