@@ -269,9 +269,35 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=400, detail="Account not found")
-    if not user.is_verified:
+    first_login = not user.is_verified
+    if first_login:
         user.is_verified = True
         db.commit()
+        host = (request.headers.get("origin") or request.headers.get("referer") or "").lower()
+        is_soulmd = "soulmd.us" in host
+        try:
+            if is_soulmd:
+                send_email(user.email, "Welcome to SoulMD — here is your free EKGScan",
+                    """<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:40px">
+                    <h1 style="color:#1a2a4a;margin-bottom:4px">SoulMD</h1>
+                    <div style="font-size:13px;color:#6a8ab0;font-style:italic;margin-bottom:24px">Where Science Meets Soul</div>
+                    <h2 style="color:#1a2a4a">Welcome aboard</h2>
+                    <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
+                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock any single tool ($4.99/mo — NephroAI $9.99, ClinicalNote AI $29.99) or go all-in with the Suite ($88.88/mo, $888/yr).</p>
+                    <a href="https://soulmd.us/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Open SoulMD Dashboard</a>
+                    <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI output must be independently reviewed by a licensed clinician. In emergencies, call 911.</p>
+                    </div>""")
+            else:
+                send_email(user.email, "Welcome to EKGScan — your free scan is ready",
+                    """<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:40px">
+                    <h1 style="color:#1a2a4a;margin-bottom:24px">EKGScan</h1>
+                    <h2 style="color:#1a2a4a">Welcome</h2>
+                    <p style="color:#4a5e6a;line-height:1.7">Your account is ready. Your first 12-lead EKG interpretation is free — upload any image and get a structured report in seconds.</p>
+                    <a href="https://ekgscan.com/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Analyze an EKG</a>
+                    <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI interpretation must be reviewed by a qualified clinician. In emergencies, call 911.</p>
+                    </div>""")
+        except Exception as e:
+            print(f"Welcome email error: {e}")
     access_token = create_token({"sub": user.email})
     return {
         "access_token": access_token,
