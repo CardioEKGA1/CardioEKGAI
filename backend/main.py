@@ -1193,6 +1193,24 @@ def admin_charts(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
         "tool_usage_by_tool": tool_usage_by_tool,
     }
 
+class AdminMintToken(BaseModel):
+    email: str
+
+@app.post("/admin/mint-token")
+def admin_mint_token(data: AdminMintToken, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    email = (data.email or "").strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    token = create_token({"sub": user.email})
+    return {
+        "access_token": token,
+        "user_id": user.id,
+        "email": user.email,
+        "is_superuser": bool(user.is_superuser),
+        "note": "Admin-minted token — full 30-day lifetime, same as a normal login.",
+    }
+
 @app.get("/admin/billing/validate")
 def admin_billing_validate(_: bool = Depends(verify_admin)):
     expected = [
