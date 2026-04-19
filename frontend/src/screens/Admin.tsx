@@ -257,6 +257,30 @@ const Field: React.FC<{label: string; children: React.ReactNode}> = ({label, chi
   </div>
 );
 
+const FeedbackChart: React.FC<{rows: {tool: string; up: number; down: number; ratio: number; total: number}[]}> = ({rows}) => {
+  if (!rows.length) return <div style={{textAlign:'center', color:'#8aa0c0', fontSize:'13px', padding:'20px'}}>No feedback submitted yet.</div>;
+  const max = Math.max(...rows.map(r => r.total), 1);
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
+      {rows.map((r) => (
+        <div key={r.tool} style={{display:'grid', gridTemplateColumns:'110px 1fr 90px', gap:'10px', alignItems:'center'}}>
+          <div style={{fontSize:'12px', color:'#1a2a4a', fontWeight:'700', textTransform:'capitalize', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{r.tool}</div>
+          <div style={{position:'relative', height:'16px', background:'rgba(122,176,240,0.08)', borderRadius:'8px', overflow:'hidden', display:'flex'}}>
+            <div title={`👍 ${r.up}`} style={{width: `${(r.up / max) * 100}%`, background:'linear-gradient(90deg,#88c8a8,#70b870)', transition:'width 0.3s'}}/>
+            <div title={`👎 ${r.down}`} style={{width: `${(r.down / max) * 100}%`, background:'linear-gradient(90deg,#e89898,#c04040)', transition:'width 0.3s'}}/>
+          </div>
+          <div style={{textAlign:'right', fontSize:'11px', fontWeight:'700'}}>
+            <span style={{color:'#70b870'}}>{r.up}</span>
+            <span style={{color:'#8aa0c0', margin:'0 3px'}}>·</span>
+            <span style={{color:'#c04040'}}>{r.down}</span>
+            <span style={{marginLeft:'6px', color:'#4a7ad0'}}>{r.ratio}%</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const BarChart: React.FC<{rows: {label: string; value: number}[]; height?: number; valueSuffix?: string}> = ({rows, height = 140, valueSuffix = ''}) => {
   if (!rows.length) return <div style={{textAlign:'center', color:'#8aa0c0', fontSize:'13px', padding:'20px'}}>No data yet.</div>;
   const max = Math.max(...rows.map(r => r.value), 1);
@@ -390,17 +414,8 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
       </div>
 
       <div style={CARD}>
-        <div style={LABEL}>Feedback per tool</div>
-        {(data.feedback_summary || []).length === 0 ? (
-          <div style={{fontSize:'13px',color:'#8aa0c0'}}>No feedback submitted yet.</div>
-        ) : (data.feedback_summary || []).map((f:any) => (
-          <div key={f.tool} style={{display:'grid',gridTemplateColumns:'1fr auto auto auto',gap:'12px',alignItems:'center',padding:'8px 0',borderBottom:'0.5px solid rgba(0,0,0,0.06)',fontSize:'13px'}}>
-            <span style={{color:'#1a2a4a',textTransform:'capitalize'}}>{f.tool}</span>
-            <span style={{color:'#70b870',fontWeight:'600'}}>👍 {f.up}</span>
-            <span style={{color:'#c04040',fontWeight:'600'}}>👎 {f.down}</span>
-            <span style={{color:'#4a7ad0',fontWeight:'700', minWidth:'50px', textAlign:'right'}}>{f.ratio}%</span>
-          </div>
-        ))}
+        <div style={LABEL}>Feedback per tool · 👍 vs 👎</div>
+        <FeedbackChart rows={data.feedback_summary || []}/>
       </div>
 
       <div style={CARD}>
