@@ -1,8 +1,9 @@
 // © 2026 SoulMD. All rights reserved.
 import React from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import NephroIcon from './tools/NephroIcon';
 
-const NephroCardIcon = () => <img src="/icons/nephroai.svg" width="32" height="32" alt="NephroAI" style={{display:'block'}}/>;
+const NephroCardIcon = () => <NephroIcon size={32}/>;
 
 interface Props { onSignIn: () => void; onSignUp: () => void; }
 

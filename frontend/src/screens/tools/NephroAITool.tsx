@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { ToolShell, ToolResult, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL, WORDMARK } from './shared';
 import DictationButton from '../../DictationButton';
+import NephroIcon from './NephroIcon';
 
 interface Props { API: string; token: string; onBack: () => void; }
 type TabId = 'aki' | 'ckd' | 'electrolytes' | 'acid_base' | 'glomerulonephritis' | 'nephrotic' | 'hypertension' | 'dialysis' | 'transplant' | 'stones';
@@ -97,7 +98,7 @@ const NephroAITool: React.FC<Props> = ({ API, token, onBack }) => {
   const update = (k: string, v: string) => setInputs(i => ({ ...i, [k]: v }));
 
   return (
-    <ToolShell name="NephroAI" icon={<img src="/icons/nephroai.svg" width="22" height="22" alt="" style={{display:'block'}}/>} subtitle="Comprehensive nephrology decision support." onBack={onBack}>
+    <ToolShell name="NephroAI" icon={<NephroIcon size={22}/>} subtitle="Comprehensive nephrology decision support." onBack={onBack}>
       <div style={{display:'flex', gap:'6px', marginBottom:'16px', flexWrap:'wrap'}}>
         {TABS.map(t => (
           <button key={t.id} onClick={()=>switchTab(t.id)} style={{background: tab===t.id ? WORDMARK : 'rgba(255,255,255,0.75)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'6px 12px', fontSize:'12px', fontWeight:'700', color: tab===t.id ? 'white' : '#4a7ad0', cursor:'pointer'}}>{t.name}</button>
