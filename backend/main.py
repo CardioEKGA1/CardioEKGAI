@@ -148,18 +148,22 @@ def save_case(user_id: int, tool_slug: str, title: str, inputs: dict, result: di
     try:
         db.add(ClinicalCase(user_id=user_id, tool_slug=base, title=t, inputs=inputs, result=result))
         db.commit()
-        keep_rows = db.query(ClinicalCase.id).filter(
+        # Atomic prune matching spec:
+        # DELETE FROM clinical_cases
+        # WHERE user_id=? AND tool_slug=?
+        #   AND id NOT IN (SELECT id FROM clinical_cases
+        #                  WHERE user_id=? AND tool_slug=?
+        #                  ORDER BY created_at DESC LIMIT 3)
+        keep_subq = db.query(ClinicalCase.id).filter(
             ClinicalCase.user_id == user_id,
             ClinicalCase.tool_slug == base,
-        ).order_by(ClinicalCase.created_at.desc()).limit(MAX_CASES_PER_TOOL).all()
-        keep_ids = [r.id for r in keep_rows]
-        if keep_ids:
-            db.query(ClinicalCase).filter(
-                ClinicalCase.user_id == user_id,
-                ClinicalCase.tool_slug == base,
-                ~ClinicalCase.id.in_(keep_ids),
-            ).delete(synchronize_session=False)
-            db.commit()
+        ).order_by(ClinicalCase.created_at.desc()).limit(MAX_CASES_PER_TOOL).subquery()
+        db.query(ClinicalCase).filter(
+            ClinicalCase.user_id == user_id,
+            ClinicalCase.tool_slug == base,
+            ClinicalCase.id.notin_(db.query(keep_subq.c.id)),
+        ).delete(synchronize_session=False)
+        db.commit()
     except Exception as e:
         print(f"save_case error: {e}")
         db.rollback()
