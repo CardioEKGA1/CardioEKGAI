@@ -330,6 +330,10 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
       {charts && (
         <>
           <div style={CARD}>
+            <div style={LABEL}>MRR by month · last 6 months ($)</div>
+            <BarChart rows={(charts.revenue_by_month || []).map((d:any)=>({label: d.month.slice(2), value: Math.round((d.mrr || 0) * 100) / 100}))} height={160} valueSuffix=""/>
+          </div>
+          <div style={CARD}>
             <div style={LABEL}>New signups · last 30 days</div>
             <BarChart rows={(charts.signups_by_day || []).map((d:any)=>({label: d.date.slice(5), value: d.count}))}/>
           </div>
@@ -342,9 +346,22 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
             <BarChart rows={(charts.subs_by_month || []).map((d:any)=>({label: d.month, value: d.count}))}/>
           </div>
           <div style={CARD}>
-            <div style={LABEL}>NephroAI tab usage</div>
+            <div style={LABEL}>Tool usage · last 30 days</div>
+            <BarChart rows={(charts.tool_usage_by_tool || []).map((d:any)=>({label: d.tool, value: d.count}))}/>
+          </div>
+          <div style={CARD}>
+            <div style={LABEL}>NephroAI tab usage · all time</div>
             <BarChart rows={(charts.nephro_breakdown || []).map((d:any)=>({label: d.tab, value: d.count}))}/>
           </div>
+          {charts.cases_stats && (
+            <div style={CARD}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexWrap:'wrap', gap:'8px'}}>
+                <div style={LABEL}>Recent cases saved</div>
+                <div style={{fontSize:'12px', color:'#6a8ab0'}}>Total <span style={{fontWeight:'800', color:'#1a2a4a'}}>{charts.cases_stats.total}</span>{charts.cases_stats.most_active && <> · most active <span style={{color:'#4a7ad0', fontWeight:'700', textTransform:'capitalize'}}>{charts.cases_stats.most_active}</span></>}</div>
+              </div>
+              <BarChart rows={(charts.cases_stats.per_tool || []).map((d:any)=>({label: d.tool, value: d.count}))}/>
+            </div>
+          )}
         </>
       )}
 

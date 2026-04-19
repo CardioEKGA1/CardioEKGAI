@@ -109,6 +109,18 @@ BUDGET_HIERARCHY = [("suite", 50.0), ("clinicalnote", 10.0), ("nephroai", 8.0), 
 _OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
 OVERAGE_PER_CALL = 0.10
 
+PRICE_PER_MONTH = {
+    ("ekgscan",      "monthly"):   9.99, ("ekgscan",      "yearly"): 119.99 / 12,
+    ("xrayread",     "monthly"):   9.99, ("xrayread",     "yearly"): 119.99 / 12,
+    ("rxcheck",      "monthly"):   9.99, ("rxcheck",      "yearly"): 119.99 / 12,
+    ("infectid",     "monthly"):   9.99, ("infectid",     "yearly"): 119.99 / 12,
+    ("cerebralai",   "monthly"):   9.99, ("cerebralai",   "yearly"): 119.99 / 12,
+    ("nephroai",     "monthly"):  24.99, ("nephroai",     "yearly"): 199.00 / 12,
+    ("palliativemd", "monthly"):  24.99, ("palliativemd", "yearly"): 199.00 / 12,
+    ("clinicalnote", "monthly"):  34.99, ("clinicalnote", "yearly"): 349.00 / 12,
+    ("suite",        "monthly"): 149.99, ("suite",        "yearly"): 1199.00 / 12,
+}
+
 def monthly_budget(user: User, db: Session) -> float:
     if user.is_superuser:
         return float("inf")
@@ -1004,17 +1016,6 @@ def admin_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     ai_spend = db.query(func.sum(User.monthly_spend)).scalar() or 0.0
     overage_revenue = db.query(func.sum(User.overage_amount_this_month)).scalar() or 0.0
 
-    PRICE_PER_MONTH = {
-        ("ekgscan",      "monthly"):  9.99, ("ekgscan",      "yearly"): 119.99 / 12,
-        ("xrayread",     "monthly"):  9.99, ("xrayread",     "yearly"): 119.99 / 12,
-        ("rxcheck",      "monthly"):  9.99, ("rxcheck",      "yearly"): 119.99 / 12,
-        ("infectid",     "monthly"):  9.99, ("infectid",     "yearly"): 119.99 / 12,
-        ("cerebralai",   "monthly"):  9.99, ("cerebralai",   "yearly"): 119.99 / 12,
-        ("nephroai",     "monthly"): 24.99, ("nephroai",     "yearly"): 199.00 / 12,
-        ("palliativemd", "monthly"): 24.99, ("palliativemd", "yearly"): 199.00 / 12,
-        ("clinicalnote", "monthly"): 34.99, ("clinicalnote", "yearly"): 349.00 / 12,
-        ("suite",        "monthly"):149.99, ("suite",        "yearly"):1199.00 / 12,
-    }
     subscription_mrr = 0.0
     for sub in db.query(Subscription).filter(Subscription.status == "active").all():
         subscription_mrr += PRICE_PER_MONTH.get((sub.tool_slug, sub.tier), 0.0)
@@ -1133,11 +1134,63 @@ def admin_charts(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
             sub_month_map[ym] = sub_month_map.get(ym, 0) + 1
     subs_by_month = [{"month": k, "count": v} for k, v in sorted(sub_month_map.items())]
 
+    # Revenue (MRR) by month for last 6 months — approximates subs active at each month boundary
+    y, m = now.year, now.month
+    month_keys: list[tuple[int,int]] = []
+    for _ in range(6):
+        month_keys.append((y, m))
+        if m == 1: y, m = y - 1, 12
+        else: m -= 1
+    month_keys.reverse()
+
+    all_subs = db.query(Subscription.created_at, Subscription.tool_slug, Subscription.tier, Subscription.status, Subscription.updated_at).all()
+    revenue_by_month = []
+    for (yy, mm) in month_keys:
+        if mm == 12:
+            boundary = datetime(yy + 1, 1, 1)
+        else:
+            boundary = datetime(yy, mm + 1, 1)
+        mrr = 0.0
+        for created, slug, tier, status, updated in all_subs:
+            if not created or created >= boundary:
+                continue
+            if status == "canceled" and updated and updated < boundary:
+                continue
+            mrr += PRICE_PER_MONTH.get((slug, tier), 0.0)
+        revenue_by_month.append({"month": f"{yy}-{mm:02d}", "mrr": round(mrr, 2)})
+
+    # Cases stats
+    total_cases = db.query(func.count(ClinicalCase.id)).scalar() or 0
+    case_rows = db.query(ClinicalCase.tool_slug, func.count(ClinicalCase.id)).group_by(ClinicalCase.tool_slug).all()
+    cases_per_tool = [{"tool": slug, "count": int(c)} for slug, c in case_rows]
+    cases_per_tool.sort(key=lambda x: x["count"], reverse=True)
+    most_active_by_cases = cases_per_tool[0]["tool"] if cases_per_tool else None
+
+    # Tool usage per tool for last 30 days (bar chart data)
+    tool_usage_rows = db.query(ToolUsage.tool_slug, func.count(ToolUsage.id)).filter(
+        ToolUsage.created_at >= thirty_days_ago
+    ).group_by(ToolUsage.tool_slug).all()
+    tool_usage_breakdown: dict[str, int] = {}
+    for slug, c in tool_usage_rows:
+        base = (slug or "").split(":")[0]
+        tool_usage_breakdown[base] = tool_usage_breakdown.get(base, 0) + int(c)
+    tool_usage_by_tool = sorted(
+        [{"tool": k, "count": v} for k, v in tool_usage_breakdown.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+
     return {
         "signups_by_day": signups_by_day,
         "ai_spend_by_day": ai_spend_by_day,
         "nephro_breakdown": nephro_breakdown,
         "subs_by_month": subs_by_month,
+        "revenue_by_month": revenue_by_month,
+        "cases_stats": {
+            "total": int(total_cases),
+            "per_tool": cases_per_tool,
+            "most_active": most_active_by_cases,
+        },
+        "tool_usage_by_tool": tool_usage_by_tool,
     }
 
 @app.get("/admin/billing/validate")
