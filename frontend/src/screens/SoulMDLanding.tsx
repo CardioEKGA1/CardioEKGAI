@@ -112,7 +112,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
         <PriceCard title="Premium specialty"     subtitle="NephroAI · PalliativeMD"           monthly="$24.99" yearly="$179.99" cta="Start premium tool" onCta={onSignUp}/>
         <PriceCard title="SoulMD Suite"          subtitle="All 8 tools · one login"           monthly="$88.88" yearly="$888"    cta="Start Suite" onCta={onSignUp} highlighted/>
       </div>
-      <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>All plans include a monthly AI budget. Additional calls beyond the budget are $0.10 each. Cancel anytime.</div>
+      <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>Cancel anytime.</div>
     </section>
 
     <section style={{padding:'40px 20px 60px', maxWidth:'800px', margin:'0 auto', width:'100%', boxSizing:'border-box', textAlign:'center'}}>

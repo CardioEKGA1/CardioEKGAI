@@ -1100,12 +1100,14 @@ def tools_access(current_user: User = Depends(get_current_user), db: Session = D
         Subscription.status == "active",
     ).all()
     tiers = {s.tool_slug: s.tier for s in active_subs}
+    # Budget and spend amounts are intentionally NOT returned. Users see usage
+    # via `pct` (a bar) and `overage` (their actual billable charges). The absolute
+    # monthly allowance is internal-only — do not add `budget` or `spent` here.
     return {
         "is_superuser": bool(current_user.is_superuser),
         "access": access,
         "tiers": tiers,
-        "budget": None if budget == float("inf") else round(budget, 2),
-        "spent": round(spent, 2),
+        "has_budget": budget != float("inf") and budget > 0,
         "overage": round(overage, 2),
         "pct": round(pct, 1),
         "overage_per_call": OVERAGE_PER_CALL,

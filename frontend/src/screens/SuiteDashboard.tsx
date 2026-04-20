@@ -54,8 +54,7 @@ interface AccessResp {
   is_superuser: boolean;
   access: Record<string, boolean>;
   tiers: Record<string, string>;
-  budget: number | null;
-  spent: number;
+  has_budget: boolean;
   overage: number;
   pct: number;
   overage_per_call: number;
@@ -208,15 +207,13 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const isSuper = !!access?.is_superuser;
   const hasAccess = (slug: string) => isSuper || !!access?.access?.[slug];
   const tierLabel = isSuper ? 'Superuser · Unlimited' : (user.is_subscribed ? 'Subscribed' : 'Free tier');
-  const hasBudget = !!access && access.budget !== null && access.budget > 0;
+  const hasBudget = !!access?.has_budget;
   const pct = access?.pct ?? 0;
-  const spent = access?.spent ?? 0;
-  const budget = access?.budget ?? 0;
   const overage = access?.overage ?? 0;
   const atOver = hasBudget && pct >= 100;
   const atWarn = hasBudget && pct >= 80 && pct < 100;
   const meterColor = atOver ? '#c04040' : atWarn ? '#d89030' : '#4a7ad0';
-  const hasAnyPaidSub = access && !isSuper && access.budget !== null && access.budget > 0;
+  const hasAnyPaidSub = !!access && !isSuper && access.has_budget;
   const suiteActive = hasAccess('suite');
   const suiteMonthly = access?.tiers?.suite === 'monthly';
   const lockedCount = TOOLS.filter(t => !hasAccess(t.slug)).length;
@@ -244,7 +241,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
             <span style={{background: isSuper ? WORDMARK : 'rgba(122,176,240,0.12)', color: isSuper ? 'white' : '#4a7ad0', borderRadius:'10px', padding:'3px 9px', fontWeight:'700'}}>{tierLabel}</span>
             {hasBudget && (
               <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'2px', minWidth:'150px'}}>
-                <div style={{fontSize:'10px', color: meterColor, fontWeight:'600'}}>${spent.toFixed(2)} / ${budget.toFixed(2)} · {pct.toFixed(0)}%</div>
+                <div style={{fontSize:'10px', color: meterColor, fontWeight:'600'}}>Usage · {pct.toFixed(0)}%</div>
                 <div style={{width:'140px', height:'4px', background:'rgba(122,176,240,0.15)', borderRadius:'3px', overflow:'hidden'}}>
                   <div style={{width: `${Math.min(100, pct)}%`, height:'100%', background: meterColor, transition:'width 0.3s'}}/>
                 </div>
@@ -277,7 +274,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       )}
       {atWarn && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'16px', background:'rgba(240,180,80,0.12)', border:'1px solid rgba(240,180,80,0.35)'}}>
-          <div style={{fontSize:'12px', color:'#1a2a4a'}}>You're at {pct.toFixed(0)}% of your monthly AI budget. Calls above ${budget.toFixed(2)} will bill at ${(access?.overage_per_call ?? 0.10).toFixed(2)} each.</div>
+          <div style={{fontSize:'12px', color:'#1a2a4a'}}>You're approaching your monthly usage allowance. Additional calls are billed at ${(access?.overage_per_call ?? 0.10).toFixed(2)} each.</div>
         </div>
       )}
 
@@ -422,7 +419,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         <div style={{...CARD, marginTop:'20px', padding:'24px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'2px solid rgba(122,176,240,0.35)', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
           <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 8 tools</div>
-          <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>$60 / month AI budget · one login · cancel anytime</div>
+          <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
             <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>
             <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $888'}</button>
