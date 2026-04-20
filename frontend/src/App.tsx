@@ -52,16 +52,18 @@ const API = 'https://ekgscan.com';
 const pathToScreen = (path: string): Screen | null => {
   if (path === '/privacy') return 'privacy';
   if (path === '/terms') return 'terms';
+  if (path === '/scan' || path === '/app') return 'upload';
   return null;
 };
 const screenToPath = (s: Screen): string => {
   if (s === 'privacy') return '/privacy';
   if (s === 'terms') return '/terms';
+  if (s === 'upload') return '/scan';
   return '/';
 };
 
 // Screens with deep-linkable URLs — these survive refresh and browser back.
-const DEEPLINK_SCREENS: Screen[] = ['privacy', 'terms'];
+const DEEPLINK_SCREENS: Screen[] = ['privacy', 'terms', 'upload'];
 const isDeepLink = (s: Screen) => DEEPLINK_SCREENS.includes(s);
 
 const App: React.FC = () => {
@@ -114,17 +116,16 @@ const App: React.FC = () => {
       const fromUrl = pathToScreen(window.location.pathname);
       if (fromUrl) {
         setScreen(fromUrl);
-      } else {
-        // URL is '/' (or unknown) — fall back to landing or (if signed in) dashboard/upload.
-        setScreen(prev => {
-          if (isDeepLink(prev)) {
-            // We were on /privacy or /terms and the user navigated back to '/'.
-            // Put them on the right home based on auth state.
-            return user ? (isSoulMD ? 'dashboard' : 'upload') : 'landing';
-          }
-          return prev;
-        });
+        return;
       }
+      // URL is '/' — default behavior depends on domain:
+      // - SoulMD: signed-in → dashboard, else landing
+      // - EKGScan: always landing (tool lives at /scan; '/' is the marketing page)
+      setScreen(prev => {
+        if (!isDeepLink(prev)) return prev;
+        if (isSoulMD) return user ? 'dashboard' : 'landing';
+        return 'landing';
+      });
     };
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
@@ -171,8 +172,12 @@ const App: React.FC = () => {
         .then(data => {
           if (data && data.email) {
             setUser(data);
-            if (!landedOnDeepLink && screen === 'landing') {
-              navigate(isSoulMD ? 'dashboard' : 'upload');
+            // SoulMD: signed-in users skip the marketing landing and go to
+            // the dashboard. EKGScan: we intentionally keep signed-in users
+            // on the landing so the Suite pitch and pricing stay visible;
+            // they click "Analyze an EKG →" to enter the tool.
+            if (!landedOnDeepLink && screen === 'landing' && isSoulMD) {
+              navigate('dashboard');
             }
           }
         })
@@ -203,7 +208,13 @@ const App: React.FC = () => {
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
       {screen==='landing' && (isSoulMD
         ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onPrivacy={goPrivacy} onTerms={goTerms}/>
-        : <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={goTerms}/>)}
+        : <Landing
+            onAnalyze={()=>navigate(user ? 'upload' : 'auth')}
+            onSignIn={()=>navigate('auth')}
+            onSignUp={()=>navigate('auth')}
+            onTerms={goTerms}
+            onPrivacy={goPrivacy}
+          />)}
       {screen==='privacy' && <Privacy onBack={goBack}/>}
       {screen==='terms' && <Terms onBack={goBack}/>}
       {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'} onOpenTool={(slug)=>{

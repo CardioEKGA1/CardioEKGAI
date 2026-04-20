@@ -150,15 +150,15 @@ _OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
 OVERAGE_PER_CALL = 0.10
 
 PRICE_PER_MONTH = {
-    ("ekgscan",      "monthly"):   9.99, ("ekgscan",      "yearly"): 119.99 / 12,
-    ("xrayread",     "monthly"):   9.99, ("xrayread",     "yearly"): 119.99 / 12,
-    ("rxcheck",      "monthly"):   9.99, ("rxcheck",      "yearly"): 119.99 / 12,
-    ("infectid",     "monthly"):   9.99, ("infectid",     "yearly"): 119.99 / 12,
-    ("cerebralai",   "monthly"):   9.99, ("cerebralai",   "yearly"): 119.99 / 12,
-    ("nephroai",     "monthly"):  24.99, ("nephroai",     "yearly"): 199.00 / 12,
-    ("palliativemd", "monthly"):  24.99, ("palliativemd", "yearly"): 199.00 / 12,
-    ("clinicalnote", "monthly"):  34.99, ("clinicalnote", "yearly"): 349.00 / 12,
-    ("suite",        "monthly"): 149.99, ("suite",        "yearly"): 1199.00 / 12,
+    ("ekgscan",      "monthly"):  9.99, ("ekgscan",      "yearly"):  89.99 / 12,
+    ("xrayread",     "monthly"):  9.99, ("xrayread",     "yearly"):  89.99 / 12,
+    ("rxcheck",      "monthly"):  9.99, ("rxcheck",      "yearly"):  89.99 / 12,
+    ("infectid",     "monthly"):  9.99, ("infectid",     "yearly"):  89.99 / 12,
+    ("cerebralai",   "monthly"):  9.99, ("cerebralai",   "yearly"):  89.99 / 12,
+    ("clinicalnote", "monthly"):  9.99, ("clinicalnote", "yearly"):  89.99 / 12,
+    ("nephroai",     "monthly"): 24.99, ("nephroai",     "yearly"): 179.99 / 12,
+    ("palliativemd", "monthly"): 24.99, ("palliativemd", "yearly"): 179.99 / 12,
+    ("suite",        "monthly"): 88.88, ("suite",        "yearly"): 888.00 / 12,
 }
 
 def monthly_budget(user: User, db: Session) -> float:
@@ -482,7 +482,7 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
                     <h1 style="color:#1a2a4a;margin-bottom:16px">SoulMD</h1>
                     <h2 style="color:#1a2a4a">Welcome aboard</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
-                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock any single tool ($4.99/mo — NephroAI $9.99, ClinicalNote AI $29.99) or go all-in with the Suite ($88.88/mo, $888/yr).</p>
+                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock any single tool ($9.99/mo · $89.99/yr — or specialty tools NephroAI & PalliativeMD at $24.99/mo · $179.99/yr) or go all-in with the Suite at $88.88/mo · $888/yr.</p>
                     <a href="https://soulmd.us/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Open SoulMD Dashboard</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI output must be independently reviewed by a licensed clinician. In emergencies, call 911.</p>
                     </div>""")
@@ -1422,15 +1422,15 @@ def admin_mint_token(data: AdminMintToken, db: Session = Depends(get_db), _: boo
 @app.get("/admin/billing/validate")
 def admin_billing_validate(_: bool = Depends(verify_admin)):
     expected = [
-        ("ekgscan",      "monthly",    999), ("ekgscan",      "yearly",  11999),
-        ("xrayread",     "monthly",    999), ("xrayread",     "yearly",  11999),
-        ("rxcheck",      "monthly",    999), ("rxcheck",      "yearly",  11999),
-        ("infectid",     "monthly",    999), ("infectid",     "yearly",  11999),
-        ("cerebralai",   "monthly",    999), ("cerebralai",   "yearly",  11999),
-        ("nephroai",     "monthly",   2499), ("nephroai",     "yearly",  19900),
-        ("palliativemd", "monthly",   2499), ("palliativemd", "yearly",  19900),
-        ("clinicalnote", "monthly",   3499), ("clinicalnote", "yearly",  34900),
-        ("suite",        "monthly",  14999), ("suite",        "yearly", 119900),
+        ("ekgscan",      "monthly",   999), ("ekgscan",      "yearly",  8999),
+        ("xrayread",     "monthly",   999), ("xrayread",     "yearly",  8999),
+        ("rxcheck",      "monthly",   999), ("rxcheck",      "yearly",  8999),
+        ("infectid",     "monthly",   999), ("infectid",     "yearly",  8999),
+        ("cerebralai",   "monthly",   999), ("cerebralai",   "yearly",  8999),
+        ("clinicalnote", "monthly",   999), ("clinicalnote", "yearly",  8999),
+        ("nephroai",     "monthly",  2499), ("nephroai",     "yearly", 17999),
+        ("palliativemd", "monthly",  2499), ("palliativemd", "yearly", 17999),
+        ("suite",        "monthly",  8888), ("suite",        "yearly", 88800),
     ]
     checks = []
     for slug, tier, expected_cents in expected:

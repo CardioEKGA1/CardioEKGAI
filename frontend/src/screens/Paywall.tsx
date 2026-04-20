@@ -43,7 +43,7 @@ const Paywall: React.FC<Props> = ({ API, token, onBack }) => {
           </button>
           <button onClick={()=>subscribe('yearly')} disabled={!!loading} style={{display:'block', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'16px', padding:'20px 12px', cursor:'pointer', textAlign:'center', opacity: loading && loading !== 'yearly' ? 0.6 : 1}}>
             <div style={{fontSize:'11px', color:'#4a7ad0', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'6px'}}>Yearly · save</div>
-            <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>$119.99</div>
+            <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>$89.99</div>
             <div style={{fontSize:'11px', color:'#8aa0c0'}}>{loading === 'yearly' ? 'Loading…' : 'per year'}</div>
           </button>
         </div>

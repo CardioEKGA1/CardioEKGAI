@@ -19,14 +19,14 @@ interface Props {
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; keywords: string; }
 
 const TOOLS: Tool[] = [
-  { slug:'ekgscan',      name:'EKGScan',         icon:'🫀',              desc:'12-lead EKG interpretation in seconds',                                  monthly:9.99,  yearly:119.99, keywords:'ekg ecg cardiac rhythm heart 12-lead cardiology arrhythmia atrial ventricular qtc' },
-  { slug:'nephroai',     name:'NephroAI',        icon:'🫘',              desc:'Comprehensive nephrology decision support',                              monthly:24.99, yearly:199.00, keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology' },
-  { slug:'xrayread',     name:'XrayRead',        icon:'🩻',              desc:'Structured radiology report from any X-ray image',                       monthly:9.99,  yearly:119.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
-  { slug:'rxcheck',      name:'RxCheck',         icon:'💊',              desc:'Full medication interaction safety check',                               monthly:9.99,  yearly:119.99, keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
-  { slug:'infectid',     name:'InfectID',        icon:'🦠',              desc:'IDSA-based antibiotic recommendations',                                  monthly:9.99,  yearly:119.99, keywords:'infectious disease antibiotics idsa uti cellulitis pneumonia cap hap sepsis bacteremia organism' },
-  { slug:'clinicalnote', name:'ClinicalNote AI', icon:'📝',              desc:'SOAP notes from bullet points in seconds',                               monthly:34.99, yearly:349.00, keywords:'soap h&p note documentation discharge summary progress consult hpi' },
-  { slug:'cerebralai',   name:'CerebralAI',      icon:'🧠',              desc:'Brain and spine MRI and CT interpretation',                              monthly:9.99,  yearly:119.99, keywords:'brain spine mri ct neuroimaging stroke hemorrhage head radiology neurology cord' },
-  { slug:'palliativemd', name:'PalliativeMD',    icon:'🫶',              desc:'AI-guided palliative care — goals of care, prognosis, family meetings', monthly:24.99, yearly:199.00, keywords:'palliative goals of care prognosis hospice family meeting dnr dni code status end of life comfort' },
+  { slug:'ekgscan',      name:'EKGScan',         icon:'🫀',              desc:'12-lead EKG interpretation in seconds',                                  monthly:9.99,  yearly:89.99,  keywords:'ekg ecg cardiac rhythm heart 12-lead cardiology arrhythmia atrial ventricular qtc' },
+  { slug:'nephroai',     name:'NephroAI',        icon:'🫘',              desc:'Comprehensive nephrology decision support',                              monthly:24.99, yearly:179.99, keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology' },
+  { slug:'xrayread',     name:'XrayRead',        icon:'🩻',              desc:'Structured radiology report from any X-ray image',                       monthly:9.99,  yearly:89.99,  keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
+  { slug:'rxcheck',      name:'RxCheck',         icon:'💊',              desc:'Full medication interaction safety check',                               monthly:9.99,  yearly:89.99,  keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
+  { slug:'infectid',     name:'InfectID',        icon:'🦠',              desc:'IDSA-based antibiotic recommendations',                                  monthly:9.99,  yearly:89.99,  keywords:'infectious disease antibiotics idsa uti cellulitis pneumonia cap hap sepsis bacteremia organism' },
+  { slug:'clinicalnote', name:'ClinicalNote AI', icon:'📝',              desc:'SOAP notes from bullet points in seconds',                               monthly:9.99,  yearly:89.99,  keywords:'soap h&p note documentation discharge summary progress consult hpi' },
+  { slug:'cerebralai',   name:'CerebralAI',      icon:'🧠',              desc:'Brain and spine MRI and CT interpretation',                              monthly:9.99,  yearly:89.99,  keywords:'brain spine mri ct neuroimaging stroke hemorrhage head radiology neurology cord' },
+  { slug:'palliativemd', name:'PalliativeMD',    icon:'🫶',              desc:'AI-guided palliative care — goals of care, prognosis, family meetings', monthly:24.99, yearly:179.99, keywords:'palliative goals of care prognosis hospice family meeting dnr dni code status end of life comfort' },
 ];
 
 const OPEN_TOOLS = new Set(['nephroai','rxcheck','infectid','clinicalnote','xrayread','cerebralai','palliativemd']);
@@ -258,7 +258,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 
       {suiteMonthly && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'14px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px'}}>
-          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save $600/year — switch to yearly Suite for $1,199.</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save ~$179/year — switch to yearly Suite for $888.</div>
           <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '…' : 'Upgrade to yearly'}</button>
         </div>
       )}
@@ -318,7 +318,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 
       {!isSuper && !suiteActive && lockedCount > 0 && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'16px', background:'linear-gradient(135deg,rgba(122,176,240,0.12),rgba(155,143,232,0.12))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
-          <div style={{fontSize:'13px', color:'#1a2a4a'}}>You have {lockedCount} tool{lockedCount===1?'':'s'} locked. Upgrade to Suite for $149.99/month and unlock everything.</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a'}}>You have {lockedCount} tool{lockedCount===1?'':'s'} locked. Upgrade to Suite for $88.88/month and unlock everything.</div>
           <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_monthly' ? '…' : 'Unlock all 8'}</button>
         </div>
       )}
@@ -423,8 +423,8 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
           <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 8 tools</div>
           <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>$60 / month AI budget · one login · cancel anytime</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
-            <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $149.99'}</button>
-            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $1,199'}</button>
+            <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>
+            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $888'}</button>
           </div>
         </div>
       )}
