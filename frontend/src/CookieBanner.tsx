@@ -1,4 +1,4 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useEffect, useState } from 'react';
 
 interface Props { onPrivacy?: () => void; }

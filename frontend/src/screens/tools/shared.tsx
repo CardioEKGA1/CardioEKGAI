@@ -1,6 +1,7 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React from 'react';
 import SoulMDLogo from '../../SoulMDLogo';
+import ComplianceDisclaimer from '../../ComplianceDisclaimer';
 
 export const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 export const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'20px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)', marginBottom:'14px'};
@@ -32,6 +33,7 @@ export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, icon, o
       For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. In emergencies, call 911.
       <div style={{marginTop:'8px'}}>Feedback on this tool? <a href="mailto:feedback@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>feedback@soulmd.us</a> · Support? <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>support@soulmd.us</a></div>
     </div>
+    <ComplianceDisclaimer style={{marginTop: '12px', marginBottom: '8px'}}/>
   </div>
   </div>
 );

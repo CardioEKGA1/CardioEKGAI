@@ -1,7 +1,8 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
 import DictationButton from '../DictationButton';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 import { User } from '../App';
 
 interface Props {
@@ -440,6 +441,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         <span>·</span>
         <button onClick={()=>setDeleteConfirmOpen(true)} style={{background:'none', border:'none', color:'#c04040', cursor:'pointer', fontSize:'11px', margin:'0 8px', padding:0, textDecoration:'underline'}}>Delete my account</button>
       </div>
+      <ComplianceDisclaimer/>
 
       {feedbackTool && (
         <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>

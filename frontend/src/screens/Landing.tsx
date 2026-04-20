@@ -1,5 +1,6 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React from 'react';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props {
   onAnalyze: () => void;
@@ -159,10 +160,11 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
           {onPrivacy && <a href="/privacy" onClick={e=>{e.preventDefault(); onPrivacy();}} style={{color:'#4a7ad0', textDecoration:'none', cursor:'pointer'}}>Privacy Policy</a>}
           <a href="/terms" onClick={e=>{e.preventDefault(); onTerms();}} style={{color:'#4a7ad0', textDecoration:'none', cursor:'pointer'}}>Terms of Service</a>
         </div>
-        <div style={{fontSize:'11px', color:'#a0b0c8', lineHeight:1.7, maxWidth:'640px', margin:'0 auto'}}>
+        <ComplianceDisclaimer/>
+        <div style={{fontSize:'11px', color:'#a0b0c8', lineHeight:1.7, maxWidth:'640px', margin:'10px auto 0 auto'}}>
           For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. Not FDA-cleared. In emergencies, call 911.
         </div>
-        <div style={{fontSize:'11px', color:'#a0b0c8', marginTop:'10px'}}>© 2026 SoulMD Inc. All rights reserved.</div>
+        <div style={{fontSize:'11px', color:'#a0b0c8', marginTop:'10px'}}>© 2026 SoulMD, LLC. All rights reserved.</div>
       </footer>
     </div>
   );

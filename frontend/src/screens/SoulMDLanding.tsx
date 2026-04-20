@@ -1,6 +1,7 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { onSignIn: () => void; onSignUp: () => void; onPrivacy?: () => void; onTerms?: () => void; }
 
@@ -128,15 +129,16 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
         <a href="/terms" onClick={onTerms ? (e => { e.preventDefault(); onTerms(); }) : undefined} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Terms of Service</a>
         <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>Contact</a>
       </div>
-      <div style={{display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap', marginBottom:'10px', fontSize:'11px', color:'#8aa0c0'}}>
+      <ComplianceDisclaimer/>
+      <div style={{display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap', marginTop:'10px', marginBottom:'10px', fontSize:'11px', color:'#8aa0c0'}}>
         <a href="https://soulmd.us" style={{color:'#8aa0c0', textDecoration:'none'}}>soulmd.us</a>
         <span>·</span>
         <a href="https://ekgscan.com" style={{color:'#8aa0c0', textDecoration:'none'}}>ekgscan.com</a>
         <span>·</span>
         <span>Data stored in United States</span>
       </div>
-      <div style={{fontSize:'11px', lineHeight:'1.8'}}>For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. Not FDA-cleared. In emergencies, call 911.</div>
-      <div style={{marginTop:'10px', fontSize:'11px', color:'#a0b0c8'}}>© {new Date().getFullYear()} SoulMD Inc. All rights reserved.</div>
+      <div style={{fontSize:'11px', lineHeight:'1.8'}}>For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. In emergencies, call 911.</div>
+      <div style={{marginTop:'10px', fontSize:'11px', color:'#a0b0c8'}}>© {new Date().getFullYear()} SoulMD, LLC. All rights reserved.</div>
     </footer>
   </div>
 );

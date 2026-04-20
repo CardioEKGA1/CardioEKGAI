@@ -1,6 +1,7 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState, useRef } from 'react';
 import { EkgResult, User } from '../App';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { API: string; token: string; user: User | null; onResult: (r: EkgResult, url: string) => void; onPaywall: () => void; onLogout: () => void; onSignUp: () => void; }
 
@@ -91,6 +92,7 @@ const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogo
         <div style={{background:'rgba(122,176,240,0.1)',borderRadius:'12px',padding:'12px',fontSize:'11px',color:'#6a8ab0',lineHeight:'1.6',textAlign:'center'}}>
           For decision support only. AI interpretation must be reviewed by a qualified clinician.
         </div>
+        <ComplianceDisclaimer style={{marginTop: '12px'}}/>
       </div>
     </div>
   );

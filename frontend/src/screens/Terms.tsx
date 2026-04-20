@@ -1,5 +1,6 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React from 'react';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { onBack: () => void; }
 
@@ -13,7 +14,8 @@ const Terms: React.FC<Props> = ({ onBack }) => (
           <svg width="22" height="16" viewBox="0 0 22 16"><polyline points="0,8 4,8 6,2 8,14 10,4 12,12 14,8 22,8" fill="none" stroke="white" strokeWidth="2" strokeLinejoin="round"/></svg>
         </div>
         <div>
-          <div style={{fontSize:'20px',fontWeight:'800',color:'#1a2a4a'}}>SoulMD Inc. Terms of Service</div>
+          <div style={{fontSize:'20px',fontWeight:'800',color:'#1a2a4a'}}>SoulMD Terms of Service</div>
+          <div style={{fontSize:'11px',color:'#8aa0c0',marginTop:'2px'}}>Operated by SoulMD, LLC</div>
           <div style={{fontSize:'12px',color:'#8aa0c0'}}>Covers EKGScan (ekgscan.com) and SoulMD Suite (soulmd.us) · Last updated: April 2026</div>
         </div>
       </div>
@@ -65,7 +67,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
         },
         {
           title: '12. EU / UK / EEA Users — GDPR',
-          body: 'If you are located in the EU, EEA, or UK, the processing of your personal data is governed by the General Data Protection Regulation (GDPR) or the UK GDPR, as applicable. SoulMD Inc. acts as the data controller. Our lawful bases for processing include (a) performance of this contract, (b) your consent for transactional email, and (c) legitimate interests in securing and improving the service. You have rights of access, rectification, erasure, restriction, portability, and objection, and the right to lodge a complaint with your national data protection authority. See our Privacy Policy or email support@soulmd.us to exercise these rights.'
+          body: 'If you are located in the EU, EEA, or UK, the processing of your personal data is governed by the General Data Protection Regulation (GDPR) or the UK GDPR, as applicable. SoulMD, LLC. acts as the data controller. Our lawful bases for processing include (a) performance of this contract, (b) your consent for transactional email, and (c) legitimate interests in securing and improving the service. You have rights of access, rectification, erasure, restriction, portability, and objection, and the right to lodge a complaint with your national data protection authority. See our Privacy Policy or email support@soulmd.us to exercise these rights.'
         },
         {
           title: '13. Australian Users',
@@ -73,7 +75,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
         },
         {
           title: '14. Data Processor Information',
-          body: 'SoulMD Inc. is the data controller. We engage the following sub-processors: Stripe (payment processing), Anthropic (AI inference), SendGrid / Twilio (transactional email), and Railway (hosting). All are US-based; international transfers rely on Standard Contractual Clauses where applicable. See the Privacy Policy for details.'
+          body: 'SoulMD, LLC. is the data controller. We engage the following sub-processors: Stripe (payment processing), Anthropic (AI inference), SendGrid / Twilio (transactional email), and Railway (hosting). All are US-based; international transfers rely on Standard Contractual Clauses where applicable. See the Privacy Policy for details.'
         },
         {
           title: '15. Account Deletion',
@@ -81,7 +83,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
         },
         {
           title: '16. Contact',
-          body: 'For questions about these Terms, data privacy, or compliance: support@soulmd.us · SoulMD Inc.'
+          body: 'For questions about these Terms, data privacy, or compliance: support@soulmd.us · SoulMD, LLC.'
         },
       ].map(section => (
         <div key={section.title} style={{marginBottom:'24px'}}>
@@ -93,6 +95,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
       <div style={{marginTop:'32px',padding:'16px',background:'rgba(122,176,240,0.1)',borderRadius:'12px',fontSize:'12px',color:'#6a8ab0',lineHeight:'1.6',textAlign:'center'}}>
         By using EKGScan or the SoulMD Suite you agree to these terms. Decision support only — always consult a qualified clinician before acting on any AI interpretation.
       </div>
+      <ComplianceDisclaimer style={{marginTop: '16px'}}/>
     </div>
   </div>
 );

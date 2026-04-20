@@ -1,4 +1,4 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState, useEffect, useCallback } from 'react';
 
 interface Props { API: string; }

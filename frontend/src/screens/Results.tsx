@@ -1,6 +1,7 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React from 'react';
 import { EkgResult } from '../App';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { result: EkgResult; imageUrl: string; onChat: () => void; onBack: () => void; }
 
@@ -64,6 +65,7 @@ const Results: React.FC<Props> = ({ result, imageUrl, onChat, onBack }) => {
         <div style={{fontSize:'11px',color:'#8aa0c0',textAlign:'center',lineHeight:'1.6'}}>
           For decision support only. Must be reviewed by a qualified clinician before clinical use.
         </div>
+        <ComplianceDisclaimer style={{marginTop: '12px'}}/>
       </div>
     </div>
   );

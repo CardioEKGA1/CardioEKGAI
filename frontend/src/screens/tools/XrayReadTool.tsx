@@ -1,4 +1,4 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState, useRef } from 'react';
 import { ToolShell, ToolResult, CARD, LABEL, BTN_PRIMARY } from './shared';
 

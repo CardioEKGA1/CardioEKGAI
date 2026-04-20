@@ -1,4 +1,4 @@
-# Copyright 2026 SoulMD Inc. All Rights Reserved.
+# Copyright 2026 SoulMD, LLC. All Rights Reserved.
 # Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
 
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header, Request
@@ -482,9 +482,10 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
                     <h1 style="color:#1a2a4a;margin-bottom:16px">SoulMD</h1>
                     <h2 style="color:#1a2a4a">Welcome aboard</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
-                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock any single tool ($9.99/mo · $89.99/yr — or specialty tools NephroAI & PalliativeMD at $24.99/mo · $179.99/yr) or go all-in with the Suite at $88.88/mo · $888/yr.</p>
+                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock any single tool ($9.99/mo or $89.99/yr — NephroAI and PalliativeMD $24.99/mo or $179.99/yr) or go all-in with the SoulMD Suite ($88.88/mo or $888/yr).</p>
                     <a href="https://soulmd.us/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Open SoulMD Dashboard</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI output must be independently reviewed by a licensed clinician. In emergencies, call 911.</p>
+                    <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
                     </div>""")
             else:
                 send_email(user.email, "Welcome to EKGScan — your free scan is ready",
@@ -494,6 +495,7 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
                     <p style="color:#4a5e6a;line-height:1.7">Your account is ready. Your first 12-lead EKG interpretation is free — upload any image and get a structured report in seconds.</p>
                     <a href="https://ekgscan.com/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Analyze an EKG</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI interpretation must be reviewed by a qualified clinician. In emergencies, call 911.</p>
+                    <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
                     </div>""")
         except Exception as e:
             print(f"Welcome email error: {e}")
@@ -551,7 +553,7 @@ def delete_account(request: Request, data: AccountDeletion, current_user: User =
             <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account (<b>{email}</b>) and all associated data — saved cases, usage records, and feedback — have been permanently deleted.</p>
             <p style="color:#4a5e6a;line-height:1.7">Stripe subscriptions canceled: <b>{len(canceled_subs)}</b>.</p>
             <p style="color:#4a5e6a;line-height:1.7">If you did not request this deletion, reply to this email immediately.</p>
-            <p style="font-size:11px;color:#a0b0c8;margin-top:24px">SoulMD Inc. · For clinical decision support only. In emergencies, call 911.</p>
+            <p style="font-size:11px;color:#a0b0c8;margin-top:24px">SoulMD, LLC. · For clinical decision support only. In emergencies, call 911.</p>
             </div>""")
     except Exception as e:
         print(f"Deletion confirmation email error: {e}")

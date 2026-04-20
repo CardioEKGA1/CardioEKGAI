@@ -1,5 +1,6 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState } from 'react';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -49,6 +50,7 @@ const Paywall: React.FC<Props> = ({ API, token, onBack }) => {
         </div>
         <div style={{fontSize:'11px', color:'#a0b0c8', marginBottom:'20px'}}>Secure payment via Stripe · Cancel anytime</div>
         <button onClick={onBack} style={{background:'none', border:'none', color:'#8aa0c0', fontSize:'13px', cursor:'pointer'}}>Maybe later</button>
+        <ComplianceDisclaimer style={{marginTop: '16px'}}/>
       </div>
     </div>
   );

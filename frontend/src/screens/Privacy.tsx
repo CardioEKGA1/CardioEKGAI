@@ -1,10 +1,11 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React from 'react';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { onBack: () => void; }
 
 const SECTIONS: {title: string; body: React.ReactNode}[] = [
-  { title: '1. Introduction', body: 'This Privacy Policy describes how SoulMD Inc. ("SoulMD", "we", "us") collects, uses, and discloses information when you use our clinical decision support services at soulmd.us and ekgscan.com. We comply with the EU General Data Protection Regulation (GDPR), the UK GDPR, and the Australian Privacy Act 1988.' },
+  { title: '1. Introduction', body: 'This Privacy Policy describes how SoulMD, LLC ("SoulMD", "we", "us") collects, uses, and discloses information when you use our clinical decision support services at soulmd.us and ekgscan.com. We comply with the EU General Data Protection Regulation (GDPR), the UK GDPR, and the Australian Privacy Act 1988.' },
   { title: '2. Data We Collect', body: (<>
     <div>We collect only what we need to run the service:</div>
     <ul style={{marginTop:'6px', paddingLeft:'20px'}}>
@@ -64,7 +65,7 @@ const SECTIONS: {title: string; body: React.ReactNode}[] = [
   { title: '10. Children', body: 'SoulMD is for licensed healthcare professionals only. We do not knowingly collect data from anyone under 18.' },
   { title: '11. Medical Disclaimer', body: 'SoulMD provides clinical decision support. All outputs must be independently reviewed by a licensed clinician. We are not FDA-cleared, not CE-marked as a medical device, and do not provide medical advice.' },
   { title: '12. Changes to this Policy', body: 'We may update this policy as laws or our practices change. Material changes will be communicated via email. Continued use of the service after a change constitutes acceptance.' },
-  { title: '13. Contact', body: (<>For data protection inquiries, access requests, or deletion requests: <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0'}}>support@soulmd.us</a>. SoulMD Inc.</>) },
+  { title: '13. Contact', body: (<>For data protection inquiries, access requests, or deletion requests: <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0'}}>support@soulmd.us</a>. SoulMD, LLC.</>) },
 ];
 
 const Privacy: React.FC<Props> = ({ onBack }) => (
@@ -87,6 +88,7 @@ const Privacy: React.FC<Props> = ({ onBack }) => (
       <div style={{marginTop:'32px', padding:'16px', background:'rgba(122,176,240,0.1)', borderRadius:'12px', fontSize:'12px', color:'#6a8ab0', lineHeight:'1.6', textAlign:'center'}}>
         Questions? Data access requests? Email <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0'}}>support@soulmd.us</a>.
       </div>
+      <ComplianceDisclaimer style={{marginTop: '16px'}}/>
     </div>
   </div>
 );

@@ -1,4 +1,4 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState } from 'react';
 import { ToolShell, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL } from './shared';
 import DictationButton from '../../DictationButton';

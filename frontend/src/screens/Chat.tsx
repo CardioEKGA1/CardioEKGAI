@@ -1,7 +1,8 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState, useRef, useEffect } from 'react';
 import { EkgResult } from '../App';
 import DictationButton from '../DictationButton';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { result: EkgResult; API: string; token: string; onBack: () => void; }
 interface Message { role: 'user' | 'assistant'; content: string; }
@@ -81,6 +82,7 @@ const Chat: React.FC<Props> = ({ result, API, token, onBack }) => {
           <span style={{color:'white',fontSize:'18px'}}>↑</span>
         </button>
       </div>
+      <ComplianceDisclaimer style={{marginTop: '8px', marginBottom: '8px'}}/>
     </div>
   );
 };

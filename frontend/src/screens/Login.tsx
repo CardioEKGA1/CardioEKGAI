@@ -1,5 +1,6 @@
-// © 2026 SoulMD. All rights reserved.
+// © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState } from 'react';
+import ComplianceDisclaimer from '../ComplianceDisclaimer';
 
 interface Props { API: string; onBack: () => void; isSoulMD?: boolean; }
 
@@ -68,6 +69,7 @@ const Login: React.FC<Props> = ({ API, onBack, isSoulMD }) => {
         <div style={{marginTop:'20px',paddingTop:'16px',borderTop:'1px solid rgba(122,176,240,0.15)',textAlign:'center',fontSize:'11px',color:'#8aa0c0'}}>
           Need help? <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0',textDecoration:'none',fontWeight:'600'}}>support@soulmd.us</a>
         </div>
+        <ComplianceDisclaimer style={{marginTop: '10px'}}/>
       </div>
     </div>
   );
