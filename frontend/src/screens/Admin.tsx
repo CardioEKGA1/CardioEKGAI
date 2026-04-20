@@ -303,6 +303,7 @@ const BarChart: React.FC<{rows: {label: string; value: number}[]; height?: numbe
 const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
   const [data, setData] = useState<any>(null);
   const [charts, setCharts] = useState<any>(null);
+  const [feedback, setFeedback] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const af = useAuthedFetch(onUnauthorized);
@@ -311,13 +312,15 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
     (async () => {
       setLoading(true); setError('');
       try {
-        const [sRes, cRes] = await Promise.all([
+        const [sRes, cRes, fRes] = await Promise.all([
           af(`${API}/admin/stats`, { headers }),
           af(`${API}/admin/charts`, { headers }),
+          af(`${API}/admin/feedback`, { headers }),
         ]);
         if (!sRes.ok) throw new Error('Failed to load stats');
         setData(await sRes.json());
         if (cRes.ok) setCharts(await cRes.json());
+        if (fRes.ok) setFeedback(await fRes.json());
       } catch(e:any) { setError(e.message); }
       finally { setLoading(false); }
     })();
@@ -414,8 +417,23 @@ const AnalyticsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
       </div>
 
       <div style={CARD}>
-        <div style={LABEL}>Feedback per tool · 👍 vs 👎</div>
+        <div style={LABEL}>Feedback ratings per tool · 👍 vs 👎 (legacy)</div>
         <FeedbackChart rows={data.feedback_summary || []}/>
+      </div>
+
+      <div style={CARD}>
+        <div style={LABEL}>Recent feedback comments</div>
+        {!feedback || (feedback.comments || []).length === 0 ? (
+          <div style={{fontSize:'13px', color:'#8aa0c0'}}>No written feedback yet.</div>
+        ) : (feedback.comments || []).map((c:any) => (
+          <div key={c.id} style={{padding:'10px 0', borderBottom:'0.5px solid rgba(0,0,0,0.06)'}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'11px', color:'#8aa0c0', marginBottom:'4px'}}>
+              <span style={{fontWeight:'700', color:'#4a7ad0', textTransform:'capitalize'}}>{c.tool_slug}</span>
+              <span>{c.created_at ? new Date(c.created_at).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : ''}</span>
+            </div>
+            <div style={{fontSize:'13px', color:'#1a2a4a', lineHeight:'1.6', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{c.comment}</div>
+          </div>
+        ))}
       </div>
 
       <div style={CARD}>

@@ -89,7 +89,8 @@ class ToolFeedback(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, index=True)
     tool_slug = Column(String, index=True)
-    rating = Column(Boolean)
+    rating = Column(Boolean, nullable=True)
+    comment = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 Base.metadata.create_all(bind=engine)
@@ -104,6 +105,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users(stripe_customer_id)"))
+    conn.execute(text("ALTER TABLE tool_feedback ADD COLUMN IF NOT EXISTS comment VARCHAR"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS overage_amount_this_month FLOAT DEFAULT 0.0"))
 

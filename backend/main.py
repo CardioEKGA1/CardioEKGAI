@@ -726,7 +726,8 @@ class ClinicalNoteRequest(BaseModel):
 
 class ToolFeedbackRequest(BaseModel):
     tool_slug: str
-    rating: bool
+    rating: bool | None = None
+    comment: str | None = None
 
 class PalliativeRequest(BaseModel):
     conversation_type: str
@@ -992,7 +993,10 @@ def tool_feedback(request: Request, data: ToolFeedbackRequest, current_user: Use
     base_slug = (data.tool_slug or "").split(":")[0]
     if base_slug not in TOOL_SLUGS:
         raise HTTPException(status_code=400, detail="Unknown tool")
-    db.add(ToolFeedback(user_id=current_user.id, tool_slug=base_slug, rating=bool(data.rating)))
+    comment = (data.comment or "").strip()[:2000] or None
+    if data.rating is None and not comment:
+        raise HTTPException(status_code=400, detail="Provide a comment or a rating.")
+    db.add(ToolFeedback(user_id=current_user.id, tool_slug=base_slug, rating=data.rating, comment=comment))
     db.commit()
     return {"ok": True}
 
@@ -1205,6 +1209,19 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
     checks["anthropic"] = {"ok": bool(os.getenv("ANTHROPIC_API_KEY"))}
     checks["admin_token_configured"] = bool(ADMIN_TOKEN)
     return checks
+
+@app.get("/admin/feedback")
+def admin_feedback_list(limit: int = 50, _: bool = Depends(verify_admin), db: Session = Depends(get_db)):
+    rows = db.query(ToolFeedback).filter(ToolFeedback.comment.isnot(None)).order_by(ToolFeedback.created_at.desc()).limit(min(max(limit, 1), 200)).all()
+    return {
+        "comments": [{
+            "id": r.id,
+            "tool_slug": r.tool_slug,
+            "rating": r.rating,
+            "comment": r.comment,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows],
+    }
 
 @app.get("/admin/charts")
 def admin_charts(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):

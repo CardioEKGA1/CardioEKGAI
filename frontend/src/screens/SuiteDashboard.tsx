@@ -1,6 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import DictationButton from '../DictationButton';
 import { User } from '../App';
 
 interface Props {
@@ -83,7 +84,11 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [banner, setBanner] = useState<string>('');
   const [search, setSearch] = useState('');
-  const [feedbackSent, setFeedbackSent] = useState<Record<string, 'up'|'down'>>({});
+  const [feedbackSent, setFeedbackSent] = useState<Record<string, boolean>>({});
+  const [feedbackTool, setFeedbackTool] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadAll = useCallback(() => {
@@ -169,14 +174,32 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
     }
   };
 
-  const sendFeedback = async (slug: string, rating: boolean) => {
-    setFeedbackSent(f => ({ ...f, [slug]: rating ? 'up' : 'down' }));
+  const openFeedback = (slug: string) => {
+    setFeedbackTool(slug); setFeedbackText(''); setFeedbackError('');
+  };
+  const closeFeedback = () => {
+    setFeedbackTool(null); setFeedbackText(''); setFeedbackError(''); setFeedbackLoading(false);
+  };
+  const submitFeedback = async () => {
+    if (!feedbackTool) return;
+    const comment = feedbackText.trim();
+    if (!comment) { setFeedbackError('Enter feedback before submitting.'); return; }
+    setFeedbackLoading(true); setFeedbackError('');
     try {
-      await fetch(`${API}/tools/feedback`, {
-        method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ tool_slug: slug, rating }),
+      const res = await fetch(`${API}/tools/feedback`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+        body: JSON.stringify({ tool_slug: feedbackTool, comment }),
       });
-    } catch {}
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || 'Could not submit feedback');
+      }
+      setFeedbackSent(f => ({ ...f, [feedbackTool]: true }));
+      closeFeedback();
+    } catch (e: any) {
+      setFeedbackError(e.message); setFeedbackLoading(false);
+    }
   };
 
   const isSuper = !!access?.is_superuser;
@@ -382,11 +405,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
                     {fb ? (
                       <span style={{color:'#70b870', fontWeight:'600'}}>Thanks for your feedback!</span>
                     ) : (
-                      <>
-                        <span>Was this helpful?</span>
-                        <button onClick={()=>sendFeedback(t.slug, true)} style={{background:'transparent', border:'none', cursor:'pointer', fontSize:'14px', padding:'2px 4px'}} aria-label="Helpful">👍</button>
-                        <button onClick={()=>sendFeedback(t.slug, false)} style={{background:'transparent', border:'none', cursor:'pointer', fontSize:'14px', padding:'2px 4px'}} aria-label="Not helpful">👎</button>
-                      </>
+                      <button onClick={()=>openFeedback(t.slug)} style={{background:'transparent', border:'none', cursor:'pointer', fontSize:'11px', color:'#4a7ad0', fontWeight:'600', padding:'2px 4px', textDecoration:'underline'}}>Leave feedback</button>
                     )}
                   </div>
                 )}
@@ -419,6 +438,37 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         <span>·</span>
         <button onClick={()=>setDeleteConfirmOpen(true)} style={{background:'none', border:'none', color:'#c04040', cursor:'pointer', fontSize:'11px', margin:'0 8px', padding:0, textDecoration:'underline'}}>Delete my account</button>
       </div>
+
+      {feedbackTool && (
+        <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>
+          <div style={{background:'white', borderRadius:'20px', padding:'24px', maxWidth:'520px', width:'100%', boxShadow:'0 20px 60px rgba(26,42,74,0.3)'}}>
+            <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px'}}>
+              <span style={{fontSize:'22px'}}>{TOOLS.find(t => t.slug === feedbackTool)?.icon as React.ReactNode ?? '💬'}</span>
+              <div style={{fontSize:'16px', fontWeight:'800', color:'#1a2a4a'}}>Feedback on {TOOLS.find(t => t.slug === feedbackTool)?.name || feedbackTool}</div>
+            </div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px', lineHeight:'1.6'}}>What could be better? What did you like? Any clinical detail we got wrong? Type or dictate — all feedback goes directly to the team.</div>
+            <div style={{display:'flex', gap:'8px', alignItems:'flex-start', marginBottom:'12px'}}>
+              <textarea
+                value={feedbackText}
+                onChange={e => setFeedbackText(e.target.value.slice(0, 2000))}
+                placeholder="Your feedback…"
+                style={{flex:1, minHeight:'140px', padding:'12px 14px', borderRadius:'12px', border:'1px solid rgba(122,176,240,0.3)', background:'rgba(240,246,255,0.5)', fontSize:'13px', color:'#1a2a4a', lineHeight:'1.6', outline:'none', resize:'vertical', boxSizing:'border-box', fontFamily:'inherit'}}
+              />
+              <DictationButton onTranscript={t => setFeedbackText(prev => (prev ? prev.trimEnd() + ' ' : '') + t)}/>
+            </div>
+            {feedbackError && <div style={{background:'#fde8e8', border:'1px solid #f0b0b0', borderRadius:'10px', padding:'10px', fontSize:'12px', color:'#c04040', marginBottom:'10px'}}>{feedbackError}</div>}
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px'}}>
+              <span style={{fontSize:'11px', color:'#a0b0c8'}}>{feedbackText.length} / 2000</span>
+              <div style={{display:'flex', gap:'8px'}}>
+                <button onClick={closeFeedback} disabled={feedbackLoading} style={{background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'10px 16px', fontSize:'13px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
+                <button onClick={submitFeedback} disabled={feedbackLoading || !feedbackText.trim()} style={{background:WORDMARK, border:'none', borderRadius:'10px', padding:'10px 18px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer', opacity: (feedbackLoading || !feedbackText.trim()) ? 0.6 : 1}}>
+                  {feedbackLoading ? 'Sending…' : 'Send feedback'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteConfirmOpen && (
         <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>
