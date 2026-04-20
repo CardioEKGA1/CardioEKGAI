@@ -24,15 +24,18 @@ if not stripe.api_key:
     sys.exit(1)
 
 CATALOG = [
-    ("ekgscan",      "EKGScan",          "12-lead EKG interpretation in seconds",                      999,  8999),
-    ("xrayread",     "XrayRead",         "Structured radiology report from any X-ray image",           999,  8999),
-    ("rxcheck",      "RxCheck",          "Full medication interaction safety check",                   999,  8999),
-    ("infectid",     "InfectID",         "IDSA-based antibiotic recommendations",                      999,  8999),
-    ("cerebralai",   "CerebralAI",       "Brain and spine MRI and CT interpretation",                  999,  8999),
-    ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                   999,  8999),
-    ("nephroai",     "NephroAI",         "Comprehensive nephrology decision support",                 2499, 17999),
-    ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings", 2499, 17999),
-    ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",                 8888, 88800),
+    # Standard tier — $9.99/mo · $89.99/yr
+    ("ekgscan",      "EKGScan",          "12-lead EKG interpretation in seconds",                                   999,  8999),
+    ("rxcheck",      "RxCheck",          "Full medication interaction safety check",                                999,  8999),
+    ("infectid",     "InfectID",         "IDSA-based antibiotic recommendations",                                   999,  8999),
+    ("nephroai",     "NephroAI",         "Comprehensive nephrology decision support",                               999,  8999),
+    # Premium tier — $24.99/mo · $179.99/yr
+    ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                               2499, 17999),
+    ("cerebralai",   "CerebralAI",       "Brain and spine MRI and CT interpretation",                              2499, 17999),
+    ("xrayread",     "XrayRead",         "Structured radiology report from any X-ray image",                       2499, 17999),
+    ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings",  2499, 17999),
+    # Suite
+    ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",                              8888, 88800),
 ]
 
 
