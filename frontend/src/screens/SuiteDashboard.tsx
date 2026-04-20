@@ -1,10 +1,7 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
-import NephroIcon from './tools/NephroIcon';
 import { User } from '../App';
-
-const NephroCardIcon = () => <NephroIcon size={32}/>;
 
 interface Props {
   API: string;
@@ -20,7 +17,7 @@ interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string
 
 const TOOLS: Tool[] = [
   { slug:'ekgscan',      name:'EKGScan',         icon:'🫀',              desc:'12-lead EKG interpretation in seconds',                                  monthly:9.99,  yearly:119.99, keywords:'ekg ecg cardiac rhythm heart 12-lead cardiology arrhythmia atrial ventricular qtc' },
-  { slug:'nephroai',     name:'NephroAI',        icon:<NephroCardIcon/>, desc:'Comprehensive nephrology decision support',                              monthly:24.99, yearly:199.00, keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology' },
+  { slug:'nephroai',     name:'NephroAI',        icon:'🫘',              desc:'Comprehensive nephrology decision support',                              monthly:24.99, yearly:199.00, keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology' },
   { slug:'xrayread',     name:'XrayRead',        icon:'🩻',              desc:'Structured radiology report from any X-ray image',                       monthly:9.99,  yearly:119.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
   { slug:'rxcheck',      name:'RxCheck',         icon:'💊',              desc:'Full medication interaction safety check',                               monthly:9.99,  yearly:119.99, keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
   { slug:'infectid',     name:'InfectID',        icon:'🦠',              desc:'IDSA-based antibiotic recommendations',                                  monthly:9.99,  yearly:119.99, keywords:'infectious disease antibiotics idsa uti cellulitis pneumonia cap hap sepsis bacteremia organism' },
