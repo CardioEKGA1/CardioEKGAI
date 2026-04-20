@@ -5,7 +5,7 @@ import NephroIcon from './tools/NephroIcon';
 
 const NephroCardIcon = () => <NephroIcon size={32}/>;
 
-interface Props { onSignIn: () => void; onSignUp: () => void; }
+interface Props { onSignIn: () => void; onSignUp: () => void; onPrivacy?: () => void; onTerms?: () => void; }
 
 interface LandingTool { slug: string; name: string; icon: React.ReactNode; desc: string; price: string; }
 
@@ -45,7 +45,7 @@ export const SoulMDBrand: React.FC<{size?: number}> = ({ size = 40 }) => (
   </div>
 );
 
-const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
+const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms }) => (
   <div style={{...BG, display:'flex', flexDirection:'column'}}>
     <nav style={{padding:'16px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(255,255,255,0.6)', backdropFilter:'blur(10px)', borderBottom:'1px solid rgba(122,176,240,0.2)', flexWrap:'wrap', gap:'10px'}}>
       <SoulMDBrand/>
@@ -126,13 +126,20 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp }) => (
     </section>
 
     <footer style={{padding:'28px 24px 40px', textAlign:'center', fontSize:'12px', color:'#6a8ab0', borderTop:'1px solid rgba(122,176,240,0.2)', background:'rgba(255,255,255,0.4)'}}>
-      <div style={{display:'flex', gap:'18px', justifyContent:'center', flexWrap:'wrap', marginBottom:'12px'}}>
-        <a href="https://soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>soulmd.us</a>
-        <a href="https://ekgscan.com" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>ekgscan.com</a>
-        <a href="mailto:anderson@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>anderson@soulmd.us</a>
+      <div style={{display:'flex', gap:'18px', justifyContent:'center', flexWrap:'wrap', marginBottom:'10px'}}>
+        <a onClick={onPrivacy} href={onPrivacy ? undefined : '/privacy'} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Privacy Policy</a>
+        <a onClick={onTerms} href={onTerms ? undefined : '/terms'} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Terms of Service</a>
+        <a href="mailto:anderson@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>Contact</a>
+      </div>
+      <div style={{display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap', marginBottom:'10px', fontSize:'11px', color:'#8aa0c0'}}>
+        <a href="https://soulmd.us" style={{color:'#8aa0c0', textDecoration:'none'}}>soulmd.us</a>
+        <span>·</span>
+        <a href="https://ekgscan.com" style={{color:'#8aa0c0', textDecoration:'none'}}>ekgscan.com</a>
+        <span>·</span>
+        <span>Data stored in United States</span>
       </div>
       <div style={{fontSize:'11px', lineHeight:'1.8'}}>For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. Not FDA-cleared. In emergencies, call 911.</div>
-      <div style={{marginTop:'10px', fontSize:'11px', color:'#a0b0c8'}}>© {new Date().getFullYear()} SoulMD · All rights reserved</div>
+      <div style={{marginTop:'10px', fontSize:'11px', color:'#a0b0c8'}}>© {new Date().getFullYear()} SoulMD Inc. All rights reserved.</div>
     </footer>
   </div>
 );

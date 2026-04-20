@@ -7,7 +7,9 @@ import Results from './screens/Results';
 import Chat from './screens/Chat';
 import Paywall from './screens/Paywall';
 import Terms from './screens/Terms';
+import Privacy from './screens/Privacy';
 import Admin from './screens/Admin';
+import CookieBanner from './CookieBanner';
 import SoulMDLanding from './screens/SoulMDLanding';
 import SuiteDashboard from './screens/SuiteDashboard';
 import NephroAITool from './screens/tools/NephroAITool';
@@ -37,7 +39,7 @@ export interface User {
   is_subscribed: boolean;
 }
 
-type Screen = 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms' | 'dashboard' | 'tool_nephroai' | 'tool_rxcheck' | 'tool_infectid' | 'tool_clinicalnote' | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd';
+type Screen = 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms' | 'privacy' | 'dashboard' | 'tool_nephroai' | 'tool_rxcheck' | 'tool_infectid' | 'tool_clinicalnote' | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd';
 
 const API = 'https://ekgscan.com';
 
@@ -47,7 +49,12 @@ const App: React.FC = () => {
     const h = window.location.host.toLowerCase();
     return h === 'soulmd.us' || h === 'www.soulmd.us' || h.endsWith('.soulmd.us');
   });
-  const [screen, setScreen] = useState<Screen>('landing');
+  const [screen, setScreen] = useState<Screen>(() => {
+    const p = window.location.pathname;
+    if (p === '/privacy') return 'privacy';
+    if (p === '/terms') return 'terms';
+    return 'landing';
+  });
   const [history, setHistory] = useState<Screen[]>(['landing']);
   const [result, setResult] = useState<EkgResult | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('');
@@ -59,7 +66,8 @@ const App: React.FC = () => {
   const navigate = (s: Screen) => {
     setHistory(h => [...h, s]);
     setScreen(s);
-    window.history.pushState({}, '', '/');
+    const path = s === 'privacy' ? '/privacy' : s === 'terms' ? '/terms' : '/';
+    window.history.pushState({}, '', path);
   };
 
   const goBack = () => {
@@ -72,12 +80,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isAdminRoute) return;
+    const path = window.location.pathname;
+    const onContentPath = path === '/privacy' || path === '/terms';
     const handlePop = (e: PopStateEvent) => {
       e.preventDefault();
       goBack();
-      window.history.pushState({}, '', '/');
     };
-    window.history.pushState({}, '', '/');
+    if (!onContentPath) {
+      window.history.pushState({}, '', '/');
+    }
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
   }, [history, isAdminRoute]);
@@ -128,8 +139,9 @@ const App: React.FC = () => {
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
       {screen==='landing' && (isSoulMD
-        ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')}/>
+        ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onPrivacy={()=>navigate('privacy')} onTerms={()=>navigate('terms')}/>
         : <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={()=>navigate('terms')}/>)}
+      {screen==='privacy' && <Privacy onBack={()=>navigate('landing')}/>}
       {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'} onOpenTool={(slug)=>{
         const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', infectid:'tool_infectid', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd'};
         if (map[slug]) navigate(map[slug]);
@@ -147,6 +159,7 @@ const App: React.FC = () => {
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
       {screen==='paywall' && <Paywall API={API} token={token} onBack={goBack}/>}
       {screen==='terms' && <Terms onBack={goBack}/>}
+      <CookieBanner/>
     </div>
   );
 };

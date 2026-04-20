@@ -150,6 +150,28 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
     } catch (e: any) { setBanner(e.message); }
   };
 
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const deleteAccount = async () => {
+    setDeleteLoading(true);
+    try {
+      const res = await fetch(`${API}/auth/delete-account`, {
+        method:'POST',
+        headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Deletion failed');
+      localStorage.removeItem('token');
+      window.location.href = 'https://soulmd.us/';
+    } catch (e: any) {
+      setBanner(`Could not delete account: ${e.message}`);
+      setDeleteLoading(false);
+      setDeleteConfirmOpen(false);
+    }
+  };
+
   const sendFeedback = async (slug: string, rating: boolean) => {
     setFeedbackSent(f => ({ ...f, [slug]: rating ? 'up' : 'down' }));
     try {
@@ -392,6 +414,32 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       <div style={{marginTop:'28px', padding:'16px', background:'rgba(122,176,240,0.08)', borderRadius:'14px', fontSize:'12px', color:'#6a8ab0', lineHeight:'1.6', textAlign:'center'}}>
         For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. In emergencies, call 911.
       </div>
+
+      <div style={{marginTop:'16px', padding:'10px', textAlign:'center', fontSize:'11px', color:'#a0b0c8'}}>
+        <a href="/privacy" style={{color:'#4a7ad0', textDecoration:'none', margin:'0 8px'}}>Privacy Policy</a>
+        <span>·</span>
+        <a href="/terms" style={{color:'#4a7ad0', textDecoration:'none', margin:'0 8px'}}>Terms of Service</a>
+        <span>·</span>
+        <button onClick={()=>setDeleteConfirmOpen(true)} style={{background:'none', border:'none', color:'#c04040', cursor:'pointer', fontSize:'11px', margin:'0 8px', padding:0, textDecoration:'underline'}}>Delete my account</button>
+      </div>
+
+      {deleteConfirmOpen && (
+        <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>
+          <div style={{background:'white', borderRadius:'20px', padding:'28px', maxWidth:'440px', width:'100%', boxShadow:'0 20px 60px rgba(26,42,74,0.3)'}}>
+            <div style={{fontSize:'18px', fontWeight:'800', color:'#1a2a4a', marginBottom:'10px'}}>Delete your account?</div>
+            <div style={{fontSize:'13px', color:'#4a5e6a', lineHeight:'1.7', marginBottom:'16px'}}>
+              This permanently deletes your account, all saved clinical cases, usage history, and feedback, and cancels any active Stripe subscription. This action <b>cannot</b> be undone.
+            </div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'20px'}}>A confirmation email will be sent to {user.email}.</div>
+            <div style={{display:'flex', gap:'10px', justifyContent:'flex-end'}}>
+              <button onClick={()=>setDeleteConfirmOpen(false)} disabled={deleteLoading} style={{background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'10px 18px', fontSize:'13px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
+              <button onClick={deleteAccount} disabled={deleteLoading} style={{background:'#c04040', border:'none', borderRadius:'10px', padding:'10px 18px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer', opacity: deleteLoading ? 0.6 : 1}}>
+                {deleteLoading ? 'Deleting…' : 'Yes, delete everything'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </div>
   );

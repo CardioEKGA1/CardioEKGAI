@@ -75,6 +75,9 @@ class CheckoutRequest(BaseModel):
     tool_slug: str
     tier: str
 
+class AccountDeletion(BaseModel):
+    confirm: bool = False
+
 TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd", "suite"}
 
 def get_price_id(tool_slug: str, tier: str) -> str:
@@ -397,6 +400,52 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
         "is_subscribed": user.is_subscribed,
     }
 
+@app.post("/auth/delete-account")
+@limiter.limit("3/minute")
+def delete_account(request: Request, data: AccountDeletion, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if not data.confirm:
+        raise HTTPException(status_code=400, detail="confirm must be true")
+
+    user_id = current_user.id
+    email = current_user.email
+
+    canceled_subs: list[str] = []
+    active_stripe_subs = db.query(Subscription).filter(
+        Subscription.user_id == user_id,
+        Subscription.status == "active",
+        Subscription.stripe_subscription_id.isnot(None),
+    ).all()
+    for sub in active_stripe_subs:
+        try:
+            stripe.Subscription.cancel(sub.stripe_subscription_id)
+            canceled_subs.append(sub.stripe_subscription_id)
+        except Exception as e:
+            print(f"Stripe cancel error for {sub.stripe_subscription_id}: {e}")
+
+    db.query(ToolFeedback).filter(ToolFeedback.user_id == user_id).delete(synchronize_session=False)
+    db.query(ToolUsage).filter(ToolUsage.user_id == user_id).delete(synchronize_session=False)
+    db.query(ClinicalCase).filter(ClinicalCase.user_id == user_id).delete(synchronize_session=False)
+    db.query(Subscription).filter(Subscription.user_id == user_id).delete(synchronize_session=False)
+    db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
+    db.commit()
+
+    try:
+        send_email(email, "Your SoulMD account has been deleted",
+            f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:40px">
+            <h1 style="color:#1a2a4a">SoulMD</h1>
+            <h2 style="color:#1a2a4a">Account deleted</h2>
+            <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account (<b>{email}</b>) and all associated data — saved cases, usage records, and feedback — have been permanently deleted.</p>
+            <p style="color:#4a5e6a;line-height:1.7">Stripe subscriptions canceled: <b>{len(canceled_subs)}</b>.</p>
+            <p style="color:#4a5e6a;line-height:1.7">If you did not request this deletion, reply to this email immediately.</p>
+            <p style="font-size:11px;color:#a0b0c8;margin-top:24px">SoulMD Inc. · For clinical decision support only. In emergencies, call 911.</p>
+            </div>""")
+    except Exception as e:
+        print(f"Deletion confirmation email error: {e}")
+
+    return {"ok": True, "subscriptions_canceled": len(canceled_subs)}
+
 @app.get("/auth/me")
 def me(current_user: User = Depends(get_current_user)):
     if not current_user:
@@ -467,6 +516,9 @@ def create_checkout(data: CheckoutRequest, current_user: User = Depends(get_curr
             cancel_url="https://soulmd.us/?checkout=cancel",
             metadata={"user_id": str(current_user.id), "tool_slug": data.tool_slug, "tier": data.tier},
             subscription_data={"metadata": {"user_id": str(current_user.id), "tool_slug": data.tool_slug, "tier": data.tier}},
+            automatic_tax={"enabled": True},
+            billing_address_collection="required",
+            tax_id_collection={"enabled": True},
         )
         return {"url": session.url}
     except stripe.error.StripeError as e:
