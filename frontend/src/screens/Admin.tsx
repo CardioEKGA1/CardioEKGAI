@@ -561,7 +561,7 @@ const ModerationTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => 
       </div>
 
       <div style={CARD}>
-        <div style={LABEL}>Suspicious IPs · ≥3 new-account attempts in 24h</div>
+        <div style={LABEL}>Suspicious IPs · ≥5 new-account attempts in 24h</div>
         {(data.suspicious_ips || []).length === 0 ? (
           <div style={{fontSize:'13px',color:'#8aa0c0'}}>No suspicious activity detected.</div>
         ) : (data.suspicious_ips || []).map((r:any) => (

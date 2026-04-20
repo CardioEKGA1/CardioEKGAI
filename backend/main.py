@@ -352,7 +352,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
                 MagicLinkAttempt.created_at >= one_day_ago,
                 MagicLinkAttempt.is_new_account == True,
             ).scalar() or 0
-            if distinct_new_from_ip >= 1:
+            if distinct_new_from_ip >= 3:
                 db.add(MagicLinkAttempt(email_hash=email_hash, ip_hash=ip_hash_v, is_new_account=False, was_blocked=is_blocklisted))
                 db.commit()
                 return {"message": "Check your email for a sign-in link."}
@@ -1410,7 +1410,7 @@ def admin_moderation(db: Session = Depends(get_db), _: bool = Depends(verify_adm
         MagicLinkAttempt.created_at >= one_day_ago,
         MagicLinkAttempt.is_new_account == True,
     ).group_by(MagicLinkAttempt.ip_hash).having(
-        func.count(func.distinct(MagicLinkAttempt.email_hash)) >= 3
+        func.count(func.distinct(MagicLinkAttempt.email_hash)) >= 5
     ).all()
     suspicious_ips = [
         {"ip_hash_tail": (ip_h or "")[-10:], "distinct_new_accounts_24h": int(n)}
