@@ -11,7 +11,8 @@ from slowapi.errors import RateLimitExceeded
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase
+from database import get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt
+import hashlib
 from auth import create_token, create_magic_token, decode_token
 from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES
 from email_utils import send_verification_email
@@ -50,6 +51,19 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "chachodesertspaces@gmail.com")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 SUPERUSER_EMAIL = os.getenv("SUPERUSER_EMAIL", "").strip().lower()
+EMAIL_HASH_PEPPER = os.getenv("EMAIL_HASH_PEPPER")
+if not EMAIL_HASH_PEPPER:
+    EMAIL_HASH_PEPPER = "soulmd-default-pepper-set-EMAIL_HASH_PEPPER-env-var-for-prod"
+    print("WARNING: EMAIL_HASH_PEPPER env var not set; using fallback. Must be set and stable in production.")
+
+def hash_email(email: str) -> str:
+    normalized = (email or "").strip().lower()
+    return hashlib.sha256(f"{EMAIL_HASH_PEPPER}:email:{normalized}".encode("utf-8")).hexdigest()
+
+def hash_ip(ip: str) -> str:
+    if not ip:
+        return ""
+    return hashlib.sha256(f"{EMAIL_HASH_PEPPER}:ip:{ip}".encode("utf-8")).hexdigest()
 
 app.add_middleware(
     CORSMiddleware,
@@ -310,7 +324,44 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
         email = data.email.strip().lower()
         if "@" not in email or "." not in email:
             raise HTTPException(status_code=400, detail="Invalid email")
-        user = db.query(User).filter(User.email == email).first()
+        email_hash = hash_email(email)
+        client_ip = request.client.host if request.client else ""
+        ip_hash_v = hash_ip(client_ip)
+
+        # Per-email rate limit: 3 attempts / hour (silent cap to avoid revealing the limit)
+        one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+        recent_for_email = db.query(MagicLinkAttempt).filter(
+            MagicLinkAttempt.email_hash == email_hash,
+            MagicLinkAttempt.created_at >= one_hour_ago,
+        ).count()
+        if recent_for_email >= 3:
+            return {"message": "Check your email for a sign-in link."}
+
+        # Blocklist lookup
+        deletion = db.query(DeletedAccount).filter(DeletedAccount.email_hash == email_hash).first()
+        is_blocklisted = bool(deletion)
+
+        existing_user = db.query(User).filter(User.email == email).first()
+        is_new_signup = existing_user is None
+
+        # Per-IP daily cap: 1 new account creation / 24h (silent drop)
+        if is_new_signup and ip_hash_v:
+            one_day_ago = datetime.utcnow() - timedelta(days=1)
+            distinct_new_from_ip = db.query(func.count(func.distinct(MagicLinkAttempt.email_hash))).filter(
+                MagicLinkAttempt.ip_hash == ip_hash_v,
+                MagicLinkAttempt.created_at >= one_day_ago,
+                MagicLinkAttempt.is_new_account == True,
+            ).scalar() or 0
+            if distinct_new_from_ip >= 1:
+                db.add(MagicLinkAttempt(email_hash=email_hash, ip_hash=ip_hash_v, is_new_account=False, was_blocked=is_blocklisted))
+                db.commit()
+                return {"message": "Check your email for a sign-in link."}
+
+        if is_blocklisted and is_new_signup and deletion is not None:
+            deletion.re_registration_attempts = (deletion.re_registration_attempts or 0) + 1
+            db.commit()
+
+        user = existing_user
         if not user:
             is_super = bool(SUPERUSER_EMAIL) and email == SUPERUSER_EMAIL
             user = User(
@@ -318,6 +369,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
                 subscription_tier="free", is_superuser=is_super,
                 is_clinician=bool(data.is_clinician),
                 clinician_attested_at=datetime.utcnow() if data.is_clinician else None,
+                scan_count=1 if is_blocklisted else 0,  # blocklisted accounts start with free-scan already consumed
             )
             db.add(user)
             db.commit()
@@ -332,6 +384,12 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
                 changed = True
             if changed:
                 db.commit()
+
+        db.add(MagicLinkAttempt(
+            email_hash=email_hash, ip_hash=ip_hash_v,
+            is_new_account=is_new_signup, was_blocked=is_blocklisted,
+        ))
+        db.commit()
         token = create_magic_token(email)
         host = request.headers.get("origin") or request.headers.get("referer") or ""
         is_soulmd = "soulmd.us" in host
@@ -410,6 +468,13 @@ def delete_account(request: Request, data: AccountDeletion, current_user: User =
 
     user_id = current_user.id
     email = current_user.email
+
+    # Record in blocklist BEFORE deletion (idempotent — upsert by email_hash)
+    eh = hash_email(email)
+    existing_block = db.query(DeletedAccount).filter(DeletedAccount.email_hash == eh).first()
+    if not existing_block:
+        db.add(DeletedAccount(email_hash=eh, reason="user_requested"))
+        db.commit()
 
     canceled_subs: list[str] = []
     active_stripe_subs = db.query(Subscription).filter(
@@ -1097,6 +1162,8 @@ def admin_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
         "most_active": most_active,
         "feedback_summary": _feedback_summary(db),
         "most_used_month": _most_used_month(db, month_start),
+        "deleted_accounts_total": db.query(DeletedAccount).count(),
+        "blocklist_hits": int(db.query(func.sum(DeletedAccount.re_registration_attempts)).scalar() or 0),
     }
 
 def _feedback_summary(db: Session):
@@ -1335,10 +1402,34 @@ def admin_moderation(db: Session = Depends(get_db), _: bool = Depends(verify_adm
         if u:
             heavy_today.append({"id": u.id, "email": u.email, "scans_today": int(count)})
 
+    one_day_ago = datetime.utcnow() - timedelta(days=1)
+    suspicious_ip_rows = db.query(
+        MagicLinkAttempt.ip_hash,
+        func.count(func.distinct(MagicLinkAttempt.email_hash)).label("n"),
+    ).filter(
+        MagicLinkAttempt.created_at >= one_day_ago,
+        MagicLinkAttempt.is_new_account == True,
+    ).group_by(MagicLinkAttempt.ip_hash).having(
+        func.count(func.distinct(MagicLinkAttempt.email_hash)) >= 3
+    ).all()
+    suspicious_ips = [
+        {"ip_hash_tail": (ip_h or "")[-10:], "distinct_new_accounts_24h": int(n)}
+        for ip_h, n in suspicious_ip_rows if ip_h
+    ]
+
+    rejoin_rows = db.query(DeletedAccount).filter(DeletedAccount.re_registration_attempts > 0).order_by(DeletedAccount.re_registration_attempts.desc()).limit(20).all()
+    blocklist_rejoin_attempts = [{
+        "email_hash_tail": (r.email_hash or "")[-10:],
+        "attempts": int(r.re_registration_attempts or 0),
+        "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,
+    } for r in rejoin_rows]
+
     return {
         "approaching_limit": approaching,
         "unverified_with_usage": unverified_with_usage,
         "heavy_usage_today": heavy_today,
+        "suspicious_ips": suspicious_ips,
+        "blocklist_rejoin_attempts": blocklist_rejoin_attempts,
         "failed_payments": {"note": "Not yet tracked. Requires Stripe invoice.payment_failed webhook handler."},
     }
 

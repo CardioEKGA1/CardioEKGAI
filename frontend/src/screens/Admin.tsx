@@ -561,6 +561,31 @@ const ModerationTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => 
       </div>
 
       <div style={CARD}>
+        <div style={LABEL}>Suspicious IPs · ≥3 new-account attempts in 24h</div>
+        {(data.suspicious_ips || []).length === 0 ? (
+          <div style={{fontSize:'13px',color:'#8aa0c0'}}>No suspicious activity detected.</div>
+        ) : (data.suspicious_ips || []).map((r:any) => (
+          <div key={r.ip_hash_tail} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'0.5px solid rgba(0,0,0,0.06)',fontSize:'13px'}}>
+            <span style={{color:'#1a2a4a', fontFamily:'ui-monospace,monospace'}}>ip:…{r.ip_hash_tail}</span>
+            <span style={{fontWeight:'700',color:'#c04040'}}>{r.distinct_new_accounts_24h} new accounts</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={CARD}>
+        <div style={LABEL}>Deleted-account re-registration attempts</div>
+        {(data.blocklist_rejoin_attempts || []).length === 0 ? (
+          <div style={{fontSize:'13px',color:'#8aa0c0'}}>No blocklisted emails have attempted to re-register.</div>
+        ) : (data.blocklist_rejoin_attempts || []).map((r:any, i:number) => (
+          <div key={i} style={{display:'grid',gridTemplateColumns:'1fr auto auto',gap:'12px',padding:'8px 0',borderBottom:'0.5px solid rgba(0,0,0,0.06)',fontSize:'13px',alignItems:'center'}}>
+            <span style={{color:'#1a2a4a', fontFamily:'ui-monospace,monospace'}}>email:…{r.email_hash_tail}</span>
+            <span style={{fontSize:'11px',color:'#8aa0c0'}}>{r.deleted_at ? new Date(r.deleted_at).toLocaleDateString() : '—'}</span>
+            <span style={{fontWeight:'700',color:'#c04040'}}>{r.attempts} attempt{r.attempts===1?'':'s'}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={CARD}>
         <div style={LABEL}>Failed payment attempts</div>
         <div style={{fontSize:'13px',color:'#8aa0c0',lineHeight:'1.6'}}>{data.failed_payments.note}</div>
       </div>

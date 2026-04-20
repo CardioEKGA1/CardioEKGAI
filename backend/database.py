@@ -67,6 +67,23 @@ class ClinicalCase(Base):
     result = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+class DeletedAccount(Base):
+    __tablename__ = "deleted_accounts"
+    id = Column(Integer, primary_key=True, index=True)
+    email_hash = Column(String, unique=True, index=True)
+    deleted_at = Column(DateTime, default=datetime.utcnow, index=True)
+    reason = Column(String, nullable=True)
+    re_registration_attempts = Column(Integer, default=0)
+
+class MagicLinkAttempt(Base):
+    __tablename__ = "magic_link_attempts"
+    id = Column(Integer, primary_key=True, index=True)
+    email_hash = Column(String, index=True)
+    ip_hash = Column(String, index=True)
+    is_new_account = Column(Boolean, default=False)
+    was_blocked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 class ToolFeedback(Base):
     __tablename__ = "tool_feedback"
     id = Column(Integer, primary_key=True, index=True)
