@@ -11,6 +11,8 @@ interface Props {
   onLogout: () => void;
   onOpenEkgscan: () => void;
   onOpenTool: (slug: string) => void;
+  onPrivacy: () => void;
+  onTerms: () => void;
   checkoutResult: string | null;
 }
 
@@ -75,7 +77,7 @@ interface CasesResp {
   retention_days: number;
 }
 
-const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, checkoutResult }) => {
+const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, onPrivacy, onTerms, checkoutResult }) => {
   const [access, setAccess] = useState<AccessResp | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [cases, setCases] = useState<CasesResp | null>(null);
@@ -432,9 +434,9 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       </div>
 
       <div style={{marginTop:'16px', padding:'10px', textAlign:'center', fontSize:'11px', color:'#a0b0c8'}}>
-        <a href="/privacy" style={{color:'#4a7ad0', textDecoration:'none', margin:'0 8px'}}>Privacy Policy</a>
+        <a href="/privacy" onClick={e=>{e.preventDefault(); onPrivacy();}} style={{color:'#4a7ad0', textDecoration:'none', margin:'0 8px', cursor:'pointer'}}>Privacy Policy</a>
         <span>·</span>
-        <a href="/terms" style={{color:'#4a7ad0', textDecoration:'none', margin:'0 8px'}}>Terms of Service</a>
+        <a href="/terms" onClick={e=>{e.preventDefault(); onTerms();}} style={{color:'#4a7ad0', textDecoration:'none', margin:'0 8px', cursor:'pointer'}}>Terms of Service</a>
         <span>·</span>
         <button onClick={()=>setDeleteConfirmOpen(true)} style={{background:'none', border:'none', color:'#c04040', cursor:'pointer', fontSize:'11px', margin:'0 8px', padding:0, textDecoration:'underline'}}>Delete my account</button>
       </div>

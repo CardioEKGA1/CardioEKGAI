@@ -1,5 +1,5 @@
 // © 2026 SoulMD. All rights reserved.
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Landing from './screens/Landing';
 import Login from './screens/Login';
 import Upload from './screens/Upload';
@@ -39,9 +39,30 @@ export interface User {
   is_subscribed: boolean;
 }
 
-type Screen = 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall' | 'terms' | 'privacy' | 'dashboard' | 'tool_nephroai' | 'tool_rxcheck' | 'tool_infectid' | 'tool_clinicalnote' | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd';
+type Screen =
+  | 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall'
+  | 'terms' | 'privacy' | 'dashboard'
+  | 'tool_nephroai' | 'tool_rxcheck' | 'tool_infectid' | 'tool_clinicalnote'
+  | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd';
 
 const API = 'https://ekgscan.com';
+
+// URL ⇄ Screen mapping. Only public, deep-linkable content pages get stable URLs.
+// All other screens live at '/' (ephemeral in-app state).
+const pathToScreen = (path: string): Screen | null => {
+  if (path === '/privacy') return 'privacy';
+  if (path === '/terms') return 'terms';
+  return null;
+};
+const screenToPath = (s: Screen): string => {
+  if (s === 'privacy') return '/privacy';
+  if (s === 'terms') return '/terms';
+  return '/';
+};
+
+// Screens with deep-linkable URLs — these survive refresh and browser back.
+const DEEPLINK_SCREENS: Screen[] = ['privacy', 'terms'];
+const isDeepLink = (s: Screen) => DEEPLINK_SCREENS.includes(s);
 
 const App: React.FC = () => {
   const [isAdminRoute] = useState(() => window.location.pathname.startsWith('/admin'));
@@ -49,13 +70,14 @@ const App: React.FC = () => {
     const h = window.location.host.toLowerCase();
     return h === 'soulmd.us' || h === 'www.soulmd.us' || h.endsWith('.soulmd.us');
   });
+
+  // Single source of truth for what's rendered.
+  // Initialized from the URL so /privacy and /terms are refresh-safe and deep-linkable.
   const [screen, setScreen] = useState<Screen>(() => {
-    const p = window.location.pathname;
-    if (p === '/privacy') return 'privacy';
-    if (p === '/terms') return 'terms';
-    return 'landing';
+    const fromUrl = pathToScreen(window.location.pathname);
+    return fromUrl ?? 'landing';
   });
-  const [history, setHistory] = useState<Screen[]>(['landing']);
+
   const [result, setResult] = useState<EkgResult | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('');
   const [user, setUser] = useState<User | null>(null);
@@ -63,48 +85,64 @@ const App: React.FC = () => {
   const [initialMagicToken] = useState<string | null>(() => new URLSearchParams(window.location.search).get('token'));
   const [initialCheckoutResult] = useState<string | null>(() => new URLSearchParams(window.location.search).get('checkout'));
 
-  const navigate = (s: Screen) => {
-    setHistory(h => [...h, s]);
+  // navigate: push a new screen. Only changes the URL for deep-linkable screens.
+  // For ephemeral in-app screens we keep URL at '/' (no meaningful deep link).
+  const navigate = useCallback((s: Screen) => {
+    const targetPath = screenToPath(s);
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ screen: s }, '', targetPath);
+    }
     setScreen(s);
-    const path = s === 'privacy' ? '/privacy' : s === 'terms' ? '/terms' : '/';
-    window.history.pushState({}, '', path);
-  };
+  }, []);
 
-  const goBack = () => {
-    setHistory(h => {
-      const newH = h.slice(0, -1);
-      setScreen(newH[newH.length - 1] || 'landing');
-      return newH;
-    });
-  };
+  // Back-aware nav: mirrors the browser back stack so "Back" always does the right thing
+  // regardless of how the user arrived (direct link, in-app nav, or external referral).
+  const goBack = useCallback(() => {
+    // If we have history to go back to, let the browser handle it — popstate will sync.
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      navigate('landing');
+    }
+  }, [navigate]);
 
+  // popstate: user hit browser Back/Forward — sync screen state from the URL.
+  // This is the ONLY path that can change `screen` for content pages externally.
   useEffect(() => {
     if (isAdminRoute) return;
-    const path = window.location.pathname;
-    const onContentPath = path === '/privacy' || path === '/terms';
-    const handlePop = (e: PopStateEvent) => {
-      e.preventDefault();
-      goBack();
+    const handlePop = () => {
+      const fromUrl = pathToScreen(window.location.pathname);
+      if (fromUrl) {
+        setScreen(fromUrl);
+      } else {
+        // URL is '/' (or unknown) — fall back to landing or (if signed in) dashboard/upload.
+        setScreen(prev => {
+          if (isDeepLink(prev)) {
+            // We were on /privacy or /terms and the user navigated back to '/'.
+            // Put them on the right home based on auth state.
+            return user ? (isSoulMD ? 'dashboard' : 'upload') : 'landing';
+          }
+          return prev;
+        });
+      }
     };
-    if (!onContentPath) {
-      window.history.pushState({}, '', '/');
-    }
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
-  }, [history, isAdminRoute]);
+  }, [isAdminRoute, isSoulMD, user]);
 
-  const handleAuth = (data: any) => {
+  const handleAuth = useCallback((data: any) => {
     localStorage.setItem('token', data.access_token);
     setToken(data.access_token);
     setUser({ email: data.email || '', scan_count: data.scan_count, is_subscribed: data.is_subscribed });
     navigate(isSoulMD ? 'dashboard' : 'upload');
-  };
+  }, [isSoulMD, navigate]);
 
+  // Initial auth bootstrap — runs once, at mount.
   useEffect(() => {
     if (isAdminRoute) return;
-    // Capture initial-mount screen so an auth check can't auto-redirect away
-    // from explicit content pages (/privacy, /terms) when the user is signed in.
-    const canAutoNavigate = screen === 'landing';
+    // If we initialized onto a deep-link page (/privacy, /terms), DO NOT auto-navigate away
+    // when the auth check resolves. The user asked for that URL — respect it.
+    const landedOnDeepLink = isDeepLink(screen);
     if (initialMagicToken) {
       fetch(`${API}/auth/verify-token`, {
         method: 'POST',
@@ -112,7 +150,7 @@ const App: React.FC = () => {
         body: JSON.stringify({ token: initialMagicToken })
       })
         .then(r => r.json())
-        .then(data => { if (data.access_token) handleAuth(data); })
+        .then(data => { if (data.access_token && !landedOnDeepLink) handleAuth(data); })
         .catch(() => {});
       return;
     }
@@ -122,19 +160,25 @@ const App: React.FC = () => {
         .then(data => {
           if (data.email) {
             setUser(data);
-            if (canAutoNavigate) navigate(isSoulMD ? 'dashboard' : 'upload');
+            if (!landedOnDeepLink && screen === 'landing') {
+              navigate(isSoulMD ? 'dashboard' : 'upload');
+            }
           }
         })
         .catch(() => { localStorage.removeItem('token'); setToken(''); });
     }
-  }, []);
+  }, []); // eslint-disable-line
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
     setToken('');
     setUser(null);
     navigate('landing');
-  };
+  }, [navigate]);
+
+  // Helper passed to child components for SPA navigation to public pages.
+  const goPrivacy = useCallback(() => navigate('privacy'), [navigate]);
+  const goTerms = useCallback(() => navigate('terms'), [navigate]);
 
   if (isAdminRoute) {
     return (
@@ -147,13 +191,14 @@ const App: React.FC = () => {
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
       {screen==='landing' && (isSoulMD
-        ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onPrivacy={()=>navigate('privacy')} onTerms={()=>navigate('terms')}/>
-        : <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={()=>navigate('terms')}/>)}
-      {screen==='privacy' && <Privacy onBack={()=>navigate('landing')}/>}
+        ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onPrivacy={goPrivacy} onTerms={goTerms}/>
+        : <Landing onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onTerms={goTerms}/>)}
+      {screen==='privacy' && <Privacy onBack={goBack}/>}
+      {screen==='terms' && <Terms onBack={goBack}/>}
       {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'} onOpenTool={(slug)=>{
         const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', infectid:'tool_infectid', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd'};
         if (map[slug]) navigate(map[slug]);
-      }} checkoutResult={initialCheckoutResult}/>}
+      }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}/>}
       {screen==='tool_nephroai' && user && <NephroAITool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='tool_rxcheck' && user && <RxCheckTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='tool_infectid' && user && <InfectIDTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
@@ -166,8 +211,7 @@ const App: React.FC = () => {
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
       {screen==='paywall' && <Paywall API={API} token={token} onBack={goBack}/>}
-      {screen==='terms' && <Terms onBack={goBack}/>}
-      <CookieBanner/>
+      <CookieBanner onPrivacy={goPrivacy}/>
     </div>
   );
 };

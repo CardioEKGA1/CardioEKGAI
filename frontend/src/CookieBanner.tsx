@@ -1,7 +1,9 @@
 // © 2026 SoulMD. All rights reserved.
 import React, { useEffect, useState } from 'react';
 
-const CookieBanner: React.FC = () => {
+interface Props { onPrivacy?: () => void; }
+
+const CookieBanner: React.FC<Props> = ({ onPrivacy }) => {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -32,7 +34,12 @@ const CookieBanner: React.FC = () => {
       fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
     }}>
       <div style={{fontSize:'13px', color:'#1a2a4a', lineHeight:'1.5', flex:1, minWidth:'200px'}}>
-        SoulMD uses essential cookies only. No tracking or advertising cookies. <a href="/privacy" style={{color:'#4a7ad0', textDecoration:'underline'}}>Privacy Policy</a>.
+        SoulMD uses essential cookies only. No tracking or advertising cookies.{' '}
+        <a
+          href="/privacy"
+          onClick={onPrivacy ? (e => { e.preventDefault(); onPrivacy(); }) : undefined}
+          style={{color:'#4a7ad0', textDecoration:'underline', cursor:'pointer'}}
+        >Privacy Policy</a>.
       </div>
       <button onClick={accept} style={{
         background: 'linear-gradient(135deg,#7ab0f0,#9b8fe8)',

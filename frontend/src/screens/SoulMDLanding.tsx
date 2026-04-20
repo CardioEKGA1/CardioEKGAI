@@ -124,8 +124,8 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
 
     <footer style={{padding:'28px 24px 40px', textAlign:'center', fontSize:'12px', color:'#6a8ab0', borderTop:'1px solid rgba(122,176,240,0.2)', background:'rgba(255,255,255,0.4)'}}>
       <div style={{display:'flex', gap:'18px', justifyContent:'center', flexWrap:'wrap', marginBottom:'10px'}}>
-        <a onClick={onPrivacy} href={onPrivacy ? undefined : '/privacy'} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Privacy Policy</a>
-        <a onClick={onTerms} href={onTerms ? undefined : '/terms'} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Terms of Service</a>
+        <a href="/privacy" onClick={onPrivacy ? (e => { e.preventDefault(); onPrivacy(); }) : undefined} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Privacy Policy</a>
+        <a href="/terms" onClick={onTerms ? (e => { e.preventDefault(); onTerms(); }) : undefined} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Terms of Service</a>
         <a href="mailto:anderson@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>Contact</a>
       </div>
       <div style={{display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap', marginBottom:'10px', fontSize:'11px', color:'#8aa0c0'}}>
