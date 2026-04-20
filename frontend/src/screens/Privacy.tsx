@@ -47,7 +47,7 @@ const SECTIONS: {title: string; body: React.ReactNode}[] = [
       <li><b>Object</b> — to processing based on legitimate interests</li>
       <li><b>Withdraw consent</b> — stop using the service at any time</li>
     </ul>
-    <div style={{marginTop:'10px'}}>Exercise any of these rights by emailing <a href="mailto:anderson@soulmd.us" style={{color:'#4a7ad0'}}>anderson@soulmd.us</a>. We respond within 30 days. EU/EEA users have the right to lodge a complaint with their national data protection authority; Australian users may contact the Office of the Australian Information Commissioner (OAIC).</div>
+    <div style={{marginTop:'10px'}}>Exercise any of these rights by emailing <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0'}}>support@soulmd.us</a>. We respond within 30 days. EU/EEA users have the right to lodge a complaint with their national data protection authority; Australian users may contact the Office of the Australian Information Commissioner (OAIC).</div>
   </>) },
   { title: '7. Third-Party Processors', body: (<>
     <div>We share the minimum data needed with these processors:</div>
@@ -64,7 +64,7 @@ const SECTIONS: {title: string; body: React.ReactNode}[] = [
   { title: '10. Children', body: 'SoulMD is for licensed healthcare professionals only. We do not knowingly collect data from anyone under 18.' },
   { title: '11. Medical Disclaimer', body: 'SoulMD provides clinical decision support. All outputs must be independently reviewed by a licensed clinician. We are not FDA-cleared, not CE-marked as a medical device, and do not provide medical advice.' },
   { title: '12. Changes to this Policy', body: 'We may update this policy as laws or our practices change. Material changes will be communicated via email. Continued use of the service after a change constitutes acceptance.' },
-  { title: '13. Contact', body: (<>For data protection inquiries, access requests, or deletion requests: <a href="mailto:anderson@soulmd.us" style={{color:'#4a7ad0'}}>anderson@soulmd.us</a>. SoulMD Inc.</>) },
+  { title: '13. Contact', body: (<>For data protection inquiries, access requests, or deletion requests: <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0'}}>support@soulmd.us</a>. SoulMD Inc.</>) },
 ];
 
 const Privacy: React.FC<Props> = ({ onBack }) => (
@@ -85,7 +85,7 @@ const Privacy: React.FC<Props> = ({ onBack }) => (
         </div>
       ))}
       <div style={{marginTop:'32px', padding:'16px', background:'rgba(122,176,240,0.1)', borderRadius:'12px', fontSize:'12px', color:'#6a8ab0', lineHeight:'1.6', textAlign:'center'}}>
-        Questions? Data access requests? Email <a href="mailto:anderson@soulmd.us" style={{color:'#4a7ad0'}}>anderson@soulmd.us</a>.
+        Questions? Data access requests? Email <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0'}}>support@soulmd.us</a>.
       </div>
     </div>
   </div>

@@ -48,7 +48,7 @@ client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "chachodesertspaces@gmail.com")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "support@soulmd.us")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 SUPERUSER_EMAIL = os.getenv("SUPERUSER_EMAIL", "").strip().lower()
 EMAIL_HASH_PEPPER = os.getenv("EMAIL_HASH_PEPPER")
@@ -56,14 +56,32 @@ if not EMAIL_HASH_PEPPER:
     EMAIL_HASH_PEPPER = "soulmd-default-pepper-set-EMAIL_HASH_PEPPER-env-var-for-prod"
     print("WARNING: EMAIL_HASH_PEPPER env var not set; using fallback. Must be set and stable in production.")
 
+# Optional prior pepper for zero-downtime rotation: lookups try current, then OLD.
+# To rotate: set EMAIL_HASH_PEPPER_OLD to the previous value, deploy; once
+# blocklist entries have been re-hashed or aged out, remove EMAIL_HASH_PEPPER_OLD.
+EMAIL_HASH_PEPPER_OLD = os.getenv("EMAIL_HASH_PEPPER_OLD")
+
+def _hash_with(pepper: str, kind: str, value: str) -> str:
+    return hashlib.sha256(f"{pepper}:{kind}:{value}".encode("utf-8")).hexdigest()
+
 def hash_email(email: str) -> str:
+    # Writes always use the current pepper.
+    return _hash_with(EMAIL_HASH_PEPPER, "email", (email or "").strip().lower())
+
+def hash_email_candidates(email: str) -> list[str]:
+    # Reads: try current pepper first, then the rotated-out one if configured.
     normalized = (email or "").strip().lower()
-    return hashlib.sha256(f"{EMAIL_HASH_PEPPER}:email:{normalized}".encode("utf-8")).hexdigest()
+    out = [_hash_with(EMAIL_HASH_PEPPER, "email", normalized)]
+    if EMAIL_HASH_PEPPER_OLD:
+        old = _hash_with(EMAIL_HASH_PEPPER_OLD, "email", normalized)
+        if old != out[0]:
+            out.append(old)
+    return out
 
 def hash_ip(ip: str) -> str:
     if not ip:
         return ""
-    return hashlib.sha256(f"{EMAIL_HASH_PEPPER}:ip:{ip}".encode("utf-8")).hexdigest()
+    return _hash_with(EMAIL_HASH_PEPPER, "ip", ip)
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,6 +89,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Stripe webhook health: last successful signature-verified webhook we processed.
+# In-memory (per-process) — resets on restart, which the admin endpoint reports honestly.
+_last_stripe_webhook_at: datetime | None = None
+_last_stripe_webhook_type: str | None = None
 
 class MagicLinkRequest(BaseModel):
     email: str
@@ -305,13 +328,36 @@ def check_and_update_spend(user, db):
     db.commit()
     return True
 
+# SendGrid sender-identity sanity check: fires once at import time. SendGrid
+# silently rejects sends from an un-verified FROM address, which causes
+# magic-link emails to vanish without any 4xx from us. This doesn't confirm
+# verification (that requires a SendGrid API round-trip) but it surfaces
+# obvious misconfiguration early and logs a clear breadcrumb when sends fail.
+if SENDGRID_API_KEY and "@" not in (FROM_EMAIL or ""):
+    print(f"SENDGRID CONFIG WARNING: FROM_EMAIL={FROM_EMAIL!r} is not a valid email address; magic-link email will fail.")
+elif SENDGRID_API_KEY and FROM_EMAIL:
+    print(f"SendGrid sender: {FROM_EMAIL} — verify this address (or its domain) is authenticated in SendGrid or sends will silently drop.")
+
+_sendgrid_error_count = 0
+
 def send_email(to_email, subject, html):
+    global _sendgrid_error_count
+    if not SENDGRID_API_KEY:
+        print(f"Email skipped (no SENDGRID_API_KEY): to={to_email} subject={subject!r}")
+        return
     try:
         sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
         msg = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html)
-        sg.send(msg)
+        resp = sg.send(msg)
+        # SendGrid 202 = queued. Anything else is worth flagging: 401 = bad key,
+        # 403 = sender not verified, 413 = too large, etc.
+        status = getattr(resp, "status_code", None)
+        if status is None or status >= 300:
+            _sendgrid_error_count += 1
+            print(f"SendGrid non-2xx: status={status} from={FROM_EMAIL} to={to_email}")
     except Exception as e:
-        print(f"Email error: {e}")
+        _sendgrid_error_count += 1
+        print(f"Email error (from={FROM_EMAIL} to={to_email}): {type(e).__name__}: {e}")
 
 @app.get("/health")
 def health():
@@ -325,20 +371,21 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
         if "@" not in email or "." not in email:
             raise HTTPException(status_code=400, detail="Invalid email")
         email_hash = hash_email(email)
+        email_hash_candidates = hash_email_candidates(email)
         client_ip = request.client.host if request.client else ""
         ip_hash_v = hash_ip(client_ip)
 
         # Per-email rate limit: 3 attempts / hour (silent cap to avoid revealing the limit)
         one_hour_ago = datetime.utcnow() - timedelta(hours=1)
         recent_for_email = db.query(MagicLinkAttempt).filter(
-            MagicLinkAttempt.email_hash == email_hash,
+            MagicLinkAttempt.email_hash.in_(email_hash_candidates),
             MagicLinkAttempt.created_at >= one_hour_ago,
         ).count()
         if recent_for_email >= 3:
             return {"message": "Check your email for a sign-in link."}
 
-        # Blocklist lookup
-        deletion = db.query(DeletedAccount).filter(DeletedAccount.email_hash == email_hash).first()
+        # Blocklist lookup — check current and (if configured) rotated-out pepper.
+        deletion = db.query(DeletedAccount).filter(DeletedAccount.email_hash.in_(email_hash_candidates)).first()
         is_blocklisted = bool(deletion)
 
         existing_user = db.query(User).filter(User.email == email).first()
@@ -471,7 +518,7 @@ def delete_account(request: Request, data: AccountDeletion, current_user: User =
 
     # Record in blocklist BEFORE deletion (idempotent — upsert by email_hash)
     eh = hash_email(email)
-    existing_block = db.query(DeletedAccount).filter(DeletedAccount.email_hash == eh).first()
+    existing_block = db.query(DeletedAccount).filter(DeletedAccount.email_hash.in_(hash_email_candidates(email))).first()
     if not existing_block:
         db.add(DeletedAccount(email_hash=eh, reason="user_requested"))
         db.commit()
@@ -615,6 +662,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     event_type = event["type"]
     obj = event["data"]["object"]
+
+    # Mark this process as having received a signature-verified webhook.
+    # /admin/stripe-health surfaces this for external monitoring.
+    global _last_stripe_webhook_at, _last_stripe_webhook_type
+    _last_stripe_webhook_at = datetime.utcnow()
+    _last_stripe_webhook_type = event_type
 
     def _resolve_user(customer_id, email, user_id_meta):
         u = None
@@ -1204,11 +1257,30 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
         checks["database"] = {"ok": True}
     except Exception as e:
         checks["database"] = {"ok": False, "error": str(e)[:200]}
-    checks["sendgrid"] = {"ok": bool(SENDGRID_API_KEY), "from_email": FROM_EMAIL}
+    checks["sendgrid"] = {"ok": bool(SENDGRID_API_KEY), "from_email": FROM_EMAIL, "error_count_since_boot": _sendgrid_error_count}
     checks["stripe"] = {"ok": bool(stripe.api_key), "webhook_configured": bool(STRIPE_WEBHOOK_SECRET)}
     checks["anthropic"] = {"ok": bool(os.getenv("ANTHROPIC_API_KEY"))}
     checks["admin_token_configured"] = bool(ADMIN_TOKEN)
     return checks
+
+@app.get("/admin/stripe-health")
+def admin_stripe_health(_: bool = Depends(verify_admin)):
+    # Surfaces the most recent signature-verified Stripe webhook this process
+    # observed. If last_webhook_at is None, either the process just restarted or
+    # the webhook secret is misconfigured and nothing has arrived yet. Treat a
+    # stale timestamp (>24h) as a warning signal for external monitors.
+    now = datetime.utcnow()
+    last = _last_stripe_webhook_at
+    age_hours = (now - last).total_seconds() / 3600 if last else None
+    stale = (age_hours is None) or (age_hours > 24)
+    return {
+        "webhook_secret_configured": bool(STRIPE_WEBHOOK_SECRET),
+        "last_webhook_at": last.isoformat() + "Z" if last else None,
+        "last_webhook_type": _last_stripe_webhook_type,
+        "age_hours": round(age_hours, 2) if age_hours is not None else None,
+        "stale": stale,
+        "note": "last_webhook_at is per-process and resets on restart; only flag 'stale' alongside known recent Stripe activity.",
+    }
 
 @app.get("/admin/feedback")
 def admin_feedback_list(limit: int = 50, _: bool = Depends(verify_admin), db: Session = Depends(get_db)):

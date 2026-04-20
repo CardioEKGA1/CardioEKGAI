@@ -448,7 +448,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
               <span style={{fontSize:'22px'}}>{TOOLS.find(t => t.slug === feedbackTool)?.icon as React.ReactNode ?? '💬'}</span>
               <div style={{fontSize:'16px', fontWeight:'800', color:'#1a2a4a'}}>Feedback on {TOOLS.find(t => t.slug === feedbackTool)?.name || feedbackTool}</div>
             </div>
-            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px', lineHeight:'1.6'}}>What could be better? What did you like? Any clinical detail we got wrong? Type or dictate — all feedback goes directly to the team.</div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px', lineHeight:'1.6'}}>What could be better? What did you like? Any clinical detail we got wrong? Type or dictate — all feedback goes directly to the team. Prefer email? <a href="mailto:feedback@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>feedback@soulmd.us</a></div>
             <div style={{display:'flex', gap:'8px', alignItems:'flex-start', marginBottom:'12px'}}>
               <textarea
                 value={feedbackText}

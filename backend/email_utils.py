@@ -6,7 +6,7 @@ from sendgrid.helpers.mail import Mail
 import os
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "chachodesertspaces@gmail.com")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "support@soulmd.us")
 APP_URL = os.getenv("APP_URL", "https://ekgscan.com")
 
 def send_verification_email(to_email: str, token: str):

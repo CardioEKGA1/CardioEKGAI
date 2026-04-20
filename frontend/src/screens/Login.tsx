@@ -65,6 +65,9 @@ const Login: React.FC<Props> = ({ API, onBack, isSoulMD }) => {
             </button>
           </>
         )}
+        <div style={{marginTop:'20px',paddingTop:'16px',borderTop:'1px solid rgba(122,176,240,0.15)',textAlign:'center',fontSize:'11px',color:'#8aa0c0'}}>
+          Need help? <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0',textDecoration:'none',fontWeight:'600'}}>support@soulmd.us</a>
+        </div>
       </div>
     </div>
   );

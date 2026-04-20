@@ -1,5 +1,6 @@
 backend/.env
 backend/venv/
+backend/stripe_prices.json
 frontend/node_modules/
 frontend/build/
 __pycache__/

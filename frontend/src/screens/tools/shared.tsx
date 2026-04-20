@@ -30,6 +30,7 @@ export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, icon, o
     {children}
     <div style={{marginTop:'20px', padding:'14px', background:'rgba(122,176,240,0.08)', borderRadius:'12px', fontSize:'11px', color:'#6a8ab0', lineHeight:'1.6', textAlign:'center'}}>
       For clinical decision support only. AI interpretation must be independently reviewed by a licensed clinician. In emergencies, call 911.
+      <div style={{marginTop:'8px'}}>Feedback on this tool? <a href="mailto:feedback@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>feedback@soulmd.us</a> · Support? <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>support@soulmd.us</a></div>
     </div>
   </div>
   </div>

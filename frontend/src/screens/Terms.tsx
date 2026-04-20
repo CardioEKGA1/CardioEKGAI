@@ -65,7 +65,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
         },
         {
           title: '12. EU / UK / EEA Users — GDPR',
-          body: 'If you are located in the EU, EEA, or UK, the processing of your personal data is governed by the General Data Protection Regulation (GDPR) or the UK GDPR, as applicable. SoulMD Inc. acts as the data controller. Our lawful bases for processing include (a) performance of this contract, (b) your consent for transactional email, and (c) legitimate interests in securing and improving the service. You have rights of access, rectification, erasure, restriction, portability, and objection, and the right to lodge a complaint with your national data protection authority. See our Privacy Policy or email anderson@soulmd.us to exercise these rights.'
+          body: 'If you are located in the EU, EEA, or UK, the processing of your personal data is governed by the General Data Protection Regulation (GDPR) or the UK GDPR, as applicable. SoulMD Inc. acts as the data controller. Our lawful bases for processing include (a) performance of this contract, (b) your consent for transactional email, and (c) legitimate interests in securing and improving the service. You have rights of access, rectification, erasure, restriction, portability, and objection, and the right to lodge a complaint with your national data protection authority. See our Privacy Policy or email support@soulmd.us to exercise these rights.'
         },
         {
           title: '13. Australian Users',
@@ -81,7 +81,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
         },
         {
           title: '16. Contact',
-          body: 'For questions about these Terms, data privacy, or compliance: anderson@soulmd.us · SoulMD Inc.'
+          body: 'For questions about these Terms, data privacy, or compliance: support@soulmd.us · SoulMD Inc.'
         },
       ].map(section => (
         <div key={section.title} style={{marginBottom:'24px'}}>

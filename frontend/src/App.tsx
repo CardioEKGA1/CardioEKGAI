@@ -156,16 +156,27 @@ const App: React.FC = () => {
     }
     if (token) {
       fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
+        .then(async r => {
+          // Only invalid/expired tokens (401) or deleted accounts (404) should
+          // clear the session. Transient failures (5xx, network) leave it alone
+          // so a brief outage doesn't log everyone out.
+          if (r.status === 401 || r.status === 404) {
+            localStorage.removeItem('token');
+            setToken('');
+            return null;
+          }
+          if (!r.ok) return null;
+          return r.json();
+        })
         .then(data => {
-          if (data.email) {
+          if (data && data.email) {
             setUser(data);
             if (!landedOnDeepLink && screen === 'landing') {
               navigate(isSoulMD ? 'dashboard' : 'upload');
             }
           }
         })
-        .catch(() => { localStorage.removeItem('token'); setToken(''); });
+        .catch(() => { /* network error — keep token, user retries naturally */ });
     }
   }, []); // eslint-disable-line
 

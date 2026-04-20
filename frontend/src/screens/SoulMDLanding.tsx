@@ -126,7 +126,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
       <div style={{display:'flex', gap:'18px', justifyContent:'center', flexWrap:'wrap', marginBottom:'10px'}}>
         <a href="/privacy" onClick={onPrivacy ? (e => { e.preventDefault(); onPrivacy(); }) : undefined} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Privacy Policy</a>
         <a href="/terms" onClick={onTerms ? (e => { e.preventDefault(); onTerms(); }) : undefined} style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600', cursor:'pointer'}}>Terms of Service</a>
-        <a href="mailto:anderson@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>Contact</a>
+        <a href="mailto:support@soulmd.us" style={{color:'#4a7ad0', textDecoration:'none', fontWeight:'600'}}>Contact</a>
       </div>
       <div style={{display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap', marginBottom:'10px', fontSize:'11px', color:'#8aa0c0'}}>
         <a href="https://soulmd.us" style={{color:'#8aa0c0', textDecoration:'none'}}>soulmd.us</a>
