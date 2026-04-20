@@ -5,7 +5,9 @@ import DictationButton from '../../DictationButton';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
-const NOTE_TYPES = ['SOAP', 'H&P', 'Discharge Summary', 'Progress Note', 'Consult Note'];
+const NOTE_TYPES = ['SOAP', 'H&P', 'Progress Note', 'Discharge Summary', 'Consult Note', 'Procedure Note', 'Operative Note'];
+const SPECIALTIES = ['Internal Medicine','Hospitalist','Emergency Medicine','Nephrology','Cardiology','Pulmonology','Neurology','Surgery','Oncology','Palliative Care','Primary Care','Pediatrics','OB/GYN','Psychiatry','Orthopedics','ICU / Critical Care','Infectious Disease','Endocrinology','GI / Hepatology','Other'];
+const SETTINGS = ['Inpatient','Outpatient','Emergency Department','ICU','SNF / Rehab','Telehealth','Home Visit'];
 const STYLES = [
   { value: 'concise',          label: 'Concise' },
   { value: 'standard',         label: 'Standard' },
@@ -16,6 +18,9 @@ const STYLES = [
 
 const ClinicalNoteTool: React.FC<Props> = ({ API, token, onBack }) => {
   const [noteType, setNoteType] = useState('SOAP');
+  const [specialty, setSpecialty] = useState('Internal Medicine');
+  const [setting, setSetting] = useState('Inpatient');
+  const [patientAge, setPatientAge] = useState('');
   const [style, setStyle] = useState('standard');
   const [bullets, setBullets] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,11 +31,20 @@ const ClinicalNoteTool: React.FC<Props> = ({ API, token, onBack }) => {
   const generate = async () => {
     if (!bullets.trim()) { setError('Enter bullet points first.'); return; }
     setLoading(true); setError(''); setResult(null); setCopied(false);
+
+    const contextLines: string[] = [];
+    if (specialty) contextLines.push(`Specialty: ${specialty}`);
+    if (setting) contextLines.push(`Setting: ${setting}`);
+    if (patientAge) contextLines.push(`Patient age: ${patientAge}`);
+    const enrichedBullets = contextLines.length > 0
+      ? `[Context]\n${contextLines.join('\n')}\n\n[Bullets]\n${bullets}`
+      : bullets;
+
     try {
       const res = await fetch(`${API}/tools/clinicalnote/generate`, {
         method: 'POST',
         headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
-        body: JSON.stringify({ note_type: noteType, style, bullets }),
+        body: JSON.stringify({ note_type: noteType, style, bullets: enrichedBullets, specialty, setting, patient_age: patientAge ? parseInt(patientAge) : undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Generation failed');
@@ -46,20 +60,35 @@ const ClinicalNoteTool: React.FC<Props> = ({ API, token, onBack }) => {
   };
 
   return (
-    <ToolShell name="ClinicalNote AI" subtitle="Turn bullet points into a complete, formatted note." onBack={onBack}>
+    <ToolShell name="ClinicalNote AI" subtitle="Turn bullet points into a complete, formatted note." onBack={onBack} icon={<span style={{fontSize:'20px', lineHeight:1}}>📝</span>}>
       <div style={CARD}>
-        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'12px'}}>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:'10px', marginBottom:'12px'}}>
           <div>
             <div style={FIELD_LABEL}>Note type</div>
-            <select value={noteType} onChange={e=>setNoteType(e.target.value)} style={INPUT}>
-              {NOTE_TYPES.map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
+            <input list="cn-note-types" value={noteType} onChange={e=>setNoteType(e.target.value)} placeholder="Type or select" style={INPUT}/>
+            <datalist id="cn-note-types">{NOTE_TYPES.map(n => <option key={n} value={n}/>)}</datalist>
+          </div>
+          <div>
+            <div style={FIELD_LABEL}>Specialty</div>
+            <input list="cn-specialties" value={specialty} onChange={e=>setSpecialty(e.target.value)} placeholder="Type or select" style={INPUT}/>
+            <datalist id="cn-specialties">{SPECIALTIES.map(s => <option key={s} value={s}/>)}</datalist>
+          </div>
+          <div>
+            <div style={FIELD_LABEL}>Setting</div>
+            <input list="cn-settings" value={setting} onChange={e=>setSetting(e.target.value)} placeholder="Type or select" style={INPUT}/>
+            <datalist id="cn-settings">{SETTINGS.map(s => <option key={s} value={s}/>)}</datalist>
+          </div>
+          <div>
+            <div style={FIELD_LABEL}>Patient age</div>
+            <input type="text" inputMode="numeric" value={patientAge} onChange={e=>setPatientAge(e.target.value)} placeholder="years" style={INPUT}/>
           </div>
           <div>
             <div style={FIELD_LABEL}>Style</div>
-            <select value={style} onChange={e=>setStyle(e.target.value)} style={INPUT}>
-              {STYLES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
+            <input list="cn-styles" value={STYLES.find(s=>s.value===style)?.label || style} onChange={e=>{
+              const found = STYLES.find(s=>s.label.toLowerCase()===e.target.value.toLowerCase());
+              setStyle(found ? found.value : e.target.value.toLowerCase());
+            }} placeholder="Type or select" style={INPUT}/>
+            <datalist id="cn-styles">{STYLES.map(s => <option key={s.value} value={s.label}/>)}</datalist>
           </div>
         </div>
         <div style={FIELD_LABEL}>Bullet points</div>
@@ -79,7 +108,7 @@ const ClinicalNoteTool: React.FC<Props> = ({ API, token, onBack }) => {
       {result?.note && (
         <div style={CARD}>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-            <div style={LABEL}>{noteType} · {STYLES.find(s=>s.value===style)?.label}</div>
+            <div style={LABEL}>{noteType} · {STYLES.find(s=>s.value===style)?.label || style}</div>
             <button onClick={copy} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'6px 12px', fontSize:'12px', fontWeight:'700', color:'#4a7ad0', cursor:'pointer'}}>
               {copied ? '✓ Copied' : 'Copy to clipboard'}
             </button>
