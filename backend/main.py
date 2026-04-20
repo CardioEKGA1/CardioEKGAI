@@ -122,7 +122,7 @@ def has_tool_access(user: User, tool_slug: str, db: Session) -> bool:
             return True
     return False
 
-BUDGET_HIERARCHY = [("suite", 50.0), ("clinicalnote", 10.0), ("nephroai", 8.0), ("palliativemd", 8.0)]
+BUDGET_HIERARCHY = [("suite", 60.0), ("clinicalnote", 15.0), ("nephroai", 12.0), ("palliativemd", 12.0)]
 _OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
 OVERAGE_PER_CALL = 0.10
 
@@ -146,7 +146,7 @@ def monthly_budget(user: User, db: Session) -> float:
             return budget
     for slug in _OTHER_TOOLS:
         if _has_active_sub(user.id, slug, db):
-            return 3.0
+            return 5.0
     return 0.0
 
 def current_month_spend(user_id: int, db: Session) -> float:
