@@ -102,6 +102,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isAdminRoute) return;
+    // Capture initial-mount screen so an auth check can't auto-redirect away
+    // from explicit content pages (/privacy, /terms) when the user is signed in.
+    const canAutoNavigate = screen === 'landing';
     if (initialMagicToken) {
       fetch(`${API}/auth/verify-token`, {
         method: 'POST',
@@ -116,7 +119,12 @@ const App: React.FC = () => {
     if (token) {
       fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
-        .then(data => { if (data.email) { setUser(data); navigate(isSoulMD ? 'dashboard' : 'upload'); } })
+        .then(data => {
+          if (data.email) {
+            setUser(data);
+            if (canAutoNavigate) navigate(isSoulMD ? 'dashboard' : 'upload');
+          }
+        })
         .catch(() => { localStorage.removeItem('token'); setToken(''); });
     }
   }, []);
