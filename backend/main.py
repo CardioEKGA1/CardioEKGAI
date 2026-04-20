@@ -95,6 +95,27 @@ app.add_middleware(
 _last_stripe_webhook_at: datetime | None = None
 _last_stripe_webhook_type: str | None = None
 
+# Global magic-link send cap: defense against distributed email-bombing that
+# slips past per-email / per-IP caps (e.g. botnet rotating IPs). Silent-drop
+# on exceed so probers can't detect the threshold. Per-process, in-memory —
+# a single Railway instance is the intended deployment. Set
+# MAGIC_LINK_GLOBAL_CAP_PER_HOUR=0 to disable.
+from collections import deque as _deque
+_magic_link_sends: _deque = _deque()
+MAGIC_LINK_GLOBAL_CAP_PER_HOUR = int(os.getenv("MAGIC_LINK_GLOBAL_CAP_PER_HOUR", "500"))
+
+def _magic_link_global_cap_hit() -> bool:
+    """Returns True when we've exceeded the hourly global cap. Prunes stale entries."""
+    if MAGIC_LINK_GLOBAL_CAP_PER_HOUR <= 0:
+        return False
+    cutoff = datetime.utcnow() - timedelta(hours=1)
+    while _magic_link_sends and _magic_link_sends[0] < cutoff:
+        _magic_link_sends.popleft()
+    return len(_magic_link_sends) >= MAGIC_LINK_GLOBAL_CAP_PER_HOUR
+
+def _record_magic_link_send() -> None:
+    _magic_link_sends.append(datetime.utcnow())
+
 class MagicLinkRequest(BaseModel):
     email: str
     is_clinician: bool | None = None
@@ -407,6 +428,14 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
                 db.commit()
                 return {"message": "Check your email for a sign-in link."}
 
+        # Global hourly cap: final brake against distributed email-bombing.
+        # Silent-drop identical to other caps so attackers can't probe the limit.
+        if _magic_link_global_cap_hit():
+            db.add(MagicLinkAttempt(email_hash=email_hash, ip_hash=ip_hash_v, is_new_account=is_new_signup, was_blocked=is_blocklisted))
+            db.commit()
+            print(f"MAGIC_LINK_GLOBAL_CAP_HIT: cap={MAGIC_LINK_GLOBAL_CAP_PER_HOUR}/hour")
+            return {"message": "Check your email for a sign-in link."}
+
         if is_blocklisted and is_new_signup and deletion is not None:
             deletion.re_registration_attempts = (deletion.re_registration_attempts or 0) + 1
             db.commit()
@@ -446,6 +475,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
         brand = "SoulMD" if is_soulmd else "EKGScan"
         link_base = "https://soulmd.us" if is_soulmd else "https://ekgscan.com"
         link = f"{link_base}/?token={token}"
+        _record_magic_link_send()
         send_email(email, f"Your {brand} sign-in link",
             f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:40px">
             <h1 style="color:#1a2a4a">{brand}</h1>
@@ -1265,6 +1295,14 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
     except Exception as e:
         checks["database"] = {"ok": False, "error": str(e)[:200]}
     checks["sendgrid"] = {"ok": bool(SENDGRID_API_KEY), "from_email": FROM_EMAIL, "error_count_since_boot": _sendgrid_error_count}
+    # Global magic-link send counter — read-only visibility for capacity planning.
+    # _magic_link_global_cap_hit() also prunes stale entries, giving an accurate count.
+    _magic_link_global_cap_hit()
+    checks["magic_link_cap"] = {
+        "sends_last_hour": len(_magic_link_sends),
+        "cap_per_hour": MAGIC_LINK_GLOBAL_CAP_PER_HOUR,
+        "disabled": MAGIC_LINK_GLOBAL_CAP_PER_HOUR <= 0,
+    }
     checks["stripe"] = {"ok": bool(stripe.api_key), "webhook_configured": bool(STRIPE_WEBHOOK_SECRET)}
     checks["anthropic"] = {"ok": bool(os.getenv("ANTHROPIC_API_KEY"))}
     checks["admin_token_configured"] = bool(ADMIN_TOKEN)
