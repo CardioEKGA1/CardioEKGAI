@@ -51,40 +51,44 @@ load_dotenv()
 # "lab_text", "bullets", "text", "justification" keys from extra data.
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 if SENTRY_DSN:
-    import sentry_sdk
-    from sentry_sdk.integrations.fastapi import FastApiIntegration
-    from sentry_sdk.integrations.starlette import StarletteIntegration
+    # Any failure in Sentry init MUST NOT take down the app. Broad try/except.
+    try:
+        import sentry_sdk
 
-    _PHI_KEYS = {"lab_text", "bullets", "text", "justification", "notes", "clinical_context", "inputs", "medication_name", "diagnosis", "allergies"}
+        _PHI_KEYS = {"lab_text", "bullets", "text", "justification", "notes", "clinical_context", "inputs", "medication_name", "diagnosis", "allergies"}
 
-    def _scrub(event, _hint):
-        # Drop request body entirely — too risky to ship.
-        req = event.get("request") or {}
-        if "data" in req: req["data"] = "[scrubbed]"
-        # Walk extras/contexts and redact any keys that match our PHI allowlist.
-        def walk(obj):
-            if isinstance(obj, dict):
-                for k in list(obj.keys()):
-                    if k in _PHI_KEYS:
-                        obj[k] = "[scrubbed]"
-                    else:
-                        walk(obj[k])
-            elif isinstance(obj, list):
-                for v in obj: walk(v)
-        walk(event.get("extra") or {})
-        walk(event.get("contexts") or {})
-        return event
+        def _scrub(event, _hint):
+            # Drop request body entirely — too risky to ship.
+            req = event.get("request") or {}
+            if "data" in req: req["data"] = "[scrubbed]"
+            def walk(obj):
+                if isinstance(obj, dict):
+                    for k in list(obj.keys()):
+                        if k in _PHI_KEYS:
+                            obj[k] = "[scrubbed]"
+                        else:
+                            walk(obj[k])
+                elif isinstance(obj, list):
+                    for v in obj: walk(v)
+            walk(event.get("extra") or {})
+            walk(event.get("contexts") or {})
+            return event
 
-    sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        environment=os.getenv("SENTRY_ENV", "production"),
-        release=os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:12] or None,
-        send_default_pii=False,
-        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
-        before_send=_scrub,
-        integrations=[FastApiIntegration(), StarletteIntegration()],
-    )
-    print(f"Sentry initialized (env={os.getenv('SENTRY_ENV', 'production')})")
+        # Let sentry-sdk auto-detect integrations (FastAPI + Starlette). In
+        # sentry-sdk 2.x, auto-detection is default so we don't need to
+        # explicitly import/pass the integration classes — which also sidesteps
+        # any version skew where the import path changed.
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            environment=os.getenv("SENTRY_ENV", "production"),
+            release=os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:12] or None,
+            send_default_pii=False,
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            before_send=_scrub,
+        )
+        print(f"Sentry initialized (env={os.getenv('SENTRY_ENV', 'production')})")
+    except Exception as e:
+        print(f"Sentry init failed — continuing without Sentry: {type(e).__name__}: {e}")
 
 COST_PER_SCAN = 0.05
 MONTHLY_LIMIT = {"free": 0, "monthly": 10.0, "yearly": 10.0}
