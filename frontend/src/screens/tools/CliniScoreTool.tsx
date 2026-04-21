@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { ToolShell, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL, WORDMARK } from './shared';
 import DictationButton from '../../DictationButton';
-import { CALCULATORS, SPECIALTIES, PHASE_2_CALCULATORS, Calculator, CalcResult, CategoryColor } from '../../riskread/calculators';
+import { CALCULATORS, SPECIALTIES, PHASE_2_CALCULATORS, Calculator, CalcResult, CategoryColor } from '../../cliniscore/calculators';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -25,7 +25,7 @@ const COLOR_MAP: Record<CategoryColor, {bg: string; border: string; text: string
   red:    { bg: 'rgba(224,80,80,0.15)',   border: 'rgba(224,80,80,0.45)',   text: '#a02020' },
 };
 
-const RiskReadTool: React.FC<Props> = ({ API, token, onBack }) => {
+const CliniScoreTool: React.FC<Props> = ({ API, token, onBack }) => {
   const [search, setSearch] = useState('');
   const [specialty, setSpecialty] = useState('All');
   const [selected, setSelected] = useState<Calculator | null>(null);
@@ -99,7 +99,7 @@ const RiskReadTool: React.FC<Props> = ({ API, token, onBack }) => {
     if (!selected || !localResult) return;
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API}/tools/riskread/interpret`, {
+      const res = await fetch(`${API}/tools/cliniscore/interpret`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -123,7 +123,7 @@ const RiskReadTool: React.FC<Props> = ({ API, token, onBack }) => {
   if (selected) {
     const colorStyle = localResult ? COLOR_MAP[localResult.color] : null;
     return (
-      <ToolShell name="RiskRead" subtitle={selected.name} onBack={close} icon={<span style={{fontSize:'20px', lineHeight:1}}>📊</span>}>
+      <ToolShell name="CliniScore" subtitle={selected.name} onBack={close} icon={<span style={{fontSize:'20px', lineHeight:1}}>📊</span>}>
         <div style={CARD}>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px'}}>
             <div>
@@ -259,7 +259,7 @@ const RiskReadTool: React.FC<Props> = ({ API, token, onBack }) => {
 
   // ── Calculator browse view ────────────────────────────────────────────────
   return (
-    <ToolShell name="RiskRead" subtitle={`${CALCULATORS.length} calculators with AI interpretation and guideline-aligned next steps.`} onBack={onBack} icon={<span style={{fontSize:'20px', lineHeight:1}}>📊</span>}>
+    <ToolShell name="CliniScore" subtitle={`${CALCULATORS.length} calculators with AI interpretation and guideline-aligned next steps.`} onBack={onBack} icon={<span style={{fontSize:'20px', lineHeight:1}}>📊</span>}>
       <div style={CARD}>
         <input
           type="search"
@@ -317,4 +317,4 @@ const RiskReadTool: React.FC<Props> = ({ API, token, onBack }) => {
   );
 };
 
-export default RiskReadTool;
+export default CliniScoreTool;

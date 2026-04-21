@@ -10,10 +10,10 @@ interface LandingTool { slug: string; name: string; icon: React.ReactNode; desc:
 const TOOLS: LandingTool[] = [
   { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                                  price: '$9.99 / mo · $89.99 / yr' },
   { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                               price: '$9.99 / mo · $89.99 / yr' },
-  { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                                  price: '$9.99 / mo · $89.99 / yr' },
+  { slug: 'antibioticai',     name: 'AntibioticAI',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                                  price: '$9.99 / mo · $89.99 / yr' },
   { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘', desc: 'Comprehensive nephrology decision support',                              price: '$9.99 / mo · $89.99 / yr' },
   { slug: 'labread',      name: 'LabRead',         icon: '🧪', desc: 'AI lab-panel interpretation — paste, dictate, or upload',                price: 'Free · 5 / day · Suite = unlimited' },
-  { slug: 'riskread',     name: 'RiskRead',        icon: '📊', desc: 'Clinical risk calculators with AI interpretation',                        price: 'Free · 5 / day · Suite = unlimited' },
+  { slug: 'cliniscore',     name: 'CliniScore',        icon: '📊', desc: 'Clinical risk calculators with AI interpretation',                        price: 'Free · 5 / day · Suite = unlimited' },
   { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes + prior authorization letters from bullet points',            price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                              price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',                      price: '$24.99 / mo · $179.99 / yr' },
@@ -110,7 +110,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
         <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>Simple, transparent, clinician-fair</div>
       </div>
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
-        <PriceCard title="Standard tool"       subtitle="EKGScan · RxCheck · InfectID · NephroAI"                        monthly="$9.99"  yearly="$89.99"  cta="Start standard tool" onCta={onSignUp}/>
+        <PriceCard title="Standard tool"       subtitle="EKGScan · RxCheck · AntibioticAI · NephroAI"                        monthly="$9.99"  yearly="$89.99"  cta="Start standard tool" onCta={onSignUp}/>
         <PriceCard title="Premium tool"        subtitle="ClinicalNote AI · CerebralAI · XrayRead · PalliativeMD"         monthly="$24.99" yearly="$179.99" cta="Start premium tool" onCta={onSignUp}/>
         <PriceCard title="SoulMD Suite"          subtitle="All 10 tools · one login"          monthly="$88.88" yearly="$888"    cta="Start Suite" onCta={onSignUp} highlighted/>
       </div>

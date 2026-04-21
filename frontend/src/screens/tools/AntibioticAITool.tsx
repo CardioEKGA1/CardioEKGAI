@@ -54,7 +54,7 @@ const COMMON_ALLERGIES = [
 
 const WEIGHT_UNITS = [{label:'kg', perBase:1}, {label:'lbs', perBase:2.2046}];
 
-const InfectIDTool: React.FC<Props> = ({ API, token, onBack }) => {
+const AntibioticAITool: React.FC<Props> = ({ API, token, onBack }) => {
   const [form, setForm] = useState({
     infection_site:'', organism:'', allergies_list: [] as string[], allergies_other:'',
     renal_input_type:'CrCl', crcl:'', crcl_unit:'mL/min', egfr:'', egfr_unit:'mL/min/1.73m²',
@@ -98,7 +98,7 @@ const InfectIDTool: React.FC<Props> = ({ API, token, onBack }) => {
     if (form.notes) body.notes = form.notes;
 
     try {
-      const res = await fetch(`${API}/tools/infectid/analyze`, {
+      const res = await fetch(`${API}/tools/antibioticai/analyze`, {
         method: 'POST',
         headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
         body: JSON.stringify(body),
@@ -111,26 +111,26 @@ const InfectIDTool: React.FC<Props> = ({ API, token, onBack }) => {
   };
 
   return (
-    <ToolShell name="InfectID" subtitle="IDSA-based antibiotic recommendations." onBack={onBack} icon={<span style={{fontSize:'20px', lineHeight:1}}>🦠</span>}>
+    <ToolShell name="AntibioticAI" subtitle="IDSA-based antibiotic recommendations." onBack={onBack} icon={<span style={{fontSize:'20px', lineHeight:1}}>🦠</span>}>
       <div style={CARD}>
         <div style={LABEL}>Clinical context</div>
 
         <div style={{marginBottom:'12px'}}>
           <div style={FIELD_LABEL}>Infection site *</div>
           <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
-            <input list="infectid-sites" value={form.infection_site} onChange={e=>up('infection_site', e.target.value)} placeholder="Type or select — free text accepted" style={{...INPUT, flex:1}}/>
+            <input list="antibioticai-sites" value={form.infection_site} onChange={e=>up('infection_site', e.target.value)} placeholder="Type or select — free text accepted" style={{...INPUT, flex:1}}/>
             <DictationButton onTranscript={t => up('infection_site', form.infection_site + t)}/>
           </div>
-          <datalist id="infectid-sites">{INFECTION_SITES.map(s => <option key={s} value={s}/>)}</datalist>
+          <datalist id="antibioticai-sites">{INFECTION_SITES.map(s => <option key={s} value={s}/>)}</datalist>
         </div>
 
         <div style={{marginBottom:'12px'}}>
           <div style={FIELD_LABEL}>Organism (if known)</div>
           <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
-            <input list="infectid-organisms" value={form.organism} onChange={e=>up('organism', e.target.value)} placeholder="Type or select — free text accepted" style={{...INPUT, flex:1}}/>
+            <input list="antibioticai-organisms" value={form.organism} onChange={e=>up('organism', e.target.value)} placeholder="Type or select — free text accepted" style={{...INPUT, flex:1}}/>
             <DictationButton onTranscript={t => up('organism', form.organism + t)}/>
           </div>
-          <datalist id="infectid-organisms">{ORGANISMS.map(o => <option key={o} value={o}/>)}</datalist>
+          <datalist id="antibioticai-organisms">{ORGANISMS.map(o => <option key={o} value={o}/>)}</datalist>
         </div>
 
         <div style={{marginBottom:'12px'}}>
@@ -169,13 +169,13 @@ const InfectIDTool: React.FC<Props> = ({ API, token, onBack }) => {
             <SmartUnitInput value={form.crcl} unit={form.crcl_unit}
               onChange={(v,u)=>setForm(f=>({...f, crcl:v, crcl_unit:u}))}
               units={[{label:'mL/min', perBase:1}, {label:'mL/min/1.73m²', perBase:1}]}
-              listId="infectid-crcl-units" placeholder="e.g. 65"/>
+              listId="antibioticai-crcl-units" placeholder="e.g. 65"/>
           )}
           {!form.on_dialysis && form.renal_input_type === 'eGFR' && (
             <SmartUnitInput value={form.egfr} unit={form.egfr_unit}
               onChange={(v,u)=>setForm(f=>({...f, egfr:v, egfr_unit:u}))}
               units={[{label:'mL/min/1.73m²', perBase:1}, {label:'mL/min', perBase:1}]}
-              listId="infectid-egfr-units" placeholder="e.g. 55"/>
+              listId="antibioticai-egfr-units" placeholder="e.g. 55"/>
           )}
         </div>
 
@@ -184,7 +184,7 @@ const InfectIDTool: React.FC<Props> = ({ API, token, onBack }) => {
             <div style={FIELD_LABEL}>Weight</div>
             <SmartUnitInput value={form.weight} unit={form.weight_unit}
               onChange={(v,u)=>setForm(f=>({...f, weight:v, weight_unit:u}))}
-              units={WEIGHT_UNITS} listId="infectid-weight-units" placeholder="e.g. 70"/>
+              units={WEIGHT_UNITS} listId="antibioticai-weight-units" placeholder="e.g. 70"/>
           </div>
           <div>
             <div style={FIELD_LABEL}>Age</div>
@@ -208,4 +208,4 @@ const InfectIDTool: React.FC<Props> = ({ API, token, onBack }) => {
   );
 };
 
-export default InfectIDTool;
+export default AntibioticAITool;

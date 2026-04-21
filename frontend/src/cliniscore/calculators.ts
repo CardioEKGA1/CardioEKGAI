@@ -1,6 +1,6 @@
 // © 2026 SoulMD, LLC. All rights reserved.
 //
-// RiskRead calculator library.
+// CliniScore calculator library.
 // All formulas run client-side and are deterministic — AI is layered on top
 // for interpretation + guideline-aligned next steps only. Never let AI
 // "recompute" these scores; the formula here is the source of truth.

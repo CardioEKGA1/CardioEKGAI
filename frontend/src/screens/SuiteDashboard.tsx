@@ -24,15 +24,15 @@ const TOOLS: Tool[] = [
   { slug:'nephroai',     name:'NephroAI',        icon:'🫘',              desc:'Comprehensive nephrology decision support',                              monthly:9.99,  yearly:89.99,  keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology' },
   { slug:'xrayread',     name:'XrayRead',        icon:'🩻',              desc:'Structured radiology report from any X-ray image',                       monthly:24.99, yearly:179.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
   { slug:'rxcheck',      name:'RxCheck',         icon:'💊',              desc:'Full medication interaction safety check',                               monthly:9.99,  yearly:89.99,  keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
-  { slug:'infectid',     name:'InfectID',        icon:'🦠',              desc:'IDSA-based antibiotic recommendations',                                  monthly:9.99,  yearly:89.99,  keywords:'infectious disease antibiotics idsa uti cellulitis pneumonia cap hap sepsis bacteremia organism' },
+  { slug:'antibioticai',     name:'AntibioticAI',        icon:'🦠',              desc:'IDSA-based antibiotic recommendations',                                  monthly:9.99,  yearly:89.99,  keywords:'infectious disease antibiotics idsa uti cellulitis pneumonia cap hap sepsis bacteremia organism' },
   { slug:'clinicalnote', name:'ClinicalNote AI', icon:'📝',              desc:'SOAP notes from bullets + prior auth letters',                           monthly:24.99, yearly:179.99, keywords:'soap h&p note documentation discharge summary progress consult hpi prior auth pa' },
   { slug:'cerebralai',   name:'CerebralAI',      icon:'🧠',              desc:'Brain and spine MRI and CT interpretation',                              monthly:24.99, yearly:179.99, keywords:'brain spine mri ct neuroimaging stroke hemorrhage head radiology neurology cord' },
   { slug:'palliativemd', name:'PalliativeMD',    icon:'🫶',              desc:'AI-guided palliative care — goals of care, prognosis, family meetings', monthly:24.99, yearly:179.99, keywords:'palliative goals of care prognosis hospice family meeting dnr dni code status end of life comfort' },
   { slug:'labread',      name:'LabRead',         icon:'🧪',              desc:'AI lab-panel interpretation — paste, dictate, or upload',                 monthly:0,     yearly:0,      free:true,  keywords:'labs chemistry cbc bmp cmp electrolytes liver renal thyroid iron ferritin ldh tsh ptt inr ca+k+na' },
-  { slug:'riskread',     name:'RiskRead',        icon:'📊',              desc:'Clinical risk calculators with AI interpretation',                        monthly:0,     yearly:0,      free:true,  keywords:'calculator mdcalc chadsvasc hasbled heart score wells curb65 meld child-pugh fib4 phq9 gad7 qsofa bmi egfr anion gap winters' },
+  { slug:'cliniscore',     name:'CliniScore',        icon:'📊',              desc:'Clinical risk calculators with AI interpretation',                        monthly:0,     yearly:0,      free:true,  keywords:'calculator mdcalc chadsvasc hasbled heart score wells curb65 meld child-pugh fib4 phq9 gad7 qsofa bmi egfr anion gap winters' },
 ];
 
-const OPEN_TOOLS = new Set(['nephroai','rxcheck','infectid','clinicalnote','xrayread','cerebralai','palliativemd','labread','riskread']);
+const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','xrayread','cerebralai','palliativemd','labread','cliniscore']);
 
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'20px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)'};
@@ -439,7 +439,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
           <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 10 tools</div>
           <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'4px', fontWeight:600}}>Comparable tools elsewhere cost $1,259.90/yr — Suite gives you all 10 for $888/yr</div>
-          <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime · includes unlimited LabRead & RiskRead</div>
+          <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime · includes unlimited LabRead & CliniScore</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
             <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>
             <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $888'}</button>

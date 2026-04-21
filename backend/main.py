@@ -14,7 +14,7 @@ from sqlalchemy import func
 from database import get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt
 import hashlib
 from auth import create_token, create_magic_token, decode_token
-from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE, LABREAD_EXTRACT_PROMPT, LABREAD_ANALYZE_PROMPT, RISKREAD_INTERPRET_PROMPT_TEMPLATE
+from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, ANTIBIOTICAI_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE, LABREAD_EXTRACT_PROMPT, LABREAD_ANALYZE_PROMPT, CLINISCORE_INTERPRET_PROMPT_TEMPLATE
 from email_utils import send_verification_email
 from pydantic import BaseModel
 from datetime import datetime
@@ -136,13 +136,13 @@ class CheckoutRequest(BaseModel):
 class AccountDeletion(BaseModel):
     confirm: bool = False
 
-TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd", "labread", "riskread", "suite"}
+TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "labread", "cliniscore", "suite"}
 
 # Tools with a free-tier daily allowance (usage-metered, not gated by subscription).
 # Resets at UTC midnight. Paid subscribers + suite + superusers are unlimited.
 FREE_TIER_DAILY_LIMITS = {
     "labread": 5,
-    "riskread": 5,
+    "cliniscore": 5,
 }
 
 def get_price_id(tool_slug: str, tier: str) -> str:
@@ -171,7 +171,7 @@ def has_tool_access(user: User, tool_slug: str, db: Session) -> bool:
             return True
         if (user.scan_count or 0) < 1:
             return True
-    # Free-tier daily allowance for LabRead / RiskRead: 5 uses per UTC day per
+    # Free-tier daily allowance for LabRead / CliniScore: 5 uses per UTC day per
     # tool for any signed-in user. has_tool_access() returns True when the user
     # still has capacity today; the remaining count is surfaced via the response.
     if tool_slug in FREE_TIER_DAILY_LIMITS:
@@ -200,17 +200,17 @@ def free_tier_remaining(user: User, tool_slug: str, db: Session) -> int | None:
     return max(0, cap - _free_tier_uses_today(user.id, tool_slug, db))
 
 BUDGET_HIERARCHY = [("suite", 60.0), ("clinicalnote", 15.0), ("nephroai", 12.0), ("palliativemd", 12.0)]
-_OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
+_OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "antibioticai", "cerebralai")
 OVERAGE_PER_CALL = 0.10
 
-# LabRead / RiskRead are free tools (5/day cap, Suite = unlimited) — no entry
+# LabRead / CliniScore are free tools (5/day cap, Suite = unlimited) — no entry
 # here because there is no subscription price. Their usage rows still flow through
 # log_usage for the 5/day counter, but don't contribute to overage math.
 PRICE_PER_MONTH = {
     # Standard tier — $9.99/mo · $89.99/yr
     ("ekgscan",      "monthly"):  9.99, ("ekgscan",      "yearly"):  89.99 / 12,
     ("rxcheck",      "monthly"):  9.99, ("rxcheck",      "yearly"):  89.99 / 12,
-    ("infectid",     "monthly"):  9.99, ("infectid",     "yearly"):  89.99 / 12,
+    ("antibioticai",     "monthly"):  9.99, ("antibioticai",     "yearly"):  89.99 / 12,
     ("nephroai",     "monthly"):  9.99, ("nephroai",     "yearly"):  89.99 / 12,
     # Premium tier — $24.99/mo · $179.99/yr
     ("clinicalnote", "monthly"): 24.99, ("clinicalnote", "yearly"): 179.99 / 12,
@@ -577,7 +577,7 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
                     <h1 style="color:#1a2a4a;margin-bottom:16px">SoulMD</h1>
                     <h2 style="color:#1a2a4a">Welcome aboard</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
-                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock standard tools (EKGScan, RxCheck, InfectID, NephroAI) at $9.99/mo or $89.99/yr, premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) at $24.99/mo or $179.99/yr, or go all-in with the SoulMD Suite ($88.88/mo or $888/yr).</p>
+                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) at $9.99/mo or $89.99/yr, premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) at $24.99/mo or $179.99/yr, or go all-in with the SoulMD Suite ($88.88/mo or $888/yr).</p>
                     <a href="https://soulmd.us/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Open SoulMD Dashboard</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI output must be independently reviewed by a licensed clinician. In emergencies, call 911.</p>
                     <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
@@ -875,7 +875,7 @@ class NephroRequest(BaseModel):
 class RxCheckRequest(BaseModel):
     medications: list[str]
 
-class InfectIDRequest(BaseModel):
+class AntibioticAIRequest(BaseModel):
     infection_site: str
     organism: str | None = None
     allergies: str | None = None
@@ -898,7 +898,7 @@ class LabReadAnalyzeRequest(BaseModel):
     lab_text: str
     clinical_context: str | None = None
 
-class RiskReadInterpretRequest(BaseModel):
+class CliniScoreInterpretRequest(BaseModel):
     calculator_id: str         # e.g. "chadsvasc"
     calculator_name: str       # human-readable name, e.g. "CHA₂DS₂-VASc"
     specialty: str | None = None
@@ -960,20 +960,20 @@ def rxcheck_analyze(request: Request, data: RxCheckRequest, current_user: User =
     save_case(current_user.id, "rxcheck", title, {"medications": meds}, result, db)
     return result
 
-@app.post("/tools/infectid/analyze")
+@app.post("/tools/antibioticai/analyze")
 @limiter.limit("10/minute")
-def infectid_analyze(request: Request, data: InfectIDRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "infectid", db, COST_PER_SCAN)
+def antibioticai_analyze(request: Request, data: AntibioticAIRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "antibioticai", db, COST_PER_SCAN)
     if not data.infection_site or not data.infection_site.strip():
         raise HTTPException(status_code=400, detail="infection_site is required.")
     user_input = "Clinical inputs:\n" + json.dumps(data.dict(), indent=2)
     try:
-        result = call_claude_json_text(INFECTID_PROMPT, user_input)
+        result = call_claude_json_text(ANTIBIOTICAI_PROMPT, user_input)
     except Exception as e:
-        print(f"infectid error: {e}")
+        print(f"antibioticai error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    log_usage(current_user, "infectid", COST_PER_SCAN, db)
-    save_case(current_user.id, "infectid", data.infection_site[:70], data.dict(exclude_none=True), result, db)
+    log_usage(current_user, "antibioticai", COST_PER_SCAN, db)
+    save_case(current_user.id, "antibioticai", data.infection_site[:70], data.dict(exclude_none=True), result, db)
     return result
 
 @app.post("/tools/clinicalnote/generate")
@@ -1208,17 +1208,17 @@ def labread_analyze(request: Request, data: LabReadAnalyzeRequest, current_user:
               {"lab_text": data.lab_text, "clinical_context": data.clinical_context}, result, db)
     return result
 
-# ─── RiskRead ─────────────────────────────────────────────────────────────────
+# ─── CliniScore ─────────────────────────────────────────────────────────────────
 
-@app.post("/tools/riskread/interpret")
+@app.post("/tools/cliniscore/interpret")
 @limiter.limit("20/minute")
-def riskread_interpret(request: Request, data: RiskReadInterpretRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def cliniscore_interpret(request: Request, data: CliniScoreInterpretRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """The score and category come computed from the client-side formula.
     Backend layers AI interpretation + guideline-aligned next steps on top."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    if not has_tool_access(current_user, "riskread", db):
-        raise HTTPException(status_code=402, detail="You've used your 5 free RiskRead analyses today. Upgrade to continue or come back tomorrow.")
+    if not has_tool_access(current_user, "cliniscore", db):
+        raise HTTPException(status_code=402, detail="You've used your 5 free CliniScore analyses today. Upgrade to continue or come back tomorrow.")
     if not data.calculator_id or not data.calculator_name:
         raise HTTPException(status_code=400, detail="calculator_id and calculator_name are required.")
     parts = [
@@ -1235,12 +1235,12 @@ def riskread_interpret(request: Request, data: RiskReadInterpretRequest, current
         parts += ["", "Additional clinical context:", data.clinical_context.strip()]
     user_input = "\n".join(parts)
     try:
-        result = call_claude_json_text(RISKREAD_INTERPRET_PROMPT_TEMPLATE, user_input, max_tokens=2500)
+        result = call_claude_json_text(CLINISCORE_INTERPRET_PROMPT_TEMPLATE, user_input, max_tokens=2500)
     except Exception as e:
-        print(f"riskread interpret error: {e}")
+        print(f"cliniscore interpret error: {e}")
         raise HTTPException(status_code=502, detail="AI interpretation failed. Please retry.")
-    log_usage(current_user, f"riskread:{data.calculator_id}", COST_PER_SCAN, db)
-    remaining = free_tier_remaining(current_user, "riskread", db)
+    log_usage(current_user, f"cliniscore:{data.calculator_id}", COST_PER_SCAN, db)
+    remaining = free_tier_remaining(current_user, "cliniscore", db)
     if isinstance(result, dict):
         if remaining is not None:
             result["free_tier_remaining"] = remaining
@@ -1248,7 +1248,7 @@ def riskread_interpret(request: Request, data: RiskReadInterpretRequest, current
         result["score"] = data.score
         result["risk_category"] = data.category
         result["calculator_name"] = data.calculator_name
-    save_case(current_user.id, "riskread", f"{data.calculator_name} · score {data.score}",
+    save_case(current_user.id, "cliniscore", f"{data.calculator_name} · score {data.score}",
               {"calculator_id": data.calculator_id, "inputs": data.inputs, "score": data.score, "category": data.category}, result, db)
     return result
 
@@ -1350,7 +1350,7 @@ def tools_access(current_user: User = Depends(get_current_user), db: Session = D
     """Returns the user's tool entitlements + monthly budget + overage."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd", "labread", "riskread"]
+    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "labread", "cliniscore"]
     access = {t: has_tool_access(current_user, t, db) for t in tools}
     # Per-tool free-tier daily remaining counts (null if tool has no free-tier or user is unlimited)
     free_tier = {t: free_tier_remaining(current_user, t, db) for t in tools}
@@ -1790,7 +1790,7 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         # Standard tier — 999 / 8999
         ("ekgscan",      "monthly",   999), ("ekgscan",      "yearly",  8999),
         ("rxcheck",      "monthly",   999), ("rxcheck",      "yearly",  8999),
-        ("infectid",     "monthly",   999), ("infectid",     "yearly",  8999),
+        ("antibioticai",     "monthly",   999), ("antibioticai",     "yearly",  8999),
         ("nephroai",     "monthly",   999), ("nephroai",     "yearly",  8999),
         # Premium tier — 2499 / 17999
         ("clinicalnote", "monthly",  2499), ("clinicalnote", "yearly", 17999),
@@ -1799,7 +1799,7 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         ("palliativemd", "monthly",  2499), ("palliativemd", "yearly", 17999),
         # Suite
         ("suite",        "monthly",  8888), ("suite",        "yearly", 88800),
-        # LabRead / RiskRead intentionally absent: free (5/day) + Suite-included.
+        # LabRead / CliniScore intentionally absent: free (5/day) + Suite-included.
     ]
     checks = []
     for slug, tier, expected_cents in expected:

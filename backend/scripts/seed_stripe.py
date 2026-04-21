@@ -27,7 +27,7 @@ CATALOG = [
     # Standard tier — $9.99/mo · $89.99/yr
     ("ekgscan",      "EKGScan",          "12-lead EKG interpretation in seconds",                                   999,  8999),
     ("rxcheck",      "RxCheck",          "Full medication interaction safety check",                                999,  8999),
-    ("infectid",     "InfectID",         "IDSA-based antibiotic recommendations",                                   999,  8999),
+    ("antibioticai",     "AntibioticAI",         "IDSA-based antibiotic recommendations",                                   999,  8999),
     ("nephroai",     "NephroAI",         "Comprehensive nephrology decision support",                               999,  8999),
     # Premium tier — $24.99/mo · $179.99/yr
     ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                               2499, 17999),
@@ -36,7 +36,7 @@ CATALOG = [
     ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings",  2499, 17999),
     # Suite
     ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",                              8888, 88800),
-    # LabRead and RiskRead are free (5/day) with unlimited access via Suite —
+    # LabRead and CliniScore are free (5/day) with unlimited access via Suite —
     # no standalone Stripe price at this time.
 ]
 

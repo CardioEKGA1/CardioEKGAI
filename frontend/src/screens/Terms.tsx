@@ -39,7 +39,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
         },
         {
           title: '5. Subscriptions and Billing',
-          body: 'EKGScan offers a free trial of 1 EKG analysis. After the free trial, continued use requires a paid subscription. Standard tools (EKGScan, RxCheck, InfectID, NephroAI, LabRead, RiskRead) are $9.99/month or $89.99/year, with a free allowance of 5 analyses per day for LabRead and RiskRead. Premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) are $24.99/month or $179.99/year. The full SoulMD Suite (all 10 tools) is $88.88/month or $888/year. Subscriptions automatically renew unless cancelled. You may cancel at any time through your account settings. No refunds are provided for partial billing periods.'
+          body: 'EKGScan offers a free trial of 1 EKG analysis. After the free trial, continued use requires a paid subscription. Standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI, LabRead, CliniScore) are $9.99/month or $89.99/year, with a free allowance of 5 analyses per day for LabRead and CliniScore. Premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) are $24.99/month or $179.99/year. The full SoulMD Suite (all 10 tools) is $88.88/month or $888/year. Subscriptions automatically renew unless cancelled. You may cancel at any time through your account settings. No refunds are provided for partial billing periods.'
         },
         {
           title: '6. Patient Data and Privacy',

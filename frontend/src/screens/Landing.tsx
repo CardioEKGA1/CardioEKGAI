@@ -17,12 +17,12 @@ const SUITE_TOOLS: {icon: string; name: string; desc: string}[] = [
   { icon: '🫘', name: 'NephroAI',        desc: 'Comprehensive nephrology decision support' },
   { icon: '🩻', name: 'XrayRead',        desc: 'Structured radiology report from any X-ray' },
   { icon: '💊', name: 'RxCheck',         desc: 'Medication interaction safety check' },
-  { icon: '🦠', name: 'InfectID',        desc: 'IDSA-based antibiotic recommendations' },
+  { icon: '🦠', name: 'AntibioticAI',        desc: 'IDSA-based antibiotic recommendations' },
   { icon: '📝', name: 'ClinicalNote AI', desc: 'Notes + prior-auth letters from bullet points' },
   { icon: '🧠', name: 'CerebralAI',      desc: 'Brain and spine MRI/CT interpretation' },
   { icon: '🫶', name: 'PalliativeMD',    desc: 'Goals of care, prognosis, family meetings' },
   { icon: '🧪', name: 'LabRead',         desc: 'AI lab-panel interpretation with flagged values' },
-  { icon: '📊', name: 'RiskRead',        desc: 'Clinical risk calculators with AI interpretation' },
+  { icon: '📊', name: 'CliniScore',        desc: 'Clinical risk calculators with AI interpretation' },
 ];
 
 const VALUE_PROPS: {icon: string; title: string; body: string}[] = [
@@ -145,8 +145,8 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
             <ul style={{listStyle:'none', padding:0, margin:'0 0 24px 0', fontSize:'13px', lineHeight:1.9}}>
               <li>✓ All 10 clinical-AI tools</li>
               <li>✓ EKGScan · NephroAI · XrayRead · RxCheck</li>
-              <li>✓ InfectID · ClinicalNote · CerebralAI</li>
-              <li>✓ PalliativeMD · LabRead · RiskRead</li>
+              <li>✓ AntibioticAI · ClinicalNote · CerebralAI</li>
+              <li>✓ PalliativeMD · LabRead · CliniScore</li>
               <li>✓ One subscription, one login</li>
             </ul>
             <button onClick={openSoulMD} style={{marginTop:'auto', background:'white', border:'none', borderRadius:'14px', padding:'14px', fontSize:'14px', fontWeight:800, color:'#4a7ad0', cursor:'pointer', boxShadow:'0 4px 14px rgba(0,0,0,0.08)'}}>Get the Suite at soulmd.us →</button>

@@ -188,7 +188,7 @@ RXCHECK_PROMPT = (
     " Prefer [FDA label], [Lexicomp], [Micromedex], [Beers Criteria 2023] for pharmacologic interactions."
 )
 
-INFECTID_PROMPT = (
+ANTIBIOTICAI_PROMPT = (
     "You are an expert infectious disease specialist. Base recommendations on the most recent IDSA guidelines. "
     "Respond ONLY with valid JSON with keys: "
     "first_line_regimen (object: {drug, dose, route, frequency, duration, rationale, idsa_reference}), "
@@ -246,7 +246,7 @@ LABREAD_ANALYZE_PROMPT = (
     "[ACC/AHA Lipid 2018], [Endocrine Society], [ATA thyroid], [AASLD hepatology], [Hematology ASH]."
 )
 
-RISKREAD_INTERPRET_PROMPT_TEMPLATE = (
+CLINISCORE_INTERPRET_PROMPT_TEMPLATE = (
     "You are an expert clinician interpreting a calculated clinical risk score. "
     "The score and its deterministic category have already been computed from guideline-validated formulas. "
     "Your job is ONLY to add context-aware interpretation and guideline-based next steps — do NOT recompute, "
