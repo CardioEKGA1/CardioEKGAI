@@ -1,13 +1,31 @@
-body {
+html, body {
   margin: 0;
+  overflow-x: hidden;  /* safety net against inline-style overflow bugs on mobile */
+}
+body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-width: 320px;  /* floor for legacy narrow viewports */
 }
 
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+/* Ensure all interactive elements meet iOS 44×44 touch-target minimum where feasible. */
+@media (max-width: 480px) {
+  button, a {
+    min-height: 36px;  /* 44 ideal but many tiny secondary links would bloat if forced */
+  }
+}
+
+/* Prevent inputs from zooming on iOS (font-size <16px triggers auto-zoom on focus). */
+@media (max-width: 480px) {
+  input, textarea, select {
+    font-size: max(16px, 1em) !important;
+  }
 }

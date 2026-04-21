@@ -195,6 +195,33 @@ const App: React.FC = () => {
     navigate('landing');
   }, [navigate]);
 
+  // Per-screen document.title updates so the browser tab reflects where the
+  // user is. Crawlers see the static <title> in index.html; this is for UX.
+  useEffect(() => {
+    const brand = isSoulMD ? 'SoulMD' : 'EKGScan';
+    const PER_SCREEN: Record<Screen, string> = {
+      landing:           isSoulMD ? 'SoulMD — Clinical AI Suite' : 'EKGScan — 12-lead EKG interpretation',
+      auth:              `Sign in · ${brand}`,
+      upload:            `Analyze an EKG · ${brand}`,
+      results:           `EKG Results · ${brand}`,
+      chat:              `Dr. SoulMD · ${brand}`,
+      paywall:           `Upgrade · ${brand}`,
+      terms:             `Terms of Service · ${brand}`,
+      privacy:           `Privacy Policy · ${brand}`,
+      dashboard:         `Dashboard · ${brand}`,
+      tool_nephroai:     `NephroAI · ${brand}`,
+      tool_rxcheck:      `RxCheck · ${brand}`,
+      tool_antibioticai: `AntibioticAI · ${brand}`,
+      tool_clinicalnote: `ClinicalNote AI · ${brand}`,
+      tool_xrayread:     `XrayRead · ${brand}`,
+      tool_cerebralai:   `CerebralAI · ${brand}`,
+      tool_palliativemd: `PalliativeMD · ${brand}`,
+      tool_labread:      `LabRead · ${brand}`,
+      tool_cliniscore:   `CliniScore · ${brand}`,
+    };
+    document.title = PER_SCREEN[screen] || brand;
+  }, [screen, isSoulMD]);
+
   // Helper passed to child components for SPA navigation to public pages.
   const goPrivacy = useCallback(() => navigate('privacy'), [navigate]);
   const goTerms = useCallback(() => navigate('terms'), [navigate]);

@@ -36,6 +36,51 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ─── Sentry error tracking ───────────────────────────────────────────────────
+# Init BEFORE FastAPI so the integration can wrap the app. Gated on env var:
+# if SENTRY_DSN is unset, Sentry is silently disabled (no overhead, no errors).
+#
+# PII scrubbing: this product handles lab data and clinical text that is
+# user-submitted and potentially PHI-adjacent. We set send_default_pii=False
+# and add a before_send hook that drops request bodies and scrubs any
+# "lab_text", "bullets", "text", "justification" keys from extra data.
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    _PHI_KEYS = {"lab_text", "bullets", "text", "justification", "notes", "clinical_context", "inputs", "medication_name", "diagnosis", "allergies"}
+
+    def _scrub(event, _hint):
+        # Drop request body entirely — too risky to ship.
+        req = event.get("request") or {}
+        if "data" in req: req["data"] = "[scrubbed]"
+        # Walk extras/contexts and redact any keys that match our PHI allowlist.
+        def walk(obj):
+            if isinstance(obj, dict):
+                for k in list(obj.keys()):
+                    if k in _PHI_KEYS:
+                        obj[k] = "[scrubbed]"
+                    else:
+                        walk(obj[k])
+            elif isinstance(obj, list):
+                for v in obj: walk(v)
+        walk(event.get("extra") or {})
+        walk(event.get("contexts") or {})
+        return event
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=os.getenv("SENTRY_ENV", "production"),
+        release=os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:12] or None,
+        send_default_pii=False,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.05")),
+        before_send=_scrub,
+        integrations=[FastApiIntegration(), StarletteIntegration()],
+    )
+    print(f"Sentry initialized (env={os.getenv('SENTRY_ENV', 'production')})")
+
 COST_PER_SCAN = 0.05
 MONTHLY_LIMIT = {"free": 0, "monthly": 10.0, "yearly": 10.0}
 
@@ -1537,6 +1582,7 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
     checks["stripe"] = {"ok": bool(stripe.api_key), "webhook_configured": bool(STRIPE_WEBHOOK_SECRET)}
     checks["anthropic"] = {"ok": bool(os.getenv("ANTHROPIC_API_KEY"))}
     checks["admin_token_configured"] = bool(ADMIN_TOKEN)
+    checks["sentry"] = {"backend_configured": bool(SENTRY_DSN), "env": os.getenv("SENTRY_ENV", "production")}
     return checks
 
 @app.get("/admin/stripe-health")

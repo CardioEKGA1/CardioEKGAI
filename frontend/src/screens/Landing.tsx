@@ -34,12 +34,12 @@ const VALUE_PROPS: {icon: string; title: string; body: string}[] = [
 const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPrivacy }) => {
   const openSoulMD = () => { window.location.href = 'https://soulmd.us'; };
   return (
-    <div style={{minHeight:'100vh', display:'flex', flexDirection:'column', background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)', fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
+    <div style={{minHeight:'100vh', display:'flex', flexDirection:'column', background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)', fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif', overflowX:'hidden'}}>
 
       {/* NAV */}
-      <nav style={{padding:'16px 40px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(255,255,255,0.6)', backdropFilter:'blur(10px)', borderBottom:'1px solid rgba(122,176,240,0.2)'}}>
-        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-          <div style={{width:'36px', height:'36px', borderRadius:'10px', background:WORDMARK, display:'flex', alignItems:'center', justifyContent:'center'}}>
+      <nav style={{padding:'14px clamp(16px,4vw,40px)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', background:'rgba(255,255,255,0.6)', backdropFilter:'blur(10px)', borderBottom:'1px solid rgba(122,176,240,0.2)', flexWrap:'wrap'}}>
+        <div style={{display:'flex', alignItems:'center', gap:'10px', minWidth:0}}>
+          <div style={{width:'36px', height:'36px', borderRadius:'10px', background:WORDMARK, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
             <svg width="20" height="14" viewBox="0 0 20 14"><polyline points="0,7 3,7 5,1 7,13 9,4 11,10 13,7 20,7" fill="none" stroke="white" strokeWidth="2" strokeLinejoin="round"/></svg>
           </div>
           <div>
@@ -47,20 +47,20 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
             <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'1px', textTransform:'uppercase'}}>by SoulMD</div>
           </div>
         </div>
-        <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-          <button onClick={onSignIn} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'8px 20px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
-          <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'10px', padding:'8px 20px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer'}}>Sign Up Free</button>
+        <div style={{display:'flex', gap:'6px', alignItems:'center', flexShrink:0}}>
+          <button onClick={onSignIn} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', fontWeight:600, color:'#4a7ad0', cursor:'pointer', whiteSpace:'nowrap'}}>Sign In</button>
+          <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', fontWeight:700, color:'white', cursor:'pointer', whiteSpace:'nowrap'}}>Sign Up Free</button>
         </div>
       </nav>
 
       {/* HERO */}
-      <section style={{padding:'80px 24px 60px', textAlign:'center', maxWidth:'800px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
+      <section style={{padding:'clamp(40px,10vw,80px) clamp(16px,5vw,24px) clamp(40px,7vw,60px)', textAlign:'center', maxWidth:'800px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
         <div style={{fontSize:'11px', fontWeight:600, color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'18px', background:'rgba(122,176,240,0.12)', padding:'6px 16px', borderRadius:'20px', display:'inline-block'}}>AI-Powered EKG Analysis</div>
-        <h1 style={{fontSize:'56px', fontWeight:900, color:'#1a2a4a', lineHeight:1.05, margin:'0 0 20px 0', letterSpacing:'-1px'}}>
-          12-lead EKG interpretation<br/>
-          <span style={{background:WORDMARK, WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text'}}>in seconds</span>
+        <h1 style={{fontSize:'clamp(28px,7.5vw,56px)', fontWeight:900, color:'#1a2a4a', lineHeight:1.1, margin:'0 0 20px 0', letterSpacing:'-0.5px', overflowWrap:'break-word'}}>
+          <span style={{display:'block'}}>12-lead EKG interpretation</span>
+          <span style={{display:'block', background:WORDMARK, WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text'}}>in seconds</span>
         </h1>
-        <p style={{fontSize:'19px', color:'#6a8ab0', lineHeight:1.6, margin:'0 auto 36px auto', maxWidth:'580px'}}>
+        <p style={{fontSize:'clamp(15px,1.8vw,19px)', color:'#6a8ab0', lineHeight:1.6, margin:'0 auto 36px auto', maxWidth:'580px'}}>
           Upload any 12-lead tracing. Get back rhythm, rate, intervals, axis, impression, and urgent flags — in the same structured format every time.
         </p>
         <div style={{display:'flex', gap:'14px', justifyContent:'center', flexWrap:'wrap'}}>
@@ -91,7 +91,7 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
       <section style={{padding:'60px 24px', background:'rgba(255,255,255,0.5)', borderTop:'1px solid rgba(122,176,240,0.18)', borderBottom:'1px solid rgba(122,176,240,0.18)'}}>
         <div style={{maxWidth:'1040px', margin:'0 auto', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:700, color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px'}}>Meet the Suite</div>
-          <h2 style={{fontSize:'34px', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>EKGScan is one of ten.</h2>
+          <h2 style={{fontSize:'clamp(26px,5.5vw,34px)', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>EKGScan is one of ten.</h2>
           <p style={{fontSize:'15px', color:'#6a8ab0', lineHeight:1.65, maxWidth:'620px', margin:'0 auto 40px auto'}}>
             Love EKGScan? You'll love the rest. SoulMD is a full clinical-AI suite covering cardiology, nephrology, radiology, pharmacology, infectious disease, documentation, neurology, and palliative care.
           </p>
@@ -114,7 +114,7 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
       <section style={{padding:'80px 24px', maxWidth:'1000px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
         <div style={{textAlign:'center', marginBottom:'40px'}}>
           <div style={{fontSize:'11px', fontWeight:700, color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'12px'}}>Pricing</div>
-          <h2 style={{fontSize:'34px', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>Start free. Scale when you need to.</h2>
+          <h2 style={{fontSize:'clamp(24px,5vw,34px)', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>Start free. Scale when you need to.</h2>
           <p style={{fontSize:'15px', color:'#6a8ab0', lineHeight:1.65, maxWidth:'580px', margin:'0 auto'}}>
             EKGScan alone is $9.99/month. But most clinicians get more from the full Suite — every tool, one subscription.
           </p>

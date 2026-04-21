@@ -47,21 +47,21 @@ export const SoulMDBrand: React.FC<{size?: number}> = ({ size = 40 }) => (
 
 const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms }) => (
   <div style={{...BG, display:'flex', flexDirection:'column'}}>
-    <nav style={{padding:'16px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(255,255,255,0.6)', backdropFilter:'blur(10px)', borderBottom:'1px solid rgba(122,176,240,0.2)', flexWrap:'wrap', gap:'10px'}}>
+    <nav style={{padding:'14px clamp(16px,4vw,24px)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(255,255,255,0.6)', backdropFilter:'blur(10px)', borderBottom:'1px solid rgba(122,176,240,0.2)', flexWrap:'wrap', gap:'10px'}}>
       <SoulMDBrand/>
-      <div style={{display:'flex', gap:'8px'}}>
-        <button onClick={onSignIn} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'8px 18px', fontSize:'13px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
-        <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'10px', padding:'8px 18px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Sign Up Free</button>
+      <div style={{display:'flex', gap:'6px', flexShrink:0}}>
+        <button onClick={onSignIn} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer', whiteSpace:'nowrap'}}>Sign In</button>
+        <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', fontWeight:'700', color:'white', cursor:'pointer', whiteSpace:'nowrap'}}>Sign Up Free</button>
       </div>
     </nav>
 
     <section style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px 40px', textAlign:'center'}}>
       <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'10px', marginBottom:'28px'}}>
         <SoulMDLogo size={72}/>
-        <div style={{fontSize:'36px', fontWeight:'800', lineHeight:'1.1', letterSpacing:'-0.5px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
+        <div style={{fontSize:'clamp(28px,6vw,36px)', fontWeight:'800', lineHeight:'1.1', letterSpacing:'-0.5px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
         <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'4px'}}>AI CLINICAL SUITE</div>
       </div>
-      <h1 style={{fontSize:'44px', fontWeight:'900', color:'#1a2a4a', lineHeight:'1.1', marginBottom:'14px', maxWidth:'720px', letterSpacing:'-1.2px'}}>
+      <h1 style={{fontSize:'clamp(30px,7vw,44px)', fontWeight:'900', color:'#1a2a4a', lineHeight:'1.1', marginBottom:'14px', maxWidth:'720px', letterSpacing:'-1.2px', padding:'0 16px', wordBreak:'break-word'}}>
         Specialist-grade AI<br/>
         <span style={GRAD_TEXT}>for every decision</span>
       </h1>
