@@ -49,7 +49,16 @@ load_dotenv()
 # user-submitted and potentially PHI-adjacent. We set send_default_pii=False
 # and add a before_send hook that drops request bodies and scrubs any
 # "lab_text", "bullets", "text", "justification" keys from extra data.
-SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+def _clean_env(v: str) -> str:
+    """Strip whitespace and any stray surrounding quotes. Railway users
+    occasionally paste env values with the quotes — kill those early so we
+    never feed a malformed DSN to SDKs that won't tell us why they failed."""
+    s = (v or "").strip()
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        s = s[1:-1].strip()
+    return s
+
+SENTRY_DSN = _clean_env(os.getenv("SENTRY_DSN", ""))
 if SENTRY_DSN:
     # Any failure in Sentry init MUST NOT take down the app. Broad try/except.
     try:
@@ -2123,9 +2132,9 @@ def public_config():
     REACT_APP_* build-time vars so DSN rotation doesn't require a rebuild."""
     return {
         "sentry": {
-            "dsn": os.getenv("REACT_APP_SENTRY_DSN") or os.getenv("SENTRY_FRONTEND_DSN") or "",
-            "env": os.getenv("SENTRY_ENV", "production"),
-            "traces_sample_rate": float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            "dsn": _clean_env(os.getenv("REACT_APP_SENTRY_DSN", "") or os.getenv("SENTRY_FRONTEND_DSN", "")),
+            "env": _clean_env(os.getenv("SENTRY_ENV", "")) or "production",
+            "traces_sample_rate": float(_clean_env(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "")) or "0.1"),
         },
     }
 
