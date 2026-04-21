@@ -21,6 +21,7 @@ import CerebralAITool from './screens/tools/CerebralAITool';
 import PalliativeMDTool from './screens/tools/PalliativeMDTool';
 import LabReadTool from './screens/tools/LabReadTool';
 import CliniScoreTool from './screens/tools/CliniScoreTool';
+import Concierge from './screens/concierge/Concierge';
 
 export interface EkgResult {
   rhythm: string;
@@ -46,7 +47,8 @@ type Screen =
   | 'terms' | 'privacy' | 'dashboard'
   | 'tool_nephroai' | 'tool_rxcheck' | 'tool_antibioticai' | 'tool_clinicalnote'
   | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd'
-  | 'tool_labread' | 'tool_cliniscore';
+  | 'tool_labread' | 'tool_cliniscore'
+  | 'concierge';
 
 const API = 'https://ekgscan.com';
 
@@ -56,17 +58,19 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/privacy') return 'privacy';
   if (path === '/terms') return 'terms';
   if (path === '/scan' || path === '/app') return 'upload';
+  if (path === '/concierge') return 'concierge';
   return null;
 };
 const screenToPath = (s: Screen): string => {
   if (s === 'privacy') return '/privacy';
   if (s === 'terms') return '/terms';
   if (s === 'upload') return '/scan';
+  if (s === 'concierge') return '/concierge';
   return '/';
 };
 
 // Screens with deep-linkable URLs — these survive refresh and browser back.
-const DEEPLINK_SCREENS: Screen[] = ['privacy', 'terms', 'upload'];
+const DEEPLINK_SCREENS: Screen[] = ['privacy', 'terms', 'upload', 'concierge'];
 const isDeepLink = (s: Screen) => DEEPLINK_SCREENS.includes(s);
 
 const App: React.FC = () => {
@@ -218,6 +222,7 @@ const App: React.FC = () => {
       tool_palliativemd: `PalliativeMD · ${brand}`,
       tool_labread:      `LabRead · ${brand}`,
       tool_cliniscore:   `CliniScore · ${brand}`,
+      concierge:         'Concierge Medicine',
     };
     document.title = PER_SCREEN[screen] || brand;
   }, [screen, isSoulMD]);
@@ -260,6 +265,7 @@ const App: React.FC = () => {
       {screen==='tool_palliativemd' && user && <PalliativeMDTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='tool_labread' && user && <LabReadTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='tool_cliniscore' && user && <CliniScoreTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
+      {screen==='concierge' && user && <Concierge API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}

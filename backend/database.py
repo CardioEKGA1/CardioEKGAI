@@ -93,6 +93,121 @@ class ToolFeedback(Base):
     comment = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+# ─── Concierge Medicine (private, anderson@soulmd.us only) ─────────────────
+# All concierge_* tables are access-controlled at the API layer by
+# verify_concierge_admin (superuser + email match). These are NOT exposed to
+# regular SoulMD users under any circumstances.
+
+class ConciergePatient(Base):
+    __tablename__ = "concierge_patients"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, index=True, nullable=False)
+    dob = Column(String, nullable=True)  # ISO date string, keeps form simple
+    phone = Column(String, nullable=True)
+    membership_tier = Column(String, default="awaken")  # awaken | align | ascend
+    intake_data = Column(JSON, default=dict)  # chief_complaint, medical_history, medications, allergies, goals, comm_preference, etc.
+    doctor_notes = Column(String, default="")  # free-text private notes
+    last_contact_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeMessage(Base):
+    __tablename__ = "concierge_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True)
+    direction = Column(String)  # "outbound" | "inbound" | "note"
+    subject = Column(String, nullable=True)
+    body = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class ConciergeAppointment(Base):
+    __tablename__ = "concierge_appointments"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True)
+    starts_at = Column(DateTime, index=True)
+    duration_min = Column(Integer, default=30)
+    appointment_type = Column(String)  # medical_visit | life_coaching | reiki | telehealth | follow_up
+    status = Column(String, default="scheduled")  # scheduled | completed | canceled | no_show
+    notes = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeMembership(Base):
+    __tablename__ = "concierge_memberships"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True)
+    tier = Column(String)  # awaken | align | ascend
+    status = Column(String, default="active")
+    stripe_subscription_id = Column(String, nullable=True)
+    stripe_customer_id = Column(String, nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    canceled_at = Column(DateTime, nullable=True)
+
+class ConciergeInvoice(Base):
+    __tablename__ = "concierge_invoices"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True)
+    amount_cents = Column(Integer)
+    description = Column(String)
+    status = Column(String, default="paid")  # paid | pending | failed
+    stripe_invoice_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class ConciergeCoachingModule(Base):
+    __tablename__ = "concierge_coaching_modules"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String)
+    description = Column(String, default="")
+    content = Column(String, default="")  # markdown-ish prose
+    exercises = Column(JSON, default=list)  # [{prompt, type, ...}]
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeModuleAssignment(Base):
+    __tablename__ = "concierge_module_assignments"
+    id = Column(Integer, primary_key=True, index=True)
+    module_id = Column(Integer, index=True)
+    patient_id = Column(Integer, index=True)
+    progress_pct = Column(Integer, default=0)
+    completed_at = Column(DateTime, nullable=True)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeMeditation(Base):
+    __tablename__ = "concierge_meditations"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String)
+    category = Column(String)  # breathwork | body_scan | visualization | energy_healing | sleep | stress
+    description = Column(String, default="")
+    duration_min = Column(Integer, default=10)
+    script = Column(String, default="")  # text
+    audio_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeMeditationAssignment(Base):
+    __tablename__ = "concierge_meditation_assignments"
+    id = Column(Integer, primary_key=True, index=True)
+    meditation_id = Column(Integer, index=True)
+    patient_id = Column(Integer, index=True)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeHabit(Base):
+    __tablename__ = "concierge_habits"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True)
+    title = Column(String)
+    description = Column(String, default="")
+    frequency = Column(String, default="daily")  # daily | weekly | custom
+    target = Column(String, default="")  # e.g. "5x/week", "10 min/day"
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeHabitCheckin(Base):
+    __tablename__ = "concierge_habit_checkins"
+    id = Column(Integer, primary_key=True, index=True)
+    habit_id = Column(Integer, index=True)
+    status = Column(String)  # done | skipped | partial
+    notes = Column(String, default="")
+    checked_in_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:

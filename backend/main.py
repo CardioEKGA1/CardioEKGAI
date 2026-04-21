@@ -11,7 +11,12 @@ from slowapi.errors import RateLimitExceeded
 from anthropic import Anthropic
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt
+from database import (
+    get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt,
+    ConciergePatient, ConciergeMessage, ConciergeAppointment, ConciergeMembership, ConciergeInvoice,
+    ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
+    ConciergeHabit, ConciergeHabitCheckin,
+)
 import hashlib
 from auth import create_token, create_magic_token, decode_token
 from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, ANTIBIOTICAI_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE, LABREAD_EXTRACT_PROMPT, LABREAD_ANALYZE_PROMPT, CLINISCORE_INTERPRET_PROMPT_TEMPLATE
@@ -445,6 +450,20 @@ def verify_admin(x_admin_token: str = Header(None)):
     if not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid admin token")
     return True
+
+# Concierge Medicine access control: ONLY anderson@soulmd.us (the practice
+# owner) can access these endpoints. This is a private practice management
+# system — no other user should be able to see or interact with patient data
+# under any circumstances. Gate every /concierge endpoint with this dep.
+CONCIERGE_OWNER_EMAIL = os.getenv("CONCIERGE_OWNER_EMAIL", "anderson@soulmd.us").strip().lower()
+
+def verify_concierge_owner(current_user: User = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if (current_user.email or "").strip().lower() != CONCIERGE_OWNER_EMAIL:
+        # 404 not 403 — we never want to hint that this section exists.
+        raise HTTPException(status_code=404, detail="Not found")
+    return current_user
 
 def check_and_update_spend(user, db):
     current_month = datetime.now().month
@@ -1936,6 +1955,161 @@ def admin_moderation(db: Session = Depends(get_db), _: bool = Depends(verify_adm
         "blocklist_rejoin_attempts": blocklist_rejoin_attempts,
         "failed_payments": {"note": "Not yet tracked. Requires Stripe invoice.payment_failed webhook handler."},
     }
+
+# ─── Concierge Medicine (anderson@soulmd.us only) ──────────────────────────
+
+class ConciergePatientCreate(BaseModel):
+    name: str
+    email: str
+    dob: str | None = None
+    phone: str | None = None
+    membership_tier: str = "awaken"
+    intake_data: dict | None = None
+
+class ConciergePatientUpdate(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    dob: str | None = None
+    phone: str | None = None
+    membership_tier: str | None = None
+    intake_data: dict | None = None
+    doctor_notes: str | None = None
+
+def _patient_dict(p: ConciergePatient) -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "email": p.email,
+        "dob": p.dob,
+        "phone": p.phone,
+        "membership_tier": p.membership_tier,
+        "intake_data": p.intake_data or {},
+        "doctor_notes": p.doctor_notes or "",
+        "last_contact_at": p.last_contact_at.isoformat() if p.last_contact_at else None,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+@app.get("/concierge/ping")
+def concierge_ping(_: User = Depends(verify_concierge_owner)):
+    """Minimal endpoint used by the frontend to verify concierge access without
+    leaking the section's existence in a network tab to unauthorized users —
+    anyone not the owner gets a 404."""
+    return {"ok": True, "section": "concierge"}
+
+@app.get("/concierge/patients")
+def concierge_list_patients(
+    search: str = "",
+    limit: int = 200,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    q = db.query(ConciergePatient)
+    if search:
+        s = f"%{search.strip()}%"
+        q = q.filter((ConciergePatient.name.ilike(s)) | (ConciergePatient.email.ilike(s)))
+    rows = q.order_by(ConciergePatient.created_at.desc()).limit(min(max(limit, 1), 500)).all()
+    return {"patients": [_patient_dict(p) for p in rows], "total": len(rows)}
+
+@app.post("/concierge/patients")
+def concierge_create_patient(
+    data: ConciergePatientCreate,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    name = (data.name or "").strip()
+    email = (data.email or "").strip().lower()
+    if not name or not email:
+        raise HTTPException(status_code=400, detail="Name and email are required.")
+    if "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Valid email required.")
+    # Allow duplicate emails — same patient could be added by mistake, but that
+    # should be caught by the practice workflow, not hard-blocked here.
+    tier = (data.membership_tier or "awaken").lower()
+    if tier not in {"awaken", "align", "ascend"}:
+        raise HTTPException(status_code=400, detail="Unknown membership tier.")
+    patient = ConciergePatient(
+        name=name, email=email,
+        dob=(data.dob or None), phone=(data.phone or None),
+        membership_tier=tier,
+        intake_data=data.intake_data or {},
+    )
+    db.add(patient)
+    db.commit()
+    db.refresh(patient)
+    return _patient_dict(patient)
+
+@app.get("/concierge/patients/{patient_id}")
+def concierge_get_patient(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return _patient_dict(p)
+
+@app.patch("/concierge/patients/{patient_id}")
+def concierge_update_patient(
+    patient_id: int,
+    data: ConciergePatientUpdate,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if data.name is not None: p.name = data.name.strip()
+    if data.email is not None: p.email = data.email.strip().lower()
+    if data.dob is not None: p.dob = data.dob or None
+    if data.phone is not None: p.phone = data.phone or None
+    if data.membership_tier is not None:
+        tier = data.membership_tier.lower()
+        if tier in {"awaken", "align", "ascend"}:
+            p.membership_tier = tier
+    if data.intake_data is not None: p.intake_data = data.intake_data
+    if data.doctor_notes is not None: p.doctor_notes = data.doctor_notes
+    p.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(p)
+    return _patient_dict(p)
+
+@app.delete("/concierge/patients/{patient_id}")
+def concierge_delete_patient(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    pid = p.id
+    # Cascade: wipe all per-patient children. Pragmatic hard delete since this
+    # is the owner's own practice data — no multi-tenant isolation concern.
+    db.query(ConciergeMessage).filter(ConciergeMessage.patient_id == pid).delete(synchronize_session=False)
+    db.query(ConciergeAppointment).filter(ConciergeAppointment.patient_id == pid).delete(synchronize_session=False)
+    db.query(ConciergeInvoice).filter(ConciergeInvoice.patient_id == pid).delete(synchronize_session=False)
+    db.query(ConciergeMembership).filter(ConciergeMembership.patient_id == pid).delete(synchronize_session=False)
+    db.query(ConciergeModuleAssignment).filter(ConciergeModuleAssignment.patient_id == pid).delete(synchronize_session=False)
+    db.query(ConciergeMeditationAssignment).filter(ConciergeMeditationAssignment.patient_id == pid).delete(synchronize_session=False)
+    habit_ids = [h.id for h in db.query(ConciergeHabit).filter(ConciergeHabit.patient_id == pid).all()]
+    if habit_ids:
+        db.query(ConciergeHabitCheckin).filter(ConciergeHabitCheckin.habit_id.in_(habit_ids)).delete(synchronize_session=False)
+    db.query(ConciergeHabit).filter(ConciergeHabit.patient_id == pid).delete(synchronize_session=False)
+    db.delete(p)
+    db.commit()
+    return {"ok": True, "deleted_patient_id": pid}
+
+# ─── Uptime monitoring ─────────────────────────────────────────────────────
+# Lightweight endpoint designed for external uptime monitors (UptimeRobot,
+# BetterStack, etc.). No DB call, no auth, <1ms response. Use this instead
+# of /health for external probes so we don't burn DB connections on every
+# 5-minute check.
+
+@app.get("/ping")
+def ping():
+    return {"ok": True, "ts": datetime.utcnow().isoformat() + "Z"}
 
 _build = os.path.join(os.path.dirname(__file__), "build")
 if os.path.exists(_build):
