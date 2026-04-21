@@ -80,7 +80,7 @@ if SENTRY_DSN:
         environment=os.getenv("SENTRY_ENV", "production"),
         release=os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:12] or None,
         send_default_pii=False,
-        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.05")),
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
         before_send=_scrub,
         integrations=[FastApiIntegration(), StarletteIntegration()],
     )
@@ -2110,6 +2110,20 @@ def concierge_delete_patient(
 @app.get("/ping")
 def ping():
     return {"ok": True, "ts": datetime.utcnow().isoformat() + "Z"}
+
+@app.get("/config")
+def public_config():
+    """Runtime config for the frontend. Only exposes values that are safe to
+    embed in client-side code — Sentry DSNs are explicitly designed for this
+    (they're embedded in every user's browser bundle anyway). Used instead of
+    REACT_APP_* build-time vars so DSN rotation doesn't require a rebuild."""
+    return {
+        "sentry": {
+            "dsn": os.getenv("REACT_APP_SENTRY_DSN") or os.getenv("SENTRY_FRONTEND_DSN") or "",
+            "env": os.getenv("SENTRY_ENV", "production"),
+            "traces_sample_rate": float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        },
+    }
 
 _build = os.path.join(os.path.dirname(__file__), "build")
 if os.path.exists(_build):
