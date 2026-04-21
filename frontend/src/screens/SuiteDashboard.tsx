@@ -438,7 +438,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         <div style={{...CARD, marginTop:'20px', padding:'24px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'2px solid rgba(122,176,240,0.35)', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
           <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 10 tools</div>
-          <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'4px', fontWeight:600}}>All 10 tools à la carte = $1,259.90/yr — Suite saves you $371.90/yr</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'4px', fontWeight:600}}>Comparable tools elsewhere cost $1,259.90/yr — Suite gives you all 10 for $888/yr</div>
           <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime · includes unlimited LabRead & RiskRead</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
             <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>
