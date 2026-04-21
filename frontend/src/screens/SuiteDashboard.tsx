@@ -17,7 +17,7 @@ interface Props {
   checkoutResult: string | null;
 }
 
-interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; keywords: string; }
+interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; keywords: string; free?: boolean; }
 
 const TOOLS: Tool[] = [
   { slug:'ekgscan',      name:'EKGScan',         icon:'🫀',              desc:'12-lead EKG interpretation in seconds',                                  monthly:9.99,  yearly:89.99,  keywords:'ekg ecg cardiac rhythm heart 12-lead cardiology arrhythmia atrial ventricular qtc' },
@@ -25,12 +25,14 @@ const TOOLS: Tool[] = [
   { slug:'xrayread',     name:'XrayRead',        icon:'🩻',              desc:'Structured radiology report from any X-ray image',                       monthly:24.99, yearly:179.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
   { slug:'rxcheck',      name:'RxCheck',         icon:'💊',              desc:'Full medication interaction safety check',                               monthly:9.99,  yearly:89.99,  keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
   { slug:'infectid',     name:'InfectID',        icon:'🦠',              desc:'IDSA-based antibiotic recommendations',                                  monthly:9.99,  yearly:89.99,  keywords:'infectious disease antibiotics idsa uti cellulitis pneumonia cap hap sepsis bacteremia organism' },
-  { slug:'clinicalnote', name:'ClinicalNote AI', icon:'📝',              desc:'SOAP notes from bullet points in seconds',                               monthly:24.99, yearly:179.99, keywords:'soap h&p note documentation discharge summary progress consult hpi' },
+  { slug:'clinicalnote', name:'ClinicalNote AI', icon:'📝',              desc:'SOAP notes from bullets + prior auth letters',                           monthly:24.99, yearly:179.99, keywords:'soap h&p note documentation discharge summary progress consult hpi prior auth pa' },
   { slug:'cerebralai',   name:'CerebralAI',      icon:'🧠',              desc:'Brain and spine MRI and CT interpretation',                              monthly:24.99, yearly:179.99, keywords:'brain spine mri ct neuroimaging stroke hemorrhage head radiology neurology cord' },
   { slug:'palliativemd', name:'PalliativeMD',    icon:'🫶',              desc:'AI-guided palliative care — goals of care, prognosis, family meetings', monthly:24.99, yearly:179.99, keywords:'palliative goals of care prognosis hospice family meeting dnr dni code status end of life comfort' },
+  { slug:'labread',      name:'LabRead',         icon:'🧪',              desc:'AI lab-panel interpretation — paste, dictate, or upload',                 monthly:0,     yearly:0,      free:true,  keywords:'labs chemistry cbc bmp cmp electrolytes liver renal thyroid iron ferritin ldh tsh ptt inr ca+k+na' },
+  { slug:'riskread',     name:'RiskRead',        icon:'📊',              desc:'Clinical risk calculators with AI interpretation',                        monthly:0,     yearly:0,      free:true,  keywords:'calculator mdcalc chadsvasc hasbled heart score wells curb65 meld child-pugh fib4 phq9 gad7 qsofa bmi egfr anion gap winters' },
 ];
 
-const OPEN_TOOLS = new Set(['nephroai','rxcheck','infectid','clinicalnote','xrayread','cerebralai','palliativemd']);
+const OPEN_TOOLS = new Set(['nephroai','rxcheck','infectid','clinicalnote','xrayread','cerebralai','palliativemd','labread','riskread']);
 
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'20px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)'};
@@ -54,6 +56,7 @@ interface AccessResp {
   is_superuser: boolean;
   access: Record<string, boolean>;
   tiers: Record<string, string>;
+  free_tier_remaining?: Record<string, number | null>;
   has_budget: boolean;
   overage: number;
   pct: number;
@@ -317,7 +320,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       {!isSuper && !suiteActive && lockedCount > 0 && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'16px', background:'linear-gradient(135deg,rgba(122,176,240,0.12),rgba(155,143,232,0.12))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
           <div style={{fontSize:'13px', color:'#1a2a4a'}}>You have {lockedCount} tool{lockedCount===1?'':'s'} locked. Upgrade to Suite for $88.88/month and unlock everything.</div>
-          <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_monthly' ? '…' : 'Unlock all 8'}</button>
+          <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_monthly' ? '…' : 'Unlock all 10'}</button>
         </div>
       )}
 
@@ -386,14 +389,30 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
                 {active && usedCount > 0 && (
                   <div style={{fontSize:'11px', color:'#8aa0c0'}}>Used {usedCount} time{usedCount===1?'':'s'} this month</div>
                 )}
+                {t.free && (
+                  <div style={{fontSize:'11px', color:'#4a7ad0', fontWeight:600, background:'rgba(122,176,240,0.12)', padding:'4px 10px', borderRadius:'999px', alignSelf:'flex-start'}}>
+                    {(() => {
+                      const rem = access?.free_tier_remaining?.[t.slug];
+                      const suiteOrOwn = suiteActive || !!access?.tiers?.[t.slug];
+                      if (suiteOrOwn) return 'Unlimited · Suite';
+                      if (typeof rem === 'number') return `Free · ${rem} / 5 today`;
+                      return 'Free · 5 / day';
+                    })()}
+                  </div>
+                )}
                 {active ? (
                   t.slug === 'ekgscan' ? (
                     <button onClick={onOpenEkgscan} style={{background:WORDMARK, border:'none', borderRadius:'12px', padding:'10px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Open →</button>
-                  ) : OPEN_TOOLS.has(t.slug) ? (
+                  ) : OPEN_TOOLS.has(t.slug) || t.free ? (
                     <button onClick={()=>onOpenTool(t.slug)} style={{background:WORDMARK, border:'none', borderRadius:'12px', padding:'10px', fontSize:'13px', fontWeight:'700', color:'white', cursor:'pointer'}}>Open →</button>
                   ) : (
                     <button disabled style={{background:'rgba(240,246,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'12px', padding:'10px', fontSize:'12px', fontWeight:'700', color:'#8aa0c0', cursor:'default'}}>UI launching soon</button>
                   )
+                ) : t.free ? (
+                  <div style={{display:'flex', flexDirection:'column', gap:'6px', marginTop:'auto'}}>
+                    <div style={{fontSize:'12px', color:'#a06810', fontWeight:600}}>Daily free limit reached</div>
+                    <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, background:WORDMARK, border:'none', color:'white'}}>Upgrade to Suite for unlimited →</button>
+                  </div>
                 ) : (
                   <div style={{display:'flex', gap:'6px', marginTop:'auto'}}>
                     <button onClick={()=>subscribe(t.slug,'monthly')} disabled={mLoading} style={{...BTN, opacity: mLoading ? 0.6 : 1}}>{mLoading ? '...' : `Try Monthly — ${money(t.monthly)}/mo`}</button>
@@ -418,8 +437,9 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       {!loading && !isSuper && !suiteActive && (
         <div style={{...CARD, marginTop:'20px', padding:'24px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'2px solid rgba(122,176,240,0.35)', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
-          <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 8 tools</div>
-          <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime</div>
+          <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 10 tools</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'4px', fontWeight:600}}>All 10 tools à la carte = $1,259.90/yr — Suite saves you $371.90/yr</div>
+          <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime · includes unlimited LabRead & RiskRead</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
             <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>
             <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $888'}</button>

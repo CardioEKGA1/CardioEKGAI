@@ -18,9 +18,11 @@ const SUITE_TOOLS: {icon: string; name: string; desc: string}[] = [
   { icon: '🩻', name: 'XrayRead',        desc: 'Structured radiology report from any X-ray' },
   { icon: '💊', name: 'RxCheck',         desc: 'Medication interaction safety check' },
   { icon: '🦠', name: 'InfectID',        desc: 'IDSA-based antibiotic recommendations' },
-  { icon: '📝', name: 'ClinicalNote AI', desc: 'SOAP notes from bullet points in seconds' },
+  { icon: '📝', name: 'ClinicalNote AI', desc: 'Notes + prior-auth letters from bullet points' },
   { icon: '🧠', name: 'CerebralAI',      desc: 'Brain and spine MRI/CT interpretation' },
   { icon: '🫶', name: 'PalliativeMD',    desc: 'Goals of care, prognosis, family meetings' },
+  { icon: '🧪', name: 'LabRead',         desc: 'AI lab-panel interpretation with flagged values' },
+  { icon: '📊', name: 'RiskRead',        desc: 'Clinical risk calculators with AI interpretation' },
 ];
 
 const VALUE_PROPS: {icon: string; title: string; body: string}[] = [
@@ -89,7 +91,7 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
       <section style={{padding:'60px 24px', background:'rgba(255,255,255,0.5)', borderTop:'1px solid rgba(122,176,240,0.18)', borderBottom:'1px solid rgba(122,176,240,0.18)'}}>
         <div style={{maxWidth:'1040px', margin:'0 auto', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:700, color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px'}}>Meet the Suite</div>
-          <h2 style={{fontSize:'34px', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>EKGScan is one of eight.</h2>
+          <h2 style={{fontSize:'34px', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>EKGScan is one of ten.</h2>
           <p style={{fontSize:'15px', color:'#6a8ab0', lineHeight:1.65, maxWidth:'620px', margin:'0 auto 40px auto'}}>
             Love EKGScan? You'll love the rest. SoulMD is a full clinical-AI suite covering cardiology, nephrology, radiology, pharmacology, infectious disease, documentation, neurology, and palliative care.
           </p>
@@ -141,10 +143,10 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
             <div style={{fontSize:'40px', fontWeight:900, lineHeight:1, marginBottom:'4px'}}>$88.88<span style={{fontSize:'16px', fontWeight:600, opacity:0.8}}>/mo</span></div>
             <div style={{fontSize:'13px', opacity:0.85, marginBottom:'20px'}}>or $888/year — save ~$179/yr</div>
             <ul style={{listStyle:'none', padding:0, margin:'0 0 24px 0', fontSize:'13px', lineHeight:1.9}}>
-              <li>✓ All 8 clinical-AI tools</li>
-              <li>✓ EKGScan · NephroAI · XrayRead</li>
-              <li>✓ RxCheck · InfectID · ClinicalNote</li>
-              <li>✓ CerebralAI · PalliativeMD</li>
+              <li>✓ All 10 clinical-AI tools</li>
+              <li>✓ EKGScan · NephroAI · XrayRead · RxCheck</li>
+              <li>✓ InfectID · ClinicalNote · CerebralAI</li>
+              <li>✓ PalliativeMD · LabRead · RiskRead</li>
               <li>✓ One subscription, one login</li>
             </ul>
             <button onClick={openSoulMD} style={{marginTop:'auto', background:'white', border:'none', borderRadius:'14px', padding:'14px', fontSize:'14px', fontWeight:800, color:'#4a7ad0', cursor:'pointer', boxShadow:'0 4px 14px rgba(0,0,0,0.08)'}}>Get the Suite at soulmd.us →</button>

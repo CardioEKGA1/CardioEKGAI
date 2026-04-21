@@ -19,6 +19,8 @@ import ClinicalNoteTool from './screens/tools/ClinicalNoteTool';
 import XrayReadTool from './screens/tools/XrayReadTool';
 import CerebralAITool from './screens/tools/CerebralAITool';
 import PalliativeMDTool from './screens/tools/PalliativeMDTool';
+import LabReadTool from './screens/tools/LabReadTool';
+import RiskReadTool from './screens/tools/RiskReadTool';
 
 export interface EkgResult {
   rhythm: string;
@@ -43,7 +45,8 @@ type Screen =
   | 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall'
   | 'terms' | 'privacy' | 'dashboard'
   | 'tool_nephroai' | 'tool_rxcheck' | 'tool_infectid' | 'tool_clinicalnote'
-  | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd';
+  | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd'
+  | 'tool_labread' | 'tool_riskread';
 
 const API = 'https://ekgscan.com';
 
@@ -218,7 +221,7 @@ const App: React.FC = () => {
       {screen==='privacy' && <Privacy onBack={goBack}/>}
       {screen==='terms' && <Terms onBack={goBack}/>}
       {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'} onOpenTool={(slug)=>{
-        const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', infectid:'tool_infectid', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd'};
+        const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', infectid:'tool_infectid', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd', labread:'tool_labread', riskread:'tool_riskread'};
         if (map[slug]) navigate(map[slug]);
       }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}/>}
       {screen==='tool_nephroai' && user && <NephroAITool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
@@ -228,6 +231,8 @@ const App: React.FC = () => {
       {screen==='tool_xrayread' && user && <XrayReadTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='tool_cerebralai' && user && <CerebralAITool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='tool_palliativemd' && user && <PalliativeMDTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
+      {screen==='tool_labread' && user && <LabReadTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
+      {screen==='tool_riskread' && user && <RiskReadTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}

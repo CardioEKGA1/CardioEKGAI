@@ -36,6 +36,8 @@ CATALOG = [
     ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings",  2499, 17999),
     # Suite
     ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",                              8888, 88800),
+    # LabRead and RiskRead are free (5/day) with unlimited access via Suite —
+    # no standalone Stripe price at this time.
 ]
 
 

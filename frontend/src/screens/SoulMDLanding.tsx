@@ -12,7 +12,9 @@ const TOOLS: LandingTool[] = [
   { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                               price: '$9.99 / mo · $89.99 / yr' },
   { slug: 'infectid',     name: 'InfectID',        icon: '🦠', desc: 'IDSA-based antibiotic recommendations',                                  price: '$9.99 / mo · $89.99 / yr' },
   { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘', desc: 'Comprehensive nephrology decision support',                              price: '$9.99 / mo · $89.99 / yr' },
-  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes from bullet points in seconds',                               price: '$24.99 / mo · $179.99 / yr' },
+  { slug: 'labread',      name: 'LabRead',         icon: '🧪', desc: 'AI lab-panel interpretation — paste, dictate, or upload',                price: 'Free · 5 / day · Suite = unlimited' },
+  { slug: 'riskread',     name: 'RiskRead',        icon: '📊', desc: 'Clinical risk calculators with AI interpretation',                        price: 'Free · 5 / day · Suite = unlimited' },
+  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes + prior authorization letters from bullet points',            price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                              price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',                      price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶', desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', price: '$24.99 / mo · $179.99 / yr' },
@@ -23,7 +25,7 @@ const ADVANTAGES = [
   { title: 'Built for clinicians',             body: 'Structured outputs designed for clinical workflows — not chatbot transcripts.' },
   { title: 'Powered by the most advanced AI',  body: 'Runs on Claude by Anthropic, the frontier model for nuanced clinical reasoning.' },
   { title: 'Structured input, better output',  body: 'Guided forms ensure the AI sees the right clinical context every time.' },
-  { title: 'One platform, eight tools',        body: 'One login covers every specialty — cardiology, nephrology, radiology, palliative care and more.' },
+  { title: 'One platform, ten tools',          body: 'One login covers every specialty — cardiology, nephrology, radiology, palliative care, labs, risk scoring, and more.' },
   { title: 'Always improving',                 body: 'Continuously updated with the latest clinical guidelines and best practices.' },
   { title: 'Decision support, not replacement',body: 'AI-powered second opinion available 24/7 — to support your judgment, not replace it.' },
 ];
@@ -110,7 +112,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
         <PriceCard title="Standard tool"       subtitle="EKGScan · RxCheck · InfectID · NephroAI"                        monthly="$9.99"  yearly="$89.99"  cta="Start standard tool" onCta={onSignUp}/>
         <PriceCard title="Premium tool"        subtitle="ClinicalNote AI · CerebralAI · XrayRead · PalliativeMD"         monthly="$24.99" yearly="$179.99" cta="Start premium tool" onCta={onSignUp}/>
-        <PriceCard title="SoulMD Suite"          subtitle="All 8 tools · one login"           monthly="$88.88" yearly="$888"    cta="Start Suite" onCta={onSignUp} highlighted/>
+        <PriceCard title="SoulMD Suite"          subtitle="All 10 tools · one login"          monthly="$88.88" yearly="$888"    cta="Start Suite" onCta={onSignUp} highlighted/>
       </div>
       <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>Cancel anytime.</div>
     </section>

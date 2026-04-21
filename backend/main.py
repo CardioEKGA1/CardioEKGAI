@@ -14,7 +14,7 @@ from sqlalchemy import func
 from database import get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt
 import hashlib
 from auth import create_token, create_magic_token, decode_token
-from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE
+from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, INFECTID_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE, LABREAD_EXTRACT_PROMPT, LABREAD_ANALYZE_PROMPT, RISKREAD_INTERPRET_PROMPT_TEMPLATE
 from email_utils import send_verification_email
 from pydantic import BaseModel
 from datetime import datetime
@@ -136,7 +136,14 @@ class CheckoutRequest(BaseModel):
 class AccountDeletion(BaseModel):
     confirm: bool = False
 
-TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd", "suite"}
+TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd", "labread", "riskread", "suite"}
+
+# Tools with a free-tier daily allowance (usage-metered, not gated by subscription).
+# Resets at UTC midnight. Paid subscribers + suite + superusers are unlimited.
+FREE_TIER_DAILY_LIMITS = {
+    "labread": 5,
+    "riskread": 5,
+}
 
 def get_price_id(tool_slug: str, tier: str) -> str:
     key = f"STRIPE_PRICE_{tool_slug.upper()}_{tier.upper()}"
@@ -164,12 +171,41 @@ def has_tool_access(user: User, tool_slug: str, db: Session) -> bool:
             return True
         if (user.scan_count or 0) < 1:
             return True
+    # Free-tier daily allowance for LabRead / RiskRead: 5 uses per UTC day per
+    # tool for any signed-in user. has_tool_access() returns True when the user
+    # still has capacity today; the remaining count is surfaced via the response.
+    if tool_slug in FREE_TIER_DAILY_LIMITS:
+        used_today = _free_tier_uses_today(user.id, tool_slug, db)
+        return used_today < FREE_TIER_DAILY_LIMITS[tool_slug]
     return False
+
+def _free_tier_uses_today(user_id: int, tool_slug: str, db: Session) -> int:
+    """Count ToolUsage rows for this user+tool since UTC midnight."""
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    return db.query(ToolUsage).filter(
+        ToolUsage.user_id == user_id,
+        ToolUsage.tool_slug == tool_slug,
+        ToolUsage.created_at >= today,
+    ).count()
+
+def free_tier_remaining(user: User, tool_slug: str, db: Session) -> int | None:
+    """Returns uses remaining today, or None if tool has no free-tier cap or user is unlimited."""
+    if tool_slug not in FREE_TIER_DAILY_LIMITS:
+        return None
+    if user.is_superuser:
+        return None
+    if _has_active_sub(user.id, "suite", db) or _has_active_sub(user.id, tool_slug, db):
+        return None
+    cap = FREE_TIER_DAILY_LIMITS[tool_slug]
+    return max(0, cap - _free_tier_uses_today(user.id, tool_slug, db))
 
 BUDGET_HIERARCHY = [("suite", 60.0), ("clinicalnote", 15.0), ("nephroai", 12.0), ("palliativemd", 12.0)]
 _OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "infectid", "cerebralai")
 OVERAGE_PER_CALL = 0.10
 
+# LabRead / RiskRead are free tools (5/day cap, Suite = unlimited) — no entry
+# here because there is no subscription price. Their usage rows still flow through
+# log_usage for the 5/day counter, but don't contribute to overage math.
 PRICE_PER_MONTH = {
     # Standard tier — $9.99/mo · $89.99/yr
     ("ekgscan",      "monthly"):  9.99, ("ekgscan",      "yearly"):  89.99 / 12,
@@ -320,6 +356,32 @@ def call_claude_json_image(system_prompt: str, image_bytes: bytes, media_type: s
             {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
             {"type": "text", "text": user_note},
         ]}],
+    )
+    return _extract_json(response.content[0].text)
+
+# Claude-supported image media types for vision API. HEIC is NOT supported;
+# mobile clients should either convert to JPEG client-side (iOS Safari converts
+# automatically when accept excludes heic) or the backend returns 400.
+CLAUDE_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"}
+
+def call_claude_json_document(system_prompt: str, file_bytes: bytes, media_type: str, user_note: str, max_tokens: int = 2000) -> dict:
+    """Vision/document call that handles both images and PDFs.
+    Claude uses different content-block types: "image" for image types,
+    "document" for application/pdf. Raises HTTPException(400) for unsupported types.
+    """
+    mt = (media_type or "").lower().split(";")[0].strip()
+    b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
+    if mt == "application/pdf":
+        content_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+    elif mt in CLAUDE_IMAGE_TYPES:
+        content_block = {"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}}
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type {mt!r}. Use JPEG, PNG, or PDF. HEIC must be converted first (take a screenshot or switch iPhone → Settings → Camera → Formats → Most Compatible).")
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": [content_block, {"type": "text", "text": user_note}]}],
     )
     return _extract_json(response.content[0].text)
 
@@ -832,6 +894,19 @@ class ClinicalNoteRequest(BaseModel):
     justification: str | None = None
     insurance_type: str | None = None
 
+class LabReadAnalyzeRequest(BaseModel):
+    lab_text: str
+    clinical_context: str | None = None
+
+class RiskReadInterpretRequest(BaseModel):
+    calculator_id: str         # e.g. "chadsvasc"
+    calculator_name: str       # human-readable name, e.g. "CHA₂DS₂-VASc"
+    specialty: str | None = None
+    inputs: dict               # field_id → value as captured from the UI
+    score: float               # client-computed deterministic score
+    category: str              # client-computed risk category label
+    clinical_context: str | None = None
+
 class ToolFeedbackRequest(BaseModel):
     tool_slug: str
     rating: bool | None = None
@@ -1076,6 +1151,107 @@ def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user
     save_case(current_user.id, "palliativemd", f"{ct.replace('_',' ')} · {(data.text or '')[:50]}", data.dict(exclude_none=True), result, db)
     return result
 
+# ─── LabRead ──────────────────────────────────────────────────────────────────
+
+@app.post("/tools/labread/extract")
+@limiter.limit("10/minute")
+async def labread_extract(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Upload a PDF or image of a lab panel → returns extracted text for the user
+    to review before analysis. Intentionally NOT counted against the 5/day free-tier
+    cap so users can extract, review, edit, then analyze — only analysis counts.
+    Rate-limited per-IP to prevent abuse of the OCR capability."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    # Require at least access (signed-in user still has a free-tier quota for labread).
+    if not has_tool_access(current_user, "labread", db):
+        raise HTTPException(status_code=402, detail="You've used your 5 free LabRead analyses today. Upgrade to continue or come back tomorrow.")
+    ct = (file.content_type or "").lower()
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB.")
+    try:
+        result = call_claude_json_document(
+            LABREAD_EXTRACT_PROMPT, contents, ct,
+            user_note="Transcribe the lab values from this document.",
+            max_tokens=2500,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"labread extract error: {e}")
+        raise HTTPException(status_code=502, detail="Extraction failed. Try pasting values directly.")
+    return result
+
+@app.post("/tools/labread/analyze")
+@limiter.limit("10/minute")
+def labread_analyze(request: Request, data: LabReadAnalyzeRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if not has_tool_access(current_user, "labread", db):
+        raise HTTPException(status_code=402, detail="You've used your 5 free LabRead analyses today. Upgrade to continue or come back tomorrow.")
+    if not (data.lab_text and data.lab_text.strip()):
+        raise HTTPException(status_code=400, detail="Paste or type lab values first.")
+    parts = ["Lab values provided by clinician:", data.lab_text.strip()]
+    if data.clinical_context and data.clinical_context.strip():
+        parts += ["", "Clinical context:", data.clinical_context.strip()]
+    user_input = "\n".join(parts)
+    try:
+        result = call_claude_json_text(LABREAD_ANALYZE_PROMPT, user_input, max_tokens=3000)
+    except Exception as e:
+        print(f"labread analyze error: {e}")
+        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
+    log_usage(current_user, "labread", COST_PER_SCAN, db)
+    remaining = free_tier_remaining(current_user, "labread", db)
+    if isinstance(result, dict) and remaining is not None:
+        result["free_tier_remaining"] = remaining
+    save_case(current_user.id, "labread", f"Lab panel · {(data.lab_text or '')[:50]}",
+              {"lab_text": data.lab_text, "clinical_context": data.clinical_context}, result, db)
+    return result
+
+# ─── RiskRead ─────────────────────────────────────────────────────────────────
+
+@app.post("/tools/riskread/interpret")
+@limiter.limit("20/minute")
+def riskread_interpret(request: Request, data: RiskReadInterpretRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """The score and category come computed from the client-side formula.
+    Backend layers AI interpretation + guideline-aligned next steps on top."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if not has_tool_access(current_user, "riskread", db):
+        raise HTTPException(status_code=402, detail="You've used your 5 free RiskRead analyses today. Upgrade to continue or come back tomorrow.")
+    if not data.calculator_id or not data.calculator_name:
+        raise HTTPException(status_code=400, detail="calculator_id and calculator_name are required.")
+    parts = [
+        f"Calculator: {data.calculator_name} ({data.calculator_id})",
+        f"Specialty: {data.specialty or 'general'}",
+        f"Computed score: {data.score}",
+        f"Computed risk category: {data.category}",
+        "",
+        "Input values (as captured from the form):",
+    ]
+    for k, v in (data.inputs or {}).items():
+        parts.append(f"  {k}: {v}")
+    if data.clinical_context and data.clinical_context.strip():
+        parts += ["", "Additional clinical context:", data.clinical_context.strip()]
+    user_input = "\n".join(parts)
+    try:
+        result = call_claude_json_text(RISKREAD_INTERPRET_PROMPT_TEMPLATE, user_input, max_tokens=2500)
+    except Exception as e:
+        print(f"riskread interpret error: {e}")
+        raise HTTPException(status_code=502, detail="AI interpretation failed. Please retry.")
+    log_usage(current_user, f"riskread:{data.calculator_id}", COST_PER_SCAN, db)
+    remaining = free_tier_remaining(current_user, "riskread", db)
+    if isinstance(result, dict):
+        if remaining is not None:
+            result["free_tier_remaining"] = remaining
+        # Echo the deterministic score/category so the frontend can render a single unified result object
+        result["score"] = data.score
+        result["risk_category"] = data.category
+        result["calculator_name"] = data.calculator_name
+    save_case(current_user.id, "riskread", f"{data.calculator_name} · score {data.score}",
+              {"calculator_id": data.calculator_id, "inputs": data.inputs, "score": data.score, "category": data.category}, result, db)
+    return result
+
 @app.get("/cases")
 def list_cases(tool_slug: str = "", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user:
@@ -1174,8 +1350,10 @@ def tools_access(current_user: User = Depends(get_current_user), db: Session = D
     """Returns the user's tool entitlements + monthly budget + overage."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd"]
+    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "infectid", "clinicalnote", "cerebralai", "palliativemd", "labread", "riskread"]
     access = {t: has_tool_access(current_user, t, db) for t in tools}
+    # Per-tool free-tier daily remaining counts (null if tool has no free-tier or user is unlimited)
+    free_tier = {t: free_tier_remaining(current_user, t, db) for t in tools}
     budget = monthly_budget(current_user, db)
     spent = float(current_user.monthly_spend or 0.0)
     overage = float(current_user.overage_amount_this_month or 0.0)
@@ -1192,6 +1370,7 @@ def tools_access(current_user: User = Depends(get_current_user), db: Session = D
         "is_superuser": bool(current_user.is_superuser),
         "access": access,
         "tiers": tiers,
+        "free_tier_remaining": free_tier,
         "has_budget": budget != float("inf") and budget > 0,
         "overage": round(overage, 2),
         "pct": round(pct, 1),
@@ -1620,6 +1799,7 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         ("palliativemd", "monthly",  2499), ("palliativemd", "yearly", 17999),
         # Suite
         ("suite",        "monthly",  8888), ("suite",        "yearly", 88800),
+        # LabRead / RiskRead intentionally absent: free (5/day) + Suite-included.
     ]
     checks = []
     for slug, tier, expected_cents in expected:
