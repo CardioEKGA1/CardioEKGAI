@@ -1501,6 +1501,11 @@ def admin_charts(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
 class AdminMintToken(BaseModel):
     email: str
 
+class AdminPurgeTestUsers(BaseModel):
+    confirm: str
+    keep_emails: list[str] | None = None
+    cancel_stripe: bool = True
+
 @app.post("/admin/mint-token")
 def admin_mint_token(data: AdminMintToken, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     email = (data.email or "").strip().lower()
@@ -1514,6 +1519,90 @@ def admin_mint_token(data: AdminMintToken, db: Session = Depends(get_db), _: boo
         "email": user.email,
         "is_superuser": bool(user.is_superuser),
         "note": "Admin-minted token — full 30-day lifetime, same as a normal login.",
+    }
+
+@app.post("/admin/purge-test-users")
+def admin_purge_test_users(data: AdminPurgeTestUsers, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    """
+    Destructive: deletes every user NOT in keep_emails along with every child row
+    they own. Intended for clean-slate pre-launch cleanup. Requires:
+      - admin token (handled by verify_admin)
+      - body { confirm: "PURGE", keep_emails?: [...], cancel_stripe?: true }
+
+    Delete order mirrors /auth/delete-account (ToolFeedback → ToolUsage →
+    ClinicalCase → Subscription → User) plus wipes MagicLinkAttempt and
+    DeletedAccount for a true clean slate. Optionally cancels any live Stripe
+    subscriptions the deleted users own, with per-sub try/except so one failure
+    doesn't block the whole purge.
+    """
+    if data.confirm != "PURGE":
+        raise HTTPException(status_code=400, detail='Set confirm: "PURGE" to proceed. Refusing to run.')
+
+    keep = [e.strip().lower() for e in (data.keep_emails or ["anderson@soulmd.us"]) if e and e.strip()]
+    if not keep:
+        raise HTTPException(status_code=400, detail="keep_emails must be non-empty. Refusing to wipe the entire users table.")
+
+    # Sanity: confirm every keep_email actually exists before we nuke everything
+    # else. Prevents "wiped the DB because the superuser email was typo'd" class
+    # of bug.
+    existing_keep = {u.email for u in db.query(User).filter(User.email.in_(keep)).all()}
+    missing_keep = [e for e in keep if e not in existing_keep]
+    if missing_keep:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Refusing to purge: keep_emails not found in users table: {missing_keep}. Fix typos before retrying.",
+        )
+
+    users_to_delete = db.query(User).filter(~User.email.in_(keep)).all()
+    user_ids_to_delete = [u.id for u in users_to_delete]
+    deleted_email_sample = [u.email for u in users_to_delete[:20]]
+
+    # Cancel any live Stripe subs first (before we wipe Subscription rows).
+    stripe_canceled: list[str] = []
+    stripe_errors: list[dict] = []
+    if data.cancel_stripe and user_ids_to_delete:
+        active_subs = db.query(Subscription).filter(
+            Subscription.user_id.in_(user_ids_to_delete),
+            Subscription.status == "active",
+            Subscription.stripe_subscription_id.isnot(None),
+        ).all()
+        for sub in active_subs:
+            try:
+                stripe.Subscription.cancel(sub.stripe_subscription_id)
+                stripe_canceled.append(sub.stripe_subscription_id)
+            except Exception as e:
+                stripe_errors.append({"sub_id": sub.stripe_subscription_id, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+
+    counts: dict[str, int] = {}
+    if user_ids_to_delete:
+        counts["tool_feedback"] = db.query(ToolFeedback).filter(ToolFeedback.user_id.in_(user_ids_to_delete)).delete(synchronize_session=False)
+        counts["tool_usage"] = db.query(ToolUsage).filter(ToolUsage.user_id.in_(user_ids_to_delete)).delete(synchronize_session=False)
+        counts["clinical_cases"] = db.query(ClinicalCase).filter(ClinicalCase.user_id.in_(user_ids_to_delete)).delete(synchronize_session=False)
+        counts["subscriptions"] = db.query(Subscription).filter(Subscription.user_id.in_(user_ids_to_delete)).delete(synchronize_session=False)
+        counts["users"] = db.query(User).filter(User.id.in_(user_ids_to_delete)).delete(synchronize_session=False)
+    else:
+        counts.update({"tool_feedback": 0, "tool_usage": 0, "clinical_cases": 0, "subscriptions": 0, "users": 0})
+
+    # Hash-keyed tables: wipe entirely per user's spec. These don't FK to users,
+    # but carry abuse-prevention / audit state that doesn't make sense post-purge.
+    counts["magic_link_attempts"] = db.query(MagicLinkAttempt).delete(synchronize_session=False)
+    counts["deleted_accounts"] = db.query(DeletedAccount).delete(synchronize_session=False)
+
+    db.commit()
+
+    print(f"ADMIN_PURGE_TEST_USERS: kept={keep} counts={counts} stripe_canceled={len(stripe_canceled)} stripe_errors={len(stripe_errors)}")
+
+    return {
+        "ok": True,
+        "kept_emails": keep,
+        "counts": counts,
+        "stripe": {
+            "canceled": stripe_canceled,
+            "canceled_count": len(stripe_canceled),
+            "errors": stripe_errors,
+        },
+        "deleted_email_sample": deleted_email_sample,
+        "note": "Irreversible. MagicLinkAttempt and DeletedAccount were wiped entirely — abuse-prevention history cleared.",
     }
 
 @app.get("/admin/billing/validate")
