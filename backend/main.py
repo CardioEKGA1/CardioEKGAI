@@ -1948,6 +1948,98 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
     checks["sentry"] = {"backend_configured": bool(SENTRY_DSN), "env": os.getenv("SENTRY_ENV", "production")}
     return checks
 
+@app.get("/admin/billing-validate")
+def admin_billing_validate(_: bool = Depends(verify_admin)):
+    """Resolves every expected Stripe price env var and retrieves each from
+    the Stripe API. Returns a green/red status per entry plus a count so the
+    deploy can confirm all 28 are wired before exposing checkout.
+
+    Usage:
+      curl -H "X-Admin-Token: $ADMIN_TOKEN" https://soulmd.us/admin/billing-validate
+    """
+    if not stripe.api_key:
+        return {"ok": False, "error": "STRIPE_SECRET_KEY not configured"}
+
+    # Expected catalog: (env_var_name, expected_unit_amount_cents, label)
+    expected: list[tuple[str, int, str]] = [
+        # 8 tools × 2 tiers = 16
+        ("STRIPE_PRICE_EKGSCAN_MONTHLY",      999,    "EKGScan · monthly"),
+        ("STRIPE_PRICE_EKGSCAN_YEARLY",       8999,   "EKGScan · yearly"),
+        ("STRIPE_PRICE_RXCHECK_MONTHLY",      999,    "RxCheck · monthly"),
+        ("STRIPE_PRICE_RXCHECK_YEARLY",       8999,   "RxCheck · yearly"),
+        ("STRIPE_PRICE_ANTIBIOTICAI_MONTHLY", 999,    "AntibioticAI · monthly"),
+        ("STRIPE_PRICE_ANTIBIOTICAI_YEARLY",  8999,   "AntibioticAI · yearly"),
+        ("STRIPE_PRICE_NEPHROAI_MONTHLY",     999,    "NephroAI · monthly"),
+        ("STRIPE_PRICE_NEPHROAI_YEARLY",      8999,   "NephroAI · yearly"),
+        ("STRIPE_PRICE_CLINICALNOTE_MONTHLY", 2499,   "ClinicalNote AI · monthly"),
+        ("STRIPE_PRICE_CLINICALNOTE_YEARLY",  17999,  "ClinicalNote AI · yearly"),
+        ("STRIPE_PRICE_CEREBRALAI_MONTHLY",   2499,   "CerebralAI · monthly"),
+        ("STRIPE_PRICE_CEREBRALAI_YEARLY",    17999,  "CerebralAI · yearly"),
+        ("STRIPE_PRICE_XRAYREAD_MONTHLY",     2499,   "XrayRead · monthly"),
+        ("STRIPE_PRICE_XRAYREAD_YEARLY",      17999,  "XrayRead · yearly"),
+        ("STRIPE_PRICE_PALLIATIVEMD_MONTHLY", 2499,   "PalliativeMD · monthly"),
+        ("STRIPE_PRICE_PALLIATIVEMD_YEARLY",  17999,  "PalliativeMD · yearly"),
+        # Suite
+        ("STRIPE_PRICE_SUITE_MONTHLY",        11111,  "Suite · monthly"),
+        ("STRIPE_PRICE_SUITE_YEARLY",         119900, "Suite · yearly"),
+        # Bundles
+        ("STRIPE_PRICE_BUNDLE_STARTER_MONTHLY",  5888,   "Starter Bundle · monthly"),
+        ("STRIPE_PRICE_BUNDLE_STARTER_YEARLY",   49900,  "Starter Bundle · yearly"),
+        ("STRIPE_PRICE_BUNDLE_CLINICAL_MONTHLY", 5555,   "Clinical Bundle · monthly"),
+        ("STRIPE_PRICE_BUNDLE_CLINICAL_YEARLY",  44400,  "Clinical Bundle · yearly"),
+        # Concierge
+        ("STRIPE_PRICE_CONCIERGE_AWAKEN_MONTHLY",  44400,   "Concierge Awaken · monthly"),
+        ("STRIPE_PRICE_CONCIERGE_AWAKEN_YEARLY",   500000,  "Concierge Awaken · yearly"),
+        ("STRIPE_PRICE_CONCIERGE_ALIGN_MONTHLY",   88800,   "Concierge Align · monthly"),
+        ("STRIPE_PRICE_CONCIERGE_ALIGN_YEARLY",    1000000, "Concierge Align · yearly"),
+        ("STRIPE_PRICE_CONCIERGE_ASCEND_MONTHLY",  111100,  "Concierge Ascend · monthly"),
+        ("STRIPE_PRICE_CONCIERGE_ASCEND_YEARLY",   1300000, "Concierge Ascend · yearly"),
+    ]
+
+    results: list[dict] = []
+    ok_count = 0
+    for env_name, expected_cents, label in expected:
+        entry: dict = {"env": env_name, "label": label, "expected_cents": expected_cents}
+        price_id = _clean_env(os.getenv(env_name, ""))
+        if not price_id:
+            entry.update({"ok": False, "error": "env var not set"})
+            results.append(entry); continue
+        entry["price_id"] = price_id
+        try:
+            pr = stripe.Price.retrieve(price_id)
+            actual = pr.unit_amount
+            active = bool(pr.active)
+            interval = getattr(pr.recurring, "interval", None) if pr.recurring else None
+            expected_interval = "month" if env_name.endswith("_MONTHLY") else "year"
+            problems: list[str] = []
+            if actual != expected_cents:
+                problems.append(f"amount {actual}¢ ≠ expected {expected_cents}¢")
+            if not active:
+                problems.append("not active")
+            if interval != expected_interval:
+                problems.append(f"interval {interval} ≠ {expected_interval}")
+            entry.update({
+                "actual_cents": actual,
+                "active": active,
+                "interval": interval,
+                "ok": len(problems) == 0,
+                **({"issues": problems} if problems else {}),
+            })
+            if entry["ok"]:
+                ok_count += 1
+        except stripe.error.StripeError as e:
+            entry.update({"ok": False, "error": f"{type(e).__name__}: {str(e)[:160]}"})
+        results.append(entry)
+
+    return {
+        "ok": ok_count == len(expected),
+        "expected_total": len(expected),
+        "verified": ok_count,
+        "failures": len(expected) - ok_count,
+        "details": results,
+    }
+
+
 @app.get("/admin/stripe-health")
 def admin_stripe_health(_: bool = Depends(verify_admin)):
     # Surfaces the most recent signature-verified Stripe webhook this process
