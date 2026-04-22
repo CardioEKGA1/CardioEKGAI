@@ -111,46 +111,95 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
       </section>
 
       {/* PRICING */}
-      <section style={{padding:'80px 24px', maxWidth:'1000px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
+      <section style={{padding:'80px 24px', maxWidth:'1120px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
         <div style={{textAlign:'center', marginBottom:'40px'}}>
           <div style={{fontSize:'11px', fontWeight:700, color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'12px'}}>Pricing</div>
           <h2 style={{fontSize:'clamp(24px,5vw,34px)', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>Start free. Scale when you need to.</h2>
-          <p style={{fontSize:'15px', color:'#6a8ab0', lineHeight:1.65, maxWidth:'580px', margin:'0 auto'}}>
-            EKGScan alone is $9.99/month. But most clinicians get more from the full Suite — every tool, one subscription.
+          <p style={{fontSize:'15px', color:'#6a8ab0', lineHeight:1.65, maxWidth:'620px', margin:'0 auto'}}>
+            Pick one tool, pick a bundle, or get the full Suite — every path starts with a free analysis. No card required.
           </p>
         </div>
 
-        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'20px', alignItems:'stretch'}}>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(250px, 1fr))', gap:'18px', alignItems:'stretch'}}>
 
           {/* EKGScan single-tool card */}
-          <div style={{background:'rgba(255,255,255,0.85)', borderRadius:'22px', padding:'32px 28px', border:'1px solid rgba(255,255,255,0.95)', boxShadow:'0 4px 20px rgba(100,130,200,0.08)', display:'flex', flexDirection:'column'}}>
-            <div style={{fontSize:'13px', fontWeight:700, color:'#8aa0c0', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>EKGScan only</div>
-            <div style={{fontSize:'40px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$9.99<span style={{fontSize:'16px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
-            <div style={{fontSize:'13px', color:'#6a8ab0', marginBottom:'20px'}}>or $89.99/year — save ~$30/yr</div>
-            <ul style={{listStyle:'none', padding:0, margin:'0 0 24px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.9}}>
+          <div style={{background:'rgba(255,255,255,0.85)', borderRadius:'22px', padding:'28px 24px', border:'1px solid rgba(255,255,255,0.95)', boxShadow:'0 4px 20px rgba(100,130,200,0.08)', display:'flex', flexDirection:'column'}}>
+            <div style={{fontSize:'12px', fontWeight:700, color:'#8aa0c0', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>EKGScan only</div>
+            <div style={{fontSize:'36px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$9.99<span style={{fontSize:'15px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>or $89.99/year — save ~$30/yr</div>
+            <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.85}}>
               <li>✓ Unlimited 12-lead EKG analyses</li>
               <li>✓ AI cardiology chat follow-ups</li>
               <li>✓ Structured output every time</li>
               <li>✓ Cancel anytime</li>
             </ul>
-            <button onClick={onAnalyze} style={{marginTop:'auto', background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'14px', padding:'14px', fontSize:'14px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Start with EKGScan →</button>
+            <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis, no credit card.</div>
+            <button onClick={onSignUp} style={{marginTop:'auto', background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'14px', padding:'12px', fontSize:'13px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Get Started Free →</button>
+          </div>
+
+          {/* Starter Bundle */}
+          <div style={{background:'rgba(255,255,255,0.9)', borderRadius:'22px', padding:'28px 24px', border:'1px solid rgba(122,176,240,0.35)', boxShadow:'0 6px 22px rgba(100,130,200,0.1)', display:'flex', flexDirection:'column'}}>
+            <div style={{fontSize:'12px', fontWeight:700, color:'#4a7ad0', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>Starter Bundle</div>
+            <div style={{fontSize:'36px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$58.88<span style={{fontSize:'15px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>Mix & match — build your kit</div>
+            <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.85}}>
+              <li>✓ All 4 basic tools included</li>
+              <li>✓ Pick 1 premium tool</li>
+              <li>✓ Priority queue on busy hours</li>
+              <li>✓ Cancel or swap anytime</li>
+            </ul>
+            <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>
+            <button onClick={openSoulMD} style={{marginTop:'auto', background:'rgba(255,255,255,0.95)', border:'1px solid rgba(122,176,240,0.45)', borderRadius:'14px', padding:'12px', fontSize:'13px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Build a Bundle →</button>
+          </div>
+
+          {/* Clinical Bundle */}
+          <div style={{background:'rgba(255,255,255,0.9)', borderRadius:'22px', padding:'28px 24px', border:'1px solid rgba(155,143,232,0.4)', boxShadow:'0 6px 22px rgba(100,130,200,0.1)', display:'flex', flexDirection:'column'}}>
+            <div style={{fontSize:'12px', fontWeight:700, color:'#7862d4', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>Clinical Bundle</div>
+            <div style={{fontSize:'36px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$55.55<span style={{fontSize:'15px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>Specialist-weighted pick</div>
+            <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.85}}>
+              <li>✓ Pick 2 premium tools</li>
+              <li>✓ Pick 2 basic tools</li>
+              <li>✓ Priority queue on busy hours</li>
+              <li>✓ Cancel or swap anytime</li>
+            </ul>
+            <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>
+            <button onClick={openSoulMD} style={{marginTop:'auto', background:'rgba(255,255,255,0.95)', border:'1px solid rgba(155,143,232,0.45)', borderRadius:'14px', padding:'12px', fontSize:'13px', fontWeight:700, color:'#7862d4', cursor:'pointer'}}>Build a Bundle →</button>
           </div>
 
           {/* Suite featured card */}
-          <div style={{background:WORDMARK, borderRadius:'22px', padding:'32px 28px', boxShadow:'0 12px 40px rgba(122,176,240,0.35)', color:'white', display:'flex', flexDirection:'column', position:'relative'}}>
-            <div style={{position:'absolute', top:'16px', right:'16px', fontSize:'11px', fontWeight:700, background:'rgba(255,255,255,0.25)', padding:'4px 10px', borderRadius:'999px', letterSpacing:'0.5px'}}>BEST VALUE</div>
-            <div style={{fontSize:'13px', fontWeight:700, color:'rgba(255,255,255,0.85)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>SoulMD Suite</div>
-            <div style={{fontSize:'40px', fontWeight:900, lineHeight:1, marginBottom:'4px'}}>$111.11<span style={{fontSize:'16px', fontWeight:600, opacity:0.8}}>/mo</span></div>
-            <div style={{fontSize:'13px', opacity:0.85, marginBottom:'20px'}}>or $1,199/year · bundles from $55.55/mo</div>
-            <ul style={{listStyle:'none', padding:0, margin:'0 0 24px 0', fontSize:'13px', lineHeight:1.9}}>
+          <div style={{background:WORDMARK, borderRadius:'22px', padding:'28px 24px', boxShadow:'0 12px 40px rgba(122,176,240,0.35)', color:'white', display:'flex', flexDirection:'column', position:'relative'}}>
+            <div style={{position:'absolute', top:'14px', right:'14px', fontSize:'10px', fontWeight:700, background:'rgba(255,255,255,0.25)', padding:'4px 10px', borderRadius:'999px', letterSpacing:'0.5px'}}>BEST VALUE</div>
+            <div style={{fontSize:'12px', fontWeight:700, color:'rgba(255,255,255,0.85)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>SoulMD Suite</div>
+            <div style={{fontSize:'36px', fontWeight:900, lineHeight:1, marginBottom:'4px'}}>$111.11<span style={{fontSize:'15px', fontWeight:600, opacity:0.8}}>/mo</span></div>
+            <div style={{fontSize:'12px', opacity:0.85, marginBottom:'18px'}}>or $1,199/year — save ~$134/yr</div>
+            <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', lineHeight:1.85}}>
               <li>✓ All 10 clinical-AI tools</li>
-              <li>✓ EKGScan · NephroAI · XrayRead · RxCheck</li>
-              <li>✓ AntibioticAI · ClinicalNote · CerebralAI</li>
-              <li>✓ PalliativeMD · LabRead · CliniScore</li>
+              <li>✓ Priority support</li>
+              <li>✓ Early access to new tools</li>
               <li>✓ One subscription, one login</li>
             </ul>
-            <button onClick={openSoulMD} style={{marginTop:'auto', background:'white', border:'none', borderRadius:'14px', padding:'14px', fontSize:'14px', fontWeight:800, color:'#4a7ad0', cursor:'pointer', boxShadow:'0 4px 14px rgba(0,0,0,0.08)'}}>Get the Suite at soulmd.us →</button>
+            <div style={{fontSize:'11px', opacity:0.85, marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>
+            <button onClick={openSoulMD} style={{marginTop:'auto', background:'white', border:'none', borderRadius:'14px', padding:'12px', fontSize:'13px', fontWeight:800, color:'#4a7ad0', cursor:'pointer', boxShadow:'0 4px 14px rgba(0,0,0,0.08)'}}>Get the Suite →</button>
           </div>
+        </div>
+
+        {/* Individual tool tiers breakdown */}
+        <div style={{marginTop:'40px', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'16px'}}>
+          <div style={{background:'rgba(255,255,255,0.6)', borderRadius:'18px', padding:'22px 22px', border:'1px solid rgba(255,255,255,0.9)'}}>
+            <div style={{fontSize:'11px', fontWeight:700, color:'#4a7ad0', letterSpacing:'1px', textTransform:'uppercase', marginBottom:'6px'}}>Basic tools</div>
+            <div style={{fontSize:'22px', fontWeight:900, color:'#1a2a4a', marginBottom:'4px'}}>$9.99<span style={{fontSize:'13px', color:'#8aa0c0', fontWeight:600}}>/mo</span> <span style={{fontSize:'13px', color:'#8aa0c0', fontWeight:500}}>· $89.99/yr</span></div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', lineHeight:1.7}}>EKGScan · NephroAI · RxCheck · AntibioticAI</div>
+          </div>
+          <div style={{background:'rgba(255,255,255,0.6)', borderRadius:'18px', padding:'22px 22px', border:'1px solid rgba(255,255,255,0.9)'}}>
+            <div style={{fontSize:'11px', fontWeight:700, color:'#7862d4', letterSpacing:'1px', textTransform:'uppercase', marginBottom:'6px'}}>Premium tools</div>
+            <div style={{fontSize:'22px', fontWeight:900, color:'#1a2a4a', marginBottom:'4px'}}>$24.99<span style={{fontSize:'13px', color:'#8aa0c0', fontWeight:600}}>/mo</span> <span style={{fontSize:'13px', color:'#8aa0c0', fontWeight:500}}>· $179.99/yr</span></div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', lineHeight:1.7}}>XrayRead · CerebralAI · ClinicalNote AI · PalliativeMD</div>
+          </div>
+        </div>
+
+        <div style={{marginTop:'32px', textAlign:'center'}}>
+          <button onClick={openSoulMD} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'14px', padding:'12px 24px', fontSize:'13px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>See full Suite details at soulmd.us →</button>
         </div>
       </section>
 
