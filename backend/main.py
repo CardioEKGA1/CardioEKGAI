@@ -22,6 +22,7 @@ from database import (
 import hashlib
 from auth import create_token, create_magic_token, decode_token
 from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, ANTIBIOTICAI_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE, LABREAD_EXTRACT_PROMPT, LABREAD_ANALYZE_PROMPT, CLINISCORE_INTERPRET_PROMPT_TEMPLATE, style_learn_prompt
+from meditation_templates import MEDITATION_TEMPLATES, SHARED_SYSTEM_PROMPT as MEDITATION_SYSTEM_PROMPT
 from email_utils import send_verification_email
 from pydantic import BaseModel
 from datetime import datetime
@@ -3370,6 +3371,150 @@ def concierge_meditations_assignments(_: User = Depends(verify_concierge_owner),
         "meditation_id": a.meditation_id, "meditation_title": meds.get(a.meditation_id).title if meds.get(a.meditation_id) else "—",
         "category": meds.get(a.meditation_id).category if meds.get(a.meditation_id) else None,
     } for a in assigns]}
+
+
+# ─── Meditation prescription (AI-personalized, physician-only) ────────────
+# Dr. Anderson picks a template, a patient, and an optional personalization
+# note. Claude generates a full meditation script blending Martin / Gabby /
+# Abraham / Dispenza / Cannon for that specific patient. The generated
+# meditation becomes a ConciergeMeditation row, auto-assigned, delivered
+# to the patient via message + push.
+
+@app.get("/concierge/meditations/templates")
+def concierge_meditations_templates(_: User = Depends(verify_concierge_owner)):
+    return {"templates": [
+        {"slug": slug, **{k: v for k, v in t.items() if k in ("name", "category", "duration_min", "teacher", "summary")}}
+        for slug, t in MEDITATION_TEMPLATES.items()
+    ]}
+
+
+class MeditationPrescribeRequest(BaseModel):
+    template_slug: str
+    patient_id: int
+    context: str | None = None  # physician's personalization note
+
+
+@app.post("/concierge/meditations/prescribe")
+@limiter.limit("10/minute")
+def concierge_meditations_prescribe(
+    request: Request,
+    data: MeditationPrescribeRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    template = MEDITATION_TEMPLATES.get(data.template_slug)
+    if not template:
+        raise HTTPException(status_code=400, detail=f"Unknown template slug: {data.template_slug}")
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == data.patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # Pull today's oracle card for this patient (if any) so Claude can
+    # weave the theme into the meditation. Optional — the prompt handles
+    # its absence gracefully.
+    today_oracle = None
+    if p.user_id:
+        today_pull = db.query(ConciergeOraclePull).filter(
+            ConciergeOraclePull.user_id == p.user_id,
+            ConciergeOraclePull.pull_date == _today_mst(),
+        ).first()
+        if today_pull:
+            oracle = _load_oracle()
+            msg = next((m for m in oracle["messages"] if m["id"] == today_pull.message_id), None)
+            if msg:
+                today_oracle = {"title": msg["title"], "body": msg["body"], "category_label": oracle["categories"].get(msg["category"], {}).get("label")}
+
+    # Build the Claude user message.
+    first_name = (p.name or "friend").strip().split()[0] if (p.name or "").strip() else "friend"
+    parts = [
+        f"Template: {template['name']} ({template['duration_min']} min, inspired by {template['teacher']}).",
+        f"Framework: {template['framework']}",
+        "",
+        f"Patient first name: {first_name}",
+        f"Patient membership tier: {(p.membership_tier or 'awaken').title()}",
+    ]
+    intake = p.intake_data or {}
+    if isinstance(intake, dict):
+        for key in ("chief_complaint", "medical_history", "goals"):
+            v = intake.get(key)
+            if v and isinstance(v, str) and v.strip():
+                parts.append(f"{key.replace('_', ' ').title()}: {v.strip()}")
+    if data.context and data.context.strip():
+        parts.append(f"Physician's note for this meditation: {data.context.strip()}")
+    if today_oracle:
+        parts.append(
+            f"Today's oracle card: \"{today_oracle['title']}\" — \"{today_oracle['body']}\" "
+            f"(category: {today_oracle['category_label']}). Weave this theme in once, naturally."
+        )
+    user_msg = "\n".join(parts)
+
+    try:
+        result = call_claude_json_text(MEDITATION_SYSTEM_PROMPT, user_msg, max_tokens=6000)
+    except Exception as e:
+        print(f"meditation prescribe error: {e}")
+        raise HTTPException(status_code=502, detail="Could not generate meditation. Please retry.")
+
+    title = (result.get("title") or template["name"]).strip()
+    script = (result.get("script") or "").strip()
+    duration = int(result.get("duration_min") or template["duration_min"])
+    duration = max(5, min(duration, 45))
+    if not script:
+        raise HTTPException(status_code=502, detail="Generated meditation was empty. Please retry.")
+
+    # Persist. Each prescription becomes a unique ConciergeMeditation row
+    # so the script text is preserved even if the template is later edited.
+    med = ConciergeMeditation(
+        title=title,
+        category=template["category"],
+        description=template["summary"],
+        duration_min=duration,
+        script=script,
+        audio_url=None,
+    )
+    db.add(med); db.commit(); db.refresh(med)
+
+    assign = ConciergeMeditationAssignment(meditation_id=med.id, patient_id=p.id)
+    db.add(assign); db.commit(); db.refresh(assign)
+
+    # Deliver to patient: a secure message with the full script body, and a
+    # push notification. The patient reads the script in their Messages tab.
+    preview = script[:220].rstrip()
+    if len(script) > 220:
+        preview += "…"
+    msg_body = (
+        f"{title}\n"
+        f"Duration: {duration} minutes · {template['teacher']}\n\n"
+        f"{script}\n\n"
+        f"— Prescribed with care, Dr. Anderson"
+    )
+    concierge_msg = ConciergeMessage(
+        patient_id=p.id, direction="outbound",
+        subject=f"A meditation prescribed for you · {title}",
+        body=msg_body,
+        category="meditation",
+    )
+    db.add(concierge_msg); db.commit()
+
+    if p.user_id:
+        send_push_to_user(
+            p.user_id,
+            "A meditation prescribed for you 🕊️",
+            title,
+            url="/concierge",
+            db=db,
+        )
+
+    return {
+        "meditation_id": med.id,
+        "assignment_id": assign.id,
+        "title": title,
+        "duration_min": duration,
+        "category": template["category"],
+        "teacher": template["teacher"],
+        "script_preview": preview,
+        "script_chars": len(script),
+        "pushed_to_patient": bool(p.user_id),
+    }
 
 
 # ─── Concierge Coaching (module library + assignments) ───────────────────

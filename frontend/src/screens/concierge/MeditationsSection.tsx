@@ -10,6 +10,10 @@ interface Meditation {
   assignment_count: number;
   created_at: string | null;
 }
+interface Template {
+  slug: string; name: string; category: string;
+  duration_min: number; teacher: string; summary: string;
+}
 interface Assignment {
   id: number; assigned_at: string | null;
   patient_id: number; patient_name: string;
@@ -45,9 +49,11 @@ const MeditationsSection: React.FC<Props> = ({ API, token, accent }) => {
   const [meds, setMeds] = useState<Meditation[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [patients, setPatients] = useState<PatientMini[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [showPrescribe, setShowPrescribe] = useState(false);
   const [assignTarget, setAssignTarget] = useState<Meditation | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [banner, setBanner] = useState<{ok: boolean; text: string} | null>(null);
@@ -58,10 +64,12 @@ const MeditationsSection: React.FC<Props> = ({ API, token, accent }) => {
       fetch(`${API}/concierge/meditations`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { meditations: [] }),
       fetch(`${API}/concierge/meditations/assignments`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { assignments: [] }),
       fetch(`${API}/concierge/patients`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { patients: [] }),
-    ]).then(([m, a, p]) => {
+      fetch(`${API}/concierge/meditations/templates`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { templates: [] }),
+    ]).then(([m, a, p, t]) => {
       setMeds(m.meditations || []);
       setAssignments(a.assignments || []);
       setPatients((p.patients || []).map((x: any) => ({ id: x.id, name: x.name, email: x.email })));
+      setTemplates(t.templates || []);
     }).catch(() => setError('Could not load meditations.'))
       .finally(() => setLoading(false));
   }, [API, token]);
@@ -87,13 +95,19 @@ const MeditationsSection: React.FC<Props> = ({ API, token, accent }) => {
         <div>
           <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a'}}>Meditations</div>
           <div style={{fontSize:'12px', color:'#4a7ad0'}}>
-            {totals.library} in library · {totals.assigned} sent · {totals.categories} categor{totals.categories === 1 ? 'y' : 'ies'}
+            {totals.library} in library · {totals.assigned} sent · {templates.length} templates
           </div>
         </div>
-        <button onClick={() => setShowCreate(true)}
-          style={{background:accent, border:'none', borderRadius:'12px', padding:'10px 16px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer'}}>
-          + New meditation
-        </button>
+        <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
+          <button onClick={() => setShowPrescribe(true)}
+            style={{background:'linear-gradient(135deg,#d4a86b,#9b8fe8)', border:'none', borderRadius:'12px', padding:'10px 16px', fontSize:'13px', fontWeight:800, color:'white', cursor:'pointer', boxShadow:'0 8px 20px rgba(155,143,232,0.35)', letterSpacing:'0.3px'}}>
+            ✨ Prescribe personalized
+          </button>
+          <button onClick={() => setShowCreate(true)}
+            style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'12px', padding:'10px 14px', fontSize:'12px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>
+            + Manual entry
+          </button>
+        </div>
       </div>
 
       {banner && <div style={{padding:'10px 12px', borderRadius:'10px', fontSize:'12px', marginBottom:'12px', background: banner.ok ? 'rgba(112,184,112,0.1)' : 'rgba(224,80,80,0.08)', color: banner.ok ? '#2a7a2a' : '#a02020'}}>{banner.text}</div>}
@@ -229,6 +243,177 @@ const MeditationsSection: React.FC<Props> = ({ API, token, accent }) => {
           accent={accent}
         />
       )}
+
+      {showPrescribe && (
+        <PrescribeModal
+          API={API} token={token}
+          templates={templates} patients={patients}
+          onClose={() => setShowPrescribe(false)}
+          onPrescribed={(detail) => {
+            setShowPrescribe(false);
+            setBanner({ok:true, text: `Prescribed "${detail.title}" (${detail.duration_min} min). Patient notified.`});
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+// ───── Prescribe personalized meditation ──────────────────────────────────
+// Physician picks a template + patient + optional personalization note.
+// Claude generates a full script that blends all five teachers for this
+// specific patient. Auto-assigned, auto-pushed.
+
+const PrescribeModal: React.FC<{
+  API: string; token: string;
+  templates: Template[]; patients: PatientMini[];
+  onClose: () => void;
+  onPrescribed: (detail: { title: string; duration_min: number }) => void;
+}> = ({ API, token, templates, patients, onClose, onPrescribed }) => {
+  const [step, setStep] = useState<'template' | 'patient' | 'context' | 'generating'>('template');
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
+  const [context, setContext] = useState('');
+  const [error, setError] = useState('');
+
+  const prescribe = async () => {
+    if (!selectedTemplate || !selectedPatientId) return;
+    setStep('generating'); setError('');
+    try {
+      const res = await fetch(`${API}/concierge/meditations/prescribe`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+        body: JSON.stringify({
+          template_slug: selectedTemplate.slug,
+          patient_id: selectedPatientId,
+          context: context.trim() || undefined,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Generation failed');
+      onPrescribed({ title: d.title, duration_min: d.duration_min });
+    } catch (e: any) {
+      setError(e.message);
+      setStep('context');
+    }
+  };
+
+  const selectedPatient = patients.find(p => p.id === selectedPatientId);
+
+  return (
+    <div onClick={onClose} style={{position:'fixed', inset:0, zIndex:2000, background:'rgba(26,42,74,0.5)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', padding:'16px'}}>
+      <div onClick={e => e.stopPropagation()} style={{background:'white', borderRadius:'22px', maxWidth:'640px', width:'100%', maxHeight:'92vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 30px 70px rgba(26,42,74,0.35)'}}>
+        {/* Header */}
+        <div style={{padding:'18px 20px 12px', borderBottom:'1px solid rgba(122,176,240,0.2)', background:'linear-gradient(135deg, rgba(212,168,107,0.1), rgba(155,143,232,0.1))'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', color:'#6b4e7c', fontWeight:800}}>✨ Prescribe a meditation</div>
+            <button onClick={onClose} aria-label="Close" style={{background:'transparent', border:'none', fontSize:'20px', color:'#6a8ab0', cursor:'pointer', padding:'4px 8px', lineHeight:1}}>×</button>
+          </div>
+          <div style={{fontSize:'13px', color:'#6b4e7c', marginTop:'4px', fontStyle:'italic'}}>
+            {step === 'template' && 'Choose a tradition — Claude will personalize the full script for this patient.'}
+            {step === 'patient' && `${selectedTemplate?.name} · ${selectedTemplate?.teacher}`}
+            {step === 'context' && `For ${selectedPatient?.name} · ${selectedTemplate?.name}`}
+            {step === 'generating' && 'Weaving the meditation…'}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{flex:1, overflow:'auto', padding:'16px 20px'}}>
+          {step === 'template' && (
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'10px'}}>
+              {templates.map(t => {
+                const sel = selectedTemplate?.slug === t.slug;
+                return (
+                  <button key={t.slug} onClick={() => setSelectedTemplate(t)}
+                    style={{
+                      textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+                      border: sel ? '2px solid #9b8fe8' : '1px solid rgba(155,143,232,0.25)',
+                      background: sel ? 'rgba(155,143,232,0.1)' : 'rgba(255,255,255,0.7)',
+                      borderRadius:'14px', padding:'14px',
+                    }}>
+                    <div style={{fontSize:'15px', fontWeight:800, color:'#1a2a4a', marginBottom:'4px'}}>{t.name}</div>
+                    <div style={{fontSize:'10px', fontWeight:700, color:'#9b8fe8', letterSpacing:'0.4px', textTransform:'uppercase', marginBottom:'6px'}}>
+                      {t.teacher} · {t.duration_min} min
+                    </div>
+                    <div style={{fontSize:'12px', color:'#6a8ab0', lineHeight:1.5}}>{t.summary}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {step === 'patient' && (
+            patients.length === 0 ? (
+              <div style={{fontSize:'12px', color:'#6a8ab0'}}>No patients yet — add one in the Patients tab first.</div>
+            ) : (
+              <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
+                {patients.map(p => {
+                  const sel = selectedPatientId === p.id;
+                  return (
+                    <button key={p.id} onClick={() => setSelectedPatientId(p.id)}
+                      style={{textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+                        background: sel ? 'rgba(122,176,240,0.12)' : 'rgba(255,255,255,0.65)',
+                        border: sel ? '2px solid #4a7ad0' : '1px solid rgba(122,176,240,0.2)',
+                        borderRadius:'12px', padding:'10px 12px'}}>
+                      <div style={{fontSize:'13px', fontWeight:700, color:'#1a2a4a'}}>{p.name}</div>
+                      <div style={{fontSize:'11px', color:'#6a8ab0'}}>{p.email}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          )}
+
+          {step === 'context' && (
+            <div>
+              <div style={FIELD_LABEL}>Personalization note (optional)</div>
+              <textarea value={context} onChange={e => setContext(e.target.value)} rows={5}
+                placeholder="Anything you'd like Claude to weave in — recent health events in spiritual language, the tone to set, an area of the body calling for light…"
+                style={{...INPUT, minHeight:'130px', resize:'vertical'}}/>
+              <div style={{fontSize:'11px', color:'#6a8ab0', marginTop:'8px', lineHeight:1.5}}>
+                Today's oracle card (if this patient has pulled one) is automatically woven in. Patient intake notes are used for context but never quoted. Never include clinical details.
+              </div>
+              {error && <div style={{fontSize:'12px', color:'#a02020', marginTop:'10px'}}>{error}</div>}
+            </div>
+          )}
+
+          {step === 'generating' && (
+            <div style={{padding:'40px 20px', textAlign:'center'}}>
+              <div style={{fontSize:'48px', marginBottom:'14px'}}>🕊️</div>
+              <div style={{fontSize:'15px', fontWeight:700, color:'#1a2a4a'}}>Claude is writing a meditation for {selectedPatient?.name}…</div>
+              <div style={{fontSize:'12px', color:'#6a8ab0', marginTop:'8px', fontStyle:'italic', lineHeight:1.6}}>
+                Weaving Martin, Gabby, Abraham, Dispenza, and Cannon into one voice.<br/>
+                This can take 15–30 seconds.
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{padding:'14px 20px', borderTop:'1px solid rgba(122,176,240,0.2)', background:'rgba(240,246,255,0.5)', display:'flex', gap:'8px', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap'}}>
+          <div style={{fontSize:'11px', color:'#6a8ab0'}}>
+            {step === 'template' && (selectedTemplate ? `Next: pick a patient` : 'Pick a template to continue')}
+            {step === 'patient'  && (selectedPatientId ? `Next: optional personalization` : 'Pick a patient to continue')}
+            {step === 'context'  && 'Ready to generate and send.'}
+            {step === 'generating' && 'Please wait…'}
+          </div>
+          <div style={{display:'flex', gap:'8px'}}>
+            {step !== 'template' && step !== 'generating' && (
+              <button onClick={() => setStep(step === 'patient' ? 'template' : 'patient')} style={ghostBtn}>← Back</button>
+            )}
+            {step === 'template' && (
+              <button onClick={() => setStep('patient')} disabled={!selectedTemplate} style={{...solidBtn('linear-gradient(135deg,#d4a86b,#9b8fe8)'), opacity: selectedTemplate ? 1 : 0.5}}>Next</button>
+            )}
+            {step === 'patient' && (
+              <button onClick={() => setStep('context')} disabled={!selectedPatientId} style={{...solidBtn('linear-gradient(135deg,#d4a86b,#9b8fe8)'), opacity: selectedPatientId ? 1 : 0.5}}>Next</button>
+            )}
+            {step === 'context' && (
+              <button onClick={prescribe} style={solidBtn('linear-gradient(135deg,#d4a86b,#9b8fe8)')}>Generate & send ✨</button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
