@@ -3380,6 +3380,82 @@ def concierge_meditations_assignments(_: User = Depends(verify_concierge_owner),
 # meditation becomes a ConciergeMeditation row, auto-assigned, delivered
 # to the patient via message + push.
 
+@app.get("/concierge/meditations/library")
+def concierge_meditations_library(
+    category: str | None = None,
+    duration: int | None = None,
+    difficulty: str | None = None,
+    tag: str | None = None,
+    q: str | None = None,
+    limit: int = 60,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Browse/filter the physician-curated meditation library. Scoped to
+    source='library' so hand-entered 'manual' meditations (and Claude-
+    generated one-off prescriptions) don't leak into the browse view —
+    those live in their own flows.
+
+    Response also includes available_filters computed from what's actually
+    present so the UI can hide filter options that would return empty."""
+    qset = db.query(ConciergeMeditation).filter(ConciergeMeditation.source == "library")
+    if category:   qset = qset.filter(ConciergeMeditation.category == category)
+    if duration:   qset = qset.filter(ConciergeMeditation.duration_min == int(duration))
+    if difficulty: qset = qset.filter(ConciergeMeditation.difficulty == difficulty)
+    # Text search: title OR physician_notes contains q (case-insensitive).
+    # Tag matching is done Python-side because JSON fields don't support
+    # cross-dialect JSON contains cleanly.
+    if q and q.strip():
+        needle = f"%{q.strip()}%"
+        qset = qset.filter(
+            (ConciergeMeditation.title.ilike(needle)) |
+            (ConciergeMeditation.physician_notes.ilike(needle))
+        )
+    rows = qset.order_by(ConciergeMeditation.category, ConciergeMeditation.duration_min).limit(max(1, min(limit, 200))).all()
+    if tag:
+        t = tag.strip().lower()
+        rows = [r for r in rows if isinstance(r.tags, list) and any(t in (x or '').lower() for x in r.tags)]
+
+    # Gather filter options from the full library (not the filtered set) so
+    # the UI can show what's available even as filters narrow.
+    all_lib = db.query(ConciergeMeditation).filter(ConciergeMeditation.source == "library").all()
+    categories = sorted({r.category for r in all_lib if r.category})
+    durations  = sorted({r.duration_min for r in all_lib if r.duration_min})
+    difficulties = sorted({r.difficulty for r in all_lib if r.difficulty})
+    # Top 40 tags by frequency for the chip picker.
+    from collections import Counter as _Counter
+    tag_counter: _Counter = _Counter()
+    for r in all_lib:
+        if isinstance(r.tags, list):
+            for x in r.tags:
+                if x: tag_counter[str(x).lower()] += 1
+    top_tags = [t for t, _c in tag_counter.most_common(40)]
+
+    return {
+        "meditations": [{
+            "id": r.id,
+            "title": r.title,
+            "category": r.category,
+            "duration_min": r.duration_min or 0,
+            "difficulty": r.difficulty,
+            "tags": r.tags or [],
+            "physician_notes": r.physician_notes or "",
+            "description": r.description or "",
+            "script_excerpt": (r.script or "")[:280],
+            "script_chars": len(r.script or ""),
+            "assignment_count": db.query(ConciergeMeditationAssignment).filter(ConciergeMeditationAssignment.meditation_id == r.id).count(),
+        } for r in rows],
+        "total_in_library": len(all_lib),
+        "returned": len(rows),
+        "available_filters": {
+            "categories": categories,
+            "durations": durations,
+            "difficulties": difficulties,
+            "top_tags": top_tags,
+        },
+    }
+
+
 @app.get("/concierge/meditations/templates")
 def concierge_meditations_templates(_: User = Depends(verify_concierge_owner)):
     return {"templates": [

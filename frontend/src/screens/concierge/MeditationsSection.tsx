@@ -54,6 +54,7 @@ const MeditationsSection: React.FC<Props> = ({ API, token, accent }) => {
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showPrescribe, setShowPrescribe] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
   const [assignTarget, setAssignTarget] = useState<Meditation | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [banner, setBanner] = useState<{ok: boolean; text: string} | null>(null);
@@ -102,6 +103,10 @@ const MeditationsSection: React.FC<Props> = ({ API, token, accent }) => {
           <button onClick={() => setShowPrescribe(true)}
             style={{background:'linear-gradient(135deg,#d4a86b,#9b8fe8)', border:'none', borderRadius:'12px', padding:'10px 16px', fontSize:'13px', fontWeight:800, color:'white', cursor:'pointer', boxShadow:'0 8px 20px rgba(155,143,232,0.35)', letterSpacing:'0.3px'}}>
             ✨ Prescribe personalized
+          </button>
+          <button onClick={() => setShowLibrary(true)}
+            style={{background:'linear-gradient(135deg,#4a7ad0,#9b8fe8)', border:'none', borderRadius:'12px', padding:'10px 16px', fontSize:'13px', fontWeight:800, color:'white', cursor:'pointer', boxShadow:'0 8px 20px rgba(122,176,240,0.3)'}}>
+            📚 Browse library
           </button>
           <button onClick={() => setShowCreate(true)}
             style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'12px', padding:'10px 14px', fontSize:'12px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>
@@ -252,6 +257,18 @@ const MeditationsSection: React.FC<Props> = ({ API, token, accent }) => {
           onPrescribed={(detail) => {
             setShowPrescribe(false);
             setBanner({ok:true, text: `Prescribed "${detail.title}" (${detail.duration_min} min). Patient notified.`});
+            load();
+          }}
+        />
+      )}
+
+      {showLibrary && (
+        <LibraryPickerModal
+          API={API} token={token} patients={patients}
+          onClose={() => setShowLibrary(false)}
+          onPrescribed={(detail) => {
+            setShowLibrary(false);
+            setBanner({ok:true, text: `Sent "${detail.title}" to ${detail.patient_name}. Patient notified.`});
             load();
           }}
         />
@@ -526,5 +543,324 @@ export const solidBtn = (accent: string): React.CSSProperties => ({
   borderRadius:'10px', padding:'9px 18px', fontSize:'12px', fontWeight:800,
   color:'white', cursor:'pointer', fontFamily:'inherit',
 });
+
+// ───── Browse library ────────────────────────────────────────────────────
+// Physician-facing search over the 2,000-meditation generated library
+// (source='library'). Filters by category / duration / difficulty / tag /
+// free-text. Tap a result → preview → pick patient → assigns via the
+// existing /assign endpoint (patient push + Home-tab meditations list).
+
+interface LibraryMeditation {
+  id: number; title: string; category: string; duration_min: number;
+  difficulty: string | null; tags: string[]; physician_notes: string;
+  description: string; script_excerpt: string; script_chars: number;
+  assignment_count: number;
+}
+
+interface LibraryFilters {
+  categories: string[]; durations: number[]; difficulties: string[]; top_tags: string[];
+}
+
+// Pretty labels for the library category slugs the generator produces.
+// Falls back to Title Case if a slug isn't known.
+const LIBRARY_CATEGORY_LABELS: Record<string, string> = {
+  divine_light_healing: 'Divine Light Healing',
+  universe_surrender:   'Universe Surrender',
+  vortex_alignment:     'Vortex Alignment',
+  quantum_healing:      'Quantum Healing',
+  subconscious_healing: 'Subconscious Healing',
+  chakra_balancing:     'Chakra Balancing',
+  heart_coherence:      'Heart Coherence',
+  morning_activation:   'Morning Activation',
+  evening_integration:  'Evening Integration',
+  sleep_healing:        'Sleep Healing',
+  anxiety_release:      'Anxiety Release',
+  grief_and_loss:       'Grief and Loss',
+  chronic_pain:         'Chronic Pain',
+  immune_boost:         'Immune Boost',
+  cardiovascular:       'Cardiovascular',
+  kidney_and_detox:     'Kidney and Detox',
+  neurological:         'Neurological',
+  oncology_support:     'Oncology Support',
+  autoimmune:           'Autoimmune',
+  soul_purpose:         'Soul Purpose',
+  // Manual-entry category fallbacks
+  breathwork:      'Breathwork',
+  body_scan:       'Body Scan',
+  visualization:   'Visualization',
+  energy_healing:  'Energy Healing',
+  sleep:           'Sleep',
+  stress:          'Stress',
+};
+const labelFor = (slug: string) =>
+  LIBRARY_CATEGORY_LABELS[slug] || slug.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+const LibraryPickerModal: React.FC<{
+  API: string; token: string;
+  patients: PatientMini[];
+  onClose: () => void;
+  onPrescribed: (d: {title: string; patient_name: string}) => void;
+}> = ({ API, token, patients, onClose, onPrescribed }) => {
+  const [category, setCategory] = useState<string>('');
+  const [duration, setDuration] = useState<number | null>(null);
+  const [difficulty, setDifficulty] = useState<string>('');
+  const [tag, setTag] = useState<string>('');
+  const [q, setQ] = useState<string>('');
+  const [results, setResults] = useState<LibraryMeditation[]>([]);
+  const [filters, setFilters] = useState<LibraryFilters>({ categories: [], durations: [], difficulties: [], top_tags: [] });
+  const [total, setTotal] = useState<number>(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState<LibraryMeditation | null>(null);
+
+  // Debounce search + filter changes.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const params = new URLSearchParams();
+      if (category)     params.set('category', category);
+      if (duration)     params.set('duration', String(duration));
+      if (difficulty)   params.set('difficulty', difficulty);
+      if (tag)          params.set('tag', tag);
+      if (q.trim())     params.set('q', q.trim());
+      setLoading(true); setError('');
+      fetch(`${API}/concierge/meditations/library?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(d => {
+          setResults(d.meditations || []);
+          setFilters(d.available_filters || { categories: [], durations: [], difficulties: [], top_tags: [] });
+          setTotal(d.total_in_library || 0);
+        })
+        .catch(() => setError('Could not load library.'))
+        .finally(() => setLoading(false));
+    }, 240);
+    return () => clearTimeout(t);
+  }, [API, token, category, duration, difficulty, tag, q]);
+
+  return (
+    <div onClick={onClose} style={{position:'fixed', inset:0, zIndex:2000, background:'rgba(26,42,74,0.5)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', padding:'16px'}}>
+      <div onClick={e => e.stopPropagation()} style={{background:'white', borderRadius:'22px', maxWidth:'780px', width:'100%', maxHeight:'94vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 30px 70px rgba(26,42,74,0.35)'}}>
+        {/* Header */}
+        <div style={{padding:'16px 20px 12px', borderBottom:'1px solid rgba(122,176,240,0.2)', background:'linear-gradient(135deg, rgba(122,176,240,0.08), rgba(155,143,232,0.08))'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', color:'#4a7ad0', fontWeight:800}}>📚 Meditation library</div>
+            <button onClick={onClose} aria-label="Close" style={{background:'transparent', border:'none', fontSize:'20px', color:'#6a8ab0', cursor:'pointer', padding:'4px 8px'}}>×</button>
+          </div>
+          <div style={{fontSize:'12px', color:'#6a8ab0', marginTop:'4px'}}>
+            {total} in library · filter to find what this patient needs today
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div style={{padding:'14px 20px 10px', borderBottom:'1px solid rgba(122,176,240,0.15)', background:'rgba(240,246,255,0.35)'}}>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search title or physician notes…"
+            style={{...INPUT, marginBottom:'10px'}}/>
+          {filters.categories.length > 0 && (
+            <div style={{display:'flex', gap:'6px', overflowX:'auto', paddingBottom:'6px', marginBottom:'8px'}}>
+              <FilterPill active={!category} onClick={() => setCategory('')} label="All categories"/>
+              {filters.categories.map(c => (
+                <FilterPill key={c} active={category === c} onClick={() => setCategory(c)} label={labelFor(c)}/>
+              ))}
+            </div>
+          )}
+          <div style={{display:'flex', gap:'10px', flexWrap:'wrap', marginBottom:'6px'}}>
+            {filters.durations.length > 0 && (
+              <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
+                <span style={{fontSize:'10px', color:'#6a8ab0', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginRight:'4px'}}>Duration</span>
+                <FilterPill active={duration === null} onClick={() => setDuration(null)} label="Any"/>
+                {filters.durations.map(d => (
+                  <FilterPill key={d} active={duration === d} onClick={() => setDuration(d)} label={`${d} min`}/>
+                ))}
+              </div>
+            )}
+            {filters.difficulties.length > 0 && (
+              <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
+                <span style={{fontSize:'10px', color:'#6a8ab0', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginRight:'4px'}}>Difficulty</span>
+                <FilterPill active={!difficulty} onClick={() => setDifficulty('')} label="Any"/>
+                {filters.difficulties.map(d => (
+                  <FilterPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)} label={d}/>
+                ))}
+              </div>
+            )}
+          </div>
+          {filters.top_tags.length > 0 && (
+            <div style={{display:'flex', gap:'4px', overflowX:'auto', paddingBottom:'2px'}}>
+              <span style={{fontSize:'10px', color:'#6a8ab0', fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', marginRight:'4px', flexShrink:0, alignSelf:'center'}}>Tags</span>
+              <FilterPill active={!tag} onClick={() => setTag('')} label="Any"/>
+              {filters.top_tags.slice(0, 24).map(t => (
+                <FilterPill key={t} active={tag === t} onClick={() => setTag(t === tag ? '' : t)} label={t}/>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Results */}
+        <div style={{flex:1, overflow:'auto', padding:'14px 20px'}}>
+          {loading ? (
+            <div style={{padding:'40px', textAlign:'center', color:'#6a8ab0', fontSize:'13px'}}>Loading…</div>
+          ) : error ? (
+            <div style={{padding:'20px', color:'#a02020', fontSize:'13px'}}>{error}</div>
+          ) : results.length === 0 ? (
+            <div style={{padding:'40px 20px', textAlign:'center', color:'#6a8ab0'}}>
+              {total === 0 ? (
+                <>
+                  <div style={{fontSize:'36px', marginBottom:'10px', opacity:0.5}}>📚</div>
+                  <div style={{fontSize:'14px', fontWeight:700, color:'#1a2a4a', marginBottom:'6px'}}>Library is empty</div>
+                  <div style={{fontSize:'12px', maxWidth:'380px', margin:'0 auto', lineHeight:1.6}}>
+                    Run <code style={{background:'rgba(122,176,240,0.15)', padding:'2px 6px', borderRadius:'4px'}}>backend/scripts/generate_meditations.py</code> and <code style={{background:'rgba(122,176,240,0.15)', padding:'2px 6px', borderRadius:'4px'}}>load_meditations.py</code> to populate.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{fontSize:'14px', fontWeight:700, color:'#1a2a4a', marginBottom:'4px'}}>No matches</div>
+                  <div style={{fontSize:'12px'}}>Try relaxing a filter.</div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'10px'}}>
+              {results.map(m => (
+                <button key={m.id} onClick={() => setPreview(m)}
+                  style={{textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+                    background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.2)',
+                    borderRadius:'14px', padding:'12px 14px', boxShadow:'0 2px 8px rgba(100,130,200,0.08)'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px', gap:'8px'}}>
+                    <span style={{fontSize:'10px', fontWeight:800, color:'#4a7ad0', letterSpacing:'0.5px', textTransform:'uppercase', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{labelFor(m.category)}</span>
+                    <span style={{fontSize:'10px', fontWeight:700, color:'#6a8ab0', flexShrink:0}}>{m.duration_min} min</span>
+                  </div>
+                  <div style={{fontSize:'14px', fontWeight:800, color:'#1a2a4a', lineHeight:1.25, marginBottom:'6px', minHeight:'36px'}}>{m.title}</div>
+                  {m.difficulty && <span style={{fontSize:'10px', fontWeight:700, padding:'2px 8px', borderRadius:'999px', background:'rgba(155,143,232,0.12)', color:'#6a60b0', marginRight:'4px'}}>{m.difficulty}</span>}
+                  {m.assignment_count > 0 && <span style={{fontSize:'10px', color:'#6a8ab0', marginLeft:'4px'}}>· sent {m.assignment_count}×</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{padding:'10px 20px', borderTop:'1px solid rgba(122,176,240,0.2)', background:'rgba(240,246,255,0.5)', fontSize:'11px', color:'#6a8ab0', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+          <span>{loading ? '…' : `Showing ${results.length} of ${total}`}</span>
+          <button onClick={onClose} style={ghostBtn}>Close</button>
+        </div>
+      </div>
+
+      {preview && (
+        <LibraryPreview
+          API={API} token={token} meditation={preview} patients={patients}
+          onClose={() => setPreview(null)}
+          onPrescribed={onPrescribed}
+        />
+      )}
+    </div>
+  );
+};
+
+const FilterPill: React.FC<{active: boolean; onClick: () => void; label: string}> = ({ active, onClick, label }) => (
+  <button onClick={onClick}
+    style={{
+      flexShrink:0, padding:'5px 11px', borderRadius:'999px', fontSize:'11px',
+      fontWeight: active ? 800 : 600,
+      border: active ? '1px solid #4a7ad0' : '1px solid rgba(122,176,240,0.25)',
+      background: active ? 'rgba(122,176,240,0.18)' : 'rgba(255,255,255,0.75)',
+      color: active ? '#4a7ad0' : '#1a2a4a',
+      cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '0.2px',
+      whiteSpace: 'nowrap',
+    }}>
+    {label}
+  </button>
+);
+
+const LibraryPreview: React.FC<{
+  API: string; token: string;
+  meditation: LibraryMeditation;
+  patients: PatientMini[];
+  onClose: () => void;
+  onPrescribed: (d: {title: string; patient_name: string}) => void;
+}> = ({ API, token, meditation, patients, onClose, onPrescribed }) => {
+  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const prescribe = async () => {
+    if (!selectedPatientId) return;
+    setSending(true); setError('');
+    try {
+      const res = await fetch(`${API}/concierge/meditations/${meditation.id}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+        body: JSON.stringify({ patient_id: selectedPatientId }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Assign failed'); }
+      const patient = patients.find(p => p.id === selectedPatientId);
+      onPrescribed({ title: meditation.title, patient_name: patient?.name || '' });
+    } catch (e: any) { setError(e.message); setSending(false); }
+  };
+
+  return (
+    <div onClick={onClose} style={{position:'fixed', inset:0, zIndex:2100, background:'rgba(26,42,74,0.6)', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', justifyContent:'center', padding:'16px'}}>
+      <div onClick={e => e.stopPropagation()} style={{background:'white', borderRadius:'20px', maxWidth:'560px', width:'100%', maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 30px 70px rgba(26,42,74,0.35)'}}>
+        <div style={{padding:'16px 20px 12px', borderBottom:'1px solid rgba(122,176,240,0.2)'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'10px'}}>
+            <div style={{minWidth:0, flex:1}}>
+              <div style={{fontSize:'10px', fontWeight:800, color:'#4a7ad0', letterSpacing:'0.5px', textTransform:'uppercase'}}>{labelFor(meditation.category)} · {meditation.duration_min} min{meditation.difficulty ? ` · ${meditation.difficulty}` : ''}</div>
+              <div style={{fontSize:'18px', fontWeight:800, color:'#1a2a4a', marginTop:'4px', lineHeight:1.25}}>{meditation.title}</div>
+            </div>
+            <button onClick={onClose} aria-label="Close" style={{background:'transparent', border:'none', fontSize:'20px', color:'#6a8ab0', cursor:'pointer'}}>×</button>
+          </div>
+        </div>
+
+        <div style={{overflow:'auto', padding:'14px 20px', flex:1}}>
+          {meditation.physician_notes && (
+            <div style={{background:'rgba(122,176,240,0.08)', border:'1px solid rgba(122,176,240,0.2)', borderRadius:'10px', padding:'10px 12px', fontSize:'12px', color:'#1a2a4a', lineHeight:1.5, marginBottom:'12px'}}>
+              <div style={FIELD_LABEL}>When to prescribe</div>
+              <div style={{marginTop:'4px', fontStyle:'italic'}}>{meditation.physician_notes}</div>
+            </div>
+          )}
+          {meditation.tags.length > 0 && (
+            <div style={{display:'flex', gap:'4px', flexWrap:'wrap', marginBottom:'12px'}}>
+              {meditation.tags.map(t => (
+                <span key={t} style={{fontSize:'10px', padding:'2px 8px', borderRadius:'999px', background:'rgba(155,143,232,0.12)', color:'#6a60b0', fontWeight:600}}>{t}</span>
+              ))}
+            </div>
+          )}
+          <div style={FIELD_LABEL}>Script excerpt</div>
+          <div style={{fontSize:'13px', color:'#4a5e6a', marginTop:'4px', lineHeight:1.7, fontStyle:'italic', padding:'12px 14px', background:'rgba(240,246,255,0.5)', borderRadius:'10px', border:'1px solid rgba(122,176,240,0.15)'}}>
+            {meditation.script_excerpt}{meditation.script_chars > 280 ? '…' : ''}
+          </div>
+          <div style={{fontSize:'10px', color:'#8aa0c0', marginTop:'4px'}}>{meditation.script_chars.toLocaleString()} characters total. Full script delivered to the patient.</div>
+
+          <div style={{marginTop:'16px', ...FIELD_LABEL}}>Prescribe to</div>
+          {patients.length === 0 ? (
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginTop:'6px'}}>No patients yet — add one in Patients first.</div>
+          ) : (
+            <div style={{display:'flex', flexDirection:'column', gap:'6px', marginTop:'6px', maxHeight:'220px', overflow:'auto'}}>
+              {patients.map(p => {
+                const sel = selectedPatientId === p.id;
+                return (
+                  <button key={p.id} onClick={() => setSelectedPatientId(p.id)}
+                    style={{textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+                      background: sel ? 'rgba(122,176,240,0.14)' : 'rgba(255,255,255,0.7)',
+                      border: sel ? '2px solid #4a7ad0' : '1px solid rgba(122,176,240,0.2)',
+                      borderRadius:'12px', padding:'10px 12px'}}>
+                    <div style={{fontSize:'13px', fontWeight:700, color:'#1a2a4a'}}>{p.name}</div>
+                    <div style={{fontSize:'11px', color:'#6a8ab0'}}>{p.email}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {error && <div style={{color:'#a02020', fontSize:'12px', marginTop:'10px'}}>{error}</div>}
+        </div>
+
+        <div style={{padding:'12px 20px', borderTop:'1px solid rgba(122,176,240,0.2)', background:'rgba(240,246,255,0.5)', display:'flex', gap:'8px', justifyContent:'flex-end'}}>
+          <button onClick={onClose} style={ghostBtn}>Cancel</button>
+          <button onClick={prescribe} disabled={!selectedPatientId || sending}
+            style={{...solidBtn('linear-gradient(135deg,#4a7ad0,#9b8fe8)'), opacity: (!selectedPatientId || sending) ? 0.6 : 1}}>
+            {sending ? 'Sending…' : 'Prescribe & notify →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default MeditationsSection;
