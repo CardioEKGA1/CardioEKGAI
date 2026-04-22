@@ -69,22 +69,159 @@ const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
   return <NotEnrolled email={me.email} onBack={onBack}/>;
 };
 
-const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onBack }) => (
-  <div style={{minHeight:'100vh', background:'linear-gradient(135deg,#E0F4FA,#F6BFD3)', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', fontFamily:'system-ui,-apple-system,BlinkMacSystemFont,sans-serif'}}>
-    <div style={{position:'relative', maxWidth:'420px', width:'100%', background:'rgba(255,255,255,0.78)', borderRadius:'24px', padding:'32px', boxShadow:'0 20px 60px rgba(107,78,124,0.18)', textAlign:'center', overflow:'hidden'}}>
-      <div style={{position:'absolute', top:'-20px', right:'-20px', opacity:0.08}}><ChoKuRei size={160} color="#6b4e7c" opacity={1}/></div>
-      <div style={{fontSize:'11px', letterSpacing:'3px', textTransform:'uppercase', color:'#6b4e7c', opacity:0.7, fontWeight:700}}>SoulMD Concierge</div>
-      <div style={{fontSize:'22px', fontWeight:800, color:'#4a2d6b', marginTop:'6px', lineHeight:1.2}}>Where science meets the soul</div>
-      <div style={{fontSize:'13px', color:'#6b4e7c', marginTop:'12px', lineHeight:1.6}}>
-        Your email {email} isn't linked to a Concierge membership yet. Concierge enrollment is direct-pay and by invitation during beta.
+const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onBack }) => {
+  const DEEPP = '#6b4e7c';
+  const INK   = '#4a2d6b';
+  const TEAL  = '#2ABFBF';
+  const ROSE  = '#E890B0';
+
+  const tiers = [
+    {
+      id: 'awaken', label: 'Awaken', monthly: 444, yearly: 5000,
+      tagline: 'Begin the practice',
+      bullets: ['2 medical visits / month (max 30 min)', '1 guided meditation / month', 'Secure direct messaging with Dr. Anderson'],
+      accent: '#7ab0f0',
+    },
+    {
+      id: 'align',  label: 'Align',  monthly: 888, yearly: 10000,
+      tagline: 'Deepen the work',
+      bullets: ['3 medical visits / month (max 30 min)', '2 guided meditations / month', 'Lab-review turnaround within 48h'],
+      accent: TEAL, featured: true,
+    },
+    {
+      id: 'ascend', label: 'Ascend', monthly: 1111, yearly: 13000,
+      tagline: 'Fully integrated care',
+      bullets: ['5 medical visits / month (max 30 min)', '4 guided meditations / month', 'Same-day scheduling', 'Monthly integrative review'],
+      accent: '#1a2a4a',
+    },
+  ];
+
+  const alaCarte = [
+    ['Medical consultation (max 30 min)', '$300'],
+    ['Extended visit (per additional 15 min)', '$150'],
+    ['Guided meditation (30 min)', '$44'],
+    ['Urgent same-day consult', '$444'],
+    ['Lab result review + async message', '$75'],
+  ];
+
+  const requestMembership = () => {
+    const subject = encodeURIComponent('Interested in SoulMD Concierge membership');
+    const body = encodeURIComponent(
+      `Hi Dr. Anderson,\n\n` +
+      `I'm interested in joining SoulMD Concierge. A bit about me:\n\n` +
+      `Name: \n` +
+      `Age: \n` +
+      `What drew me to this practice: \n` +
+      `What I'd most like support around: \n` +
+      `Preferred tier (Awaken / Align / Ascend): \n\n` +
+      `My email on file: ${email}\n\n` +
+      `Thank you — I look forward to hearing from you.`
+    );
+    window.location.href = `mailto:anderson@soulmd.us?subject=${subject}&body=${body}`;
+  };
+
+  return (
+    <div style={{minHeight:'100vh', background:'linear-gradient(135deg,#E0F4FA 0%,#F6BFD3 100%)', fontFamily:'system-ui,-apple-system,BlinkMacSystemFont,sans-serif', paddingBottom:'40px', position:'relative'}}>
+      {/* Cho Ku Rei watermark layer */}
+      <div aria-hidden="true" style={{position:'fixed', inset:0, zIndex:0, pointerEvents:'none', overflow:'hidden'}}>
+        <div style={{position:'absolute', top:'8%',  left:'-30px'}}><ChoKuRei size={220} color={DEEPP} opacity={0.05}/></div>
+        <div style={{position:'absolute', top:'38%', right:'-30px'}}><ChoKuRei size={180} color={TEAL}  opacity={0.04}/></div>
+        <div style={{position:'absolute', bottom:'12%', left:'8%'}}><ChoKuRei size={160} color={ROSE}  opacity={0.04}/></div>
       </div>
-      <div style={{fontSize:'11px', color:'#6b4e7c', opacity:0.7, marginTop:'14px', lineHeight:1.6}}>
-        Interested in membership? Reply to your intake email from Dr. Anderson or email <a href="mailto:anderson@soulmd.us" style={{color:'#2ABFBF', textDecoration:'none', fontWeight:700}}>anderson@soulmd.us</a>.
+
+      <div style={{position:'relative', zIndex:1, maxWidth:'720px', margin:'0 auto', padding:'24px 20px'}}>
+        {/* Top bar */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'24px'}}>
+          <button onClick={onBack} style={{background:'rgba(255,255,255,0.7)', border:'1px solid rgba(107,78,124,0.15)', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', fontWeight:700, color:DEEPP, cursor:'pointer', fontFamily:'inherit'}}>← SoulMD</button>
+          <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', color:DEEPP, opacity:0.7, fontWeight:800}}>Concierge · Beta</div>
+        </div>
+
+        {/* Hero */}
+        <div style={{textAlign:'center', marginBottom:'28px', padding:'20px 4px'}}>
+          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'clamp(30px,7vw,40px)', fontWeight:600, color:INK, lineHeight:1.15, letterSpacing:'-0.3px'}}>
+            Where science meets the soul
+          </div>
+          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'clamp(15px,3.8vw,17px)', color:DEEPP, marginTop:'14px', lineHeight:1.6, maxWidth:'520px', margin:'14px auto 0'}}>
+            A direct-pay, physician-led integrative medicine practice. No insurance. No rush. No 12-minute visits. Monthly support paired with daily rituals of meaning.
+          </div>
+        </div>
+
+        {/* Tier cards */}
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'12px', marginBottom:'28px'}}>
+          {tiers.map(t => (
+            <div key={t.id} style={{
+              background: 'rgba(255,255,255,0.85)',
+              backdropFilter:'blur(10px)',
+              borderRadius:'20px',
+              padding:'22px 18px',
+              border: t.featured ? `2px solid ${t.accent}` : '1px solid rgba(255,255,255,0.9)',
+              boxShadow: t.featured ? `0 16px 32px ${t.accent}22` : '0 8px 24px rgba(107,78,124,0.1)',
+              position:'relative',
+            }}>
+              {t.featured && (
+                <div style={{position:'absolute', top:'-10px', left:'50%', transform:'translateX(-50%)', background:t.accent, color:'white', fontSize:'9px', fontWeight:800, letterSpacing:'1.5px', textTransform:'uppercase', padding:'4px 14px', borderRadius:'999px', whiteSpace:'nowrap'}}>Most chosen</div>
+              )}
+              <div style={{fontSize:'10px', fontWeight:800, letterSpacing:'2px', textTransform:'uppercase', color:t.accent}}>{t.label}</div>
+              <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'14px', color:DEEPP, marginTop:'4px'}}>{t.tagline}</div>
+              <div style={{fontSize:'32px', fontWeight:800, color:INK, marginTop:'12px', lineHeight:1}}>${t.monthly.toLocaleString()}<span style={{fontSize:'14px', fontWeight:600, color:DEEPP, opacity:0.7}}>/mo</span></div>
+              <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'4px'}}>or ${t.yearly.toLocaleString()}/yr</div>
+              <ul style={{listStyle:'none', padding:0, margin:'16px 0 0 0', display:'flex', flexDirection:'column', gap:'6px'}}>
+                {t.bullets.map(b => (
+                  <li key={b} style={{fontSize:'12px', color:INK, display:'flex', alignItems:'flex-start', gap:'7px', lineHeight:1.45}}>
+                    <span style={{color: t.accent, fontWeight:800, flexShrink:0}}>✓</span>
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        {/* À la carte */}
+        <div style={{background:'rgba(255,255,255,0.82)', borderRadius:'20px', padding:'22px', marginBottom:'28px', border:'1px solid rgba(255,255,255,0.9)', boxShadow:'0 8px 24px rgba(107,78,124,0.08)'}}>
+          <div style={{fontSize:'10px', fontWeight:800, letterSpacing:'2px', textTransform:'uppercase', color:DEEPP, opacity:0.75, marginBottom:'12px'}}>À la carte — available to non-members</div>
+          <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
+            {alaCarte.map(([label, price]) => (
+              <div key={label} style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'6px 0', borderBottom:'1px dashed rgba(107,78,124,0.12)', fontSize:'13px', color:INK}}>
+                <span>{label}</span>
+                <span style={{fontWeight:800, color:INK, letterSpacing:'0.2px'}}>{price}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* CTA block */}
+        <div style={{background:'linear-gradient(135deg, rgba(42,191,191,0.12), rgba(232,144,176,0.12))', border:'1px solid rgba(42,191,191,0.25)', borderRadius:'20px', padding:'22px 20px', textAlign:'center', marginBottom:'14px'}}>
+          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'20px', fontWeight:600, color:INK, marginBottom:'6px'}}>
+            Requests are reviewed personally by Dr. Anderson.
+          </div>
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.85, marginBottom:'16px', lineHeight:1.6}}>
+            Tap below to send your intake. We're taking a small cohort during beta; you'll hear back within 2 business days with next steps and tier guidance.
+          </div>
+          <button onClick={requestMembership}
+            style={{background:'linear-gradient(135deg,#2ABFBF,#6b4e7c)', color:'white', border:'none', borderRadius:'14px', padding:'14px 32px', fontSize:'14px', fontWeight:800, cursor:'pointer', boxShadow:'0 10px 24px rgba(42,191,191,0.35)', fontFamily:'inherit'}}>
+            Request membership →
+          </button>
+          <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'14px'}}>
+            Signed in as <b style={{color:INK}}>{email}</b> · <a href="mailto:anderson@soulmd.us?subject=Concierge%20question" style={{color:TEAL, textDecoration:'none', fontWeight:700}}>Ask a question</a>
+          </div>
+        </div>
+
+        {/* Beta disclaimer */}
+        <div style={{background:'rgba(255,255,255,0.6)', border:'1px solid rgba(232,168,64,0.35)', borderRadius:'12px', padding:'10px 14px', display:'flex', alignItems:'flex-start', gap:'8px', marginBottom:'10px'}}>
+          <span style={{fontSize:'14px', flexShrink:0}}>⚠️</span>
+          <div style={{fontSize:'10px', color:'#8a5a10', lineHeight:1.5}}>
+            <b style={{color:'#6e4208'}}>Direct-pay · Not insurance · Not HIPAA compliant yet (beta).</b> Do not enter identifying patient information in intake messages. For emergencies call 911.
+          </div>
+        </div>
+
+        <div style={{textAlign:'center', fontSize:'11px', color:DEEPP, opacity:0.6, padding:'16px 0'}}>
+          Already a member but don't see your account? <a href="mailto:anderson@soulmd.us?subject=Concierge%20access%20issue" style={{color:TEAL, textDecoration:'none', fontWeight:700}}>anderson@soulmd.us</a>
+        </div>
       </div>
-      <button onClick={onBack} style={{marginTop:'22px', background:'linear-gradient(135deg,#F6BFD3,#E890B0)', border:'none', color:'white', borderRadius:'14px', padding:'12px 24px', fontSize:'13px', fontWeight:800, cursor:'pointer'}}>Back to SoulMD</button>
     </div>
-  </div>
-);
+  );
+};
 
 const HipaaAckGate: React.FC<{onAck: () => void; onBack: () => void}> = ({ onAck, onBack }) => (
   <div style={{minHeight:'100vh', background:'linear-gradient(135deg,#E0F4FA,#F6BFD3)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', fontFamily:'system-ui,-apple-system,BlinkMacSystemFont,sans-serif'}}>
