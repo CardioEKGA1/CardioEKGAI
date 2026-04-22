@@ -1,6 +1,9 @@
 backend/.env
 backend/venv/
 backend/stripe_prices.json
+backend/meditations_shards/
+backend/meditations.json.tmp
+backend/oracle_messages.json.tmp
 frontend/node_modules/
 frontend/build/
 __pycache__/

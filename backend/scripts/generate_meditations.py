@@ -238,9 +238,9 @@ Uniqueness rules:
 
 # ─── Library state ────────────────────────────────────────────────────────
 
-def load_library() -> dict:
-    if OUT_PATH.exists():
-        with open(OUT_PATH) as f:
+def load_library(path: Path = OUT_PATH) -> dict:
+    if path.exists():
+        with open(path) as f:
             data = json.load(f)
         data.setdefault("meditations", [])
         data.setdefault("meta", {})
@@ -258,12 +258,12 @@ def load_library() -> dict:
     }
 
 
-def save_library(lib: dict):
+def save_library(lib: dict, path: Path = OUT_PATH):
     """Atomic write so an interrupt never leaves a half-file."""
-    tmp = OUT_PATH.parent / (OUT_PATH.name + ".tmp")
+    tmp = path.parent / (path.name + ".tmp")
     with open(tmp, "w") as f:
         json.dump(lib, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, OUT_PATH)
+    os.replace(tmp, path)
 
 
 # ─── Generation ───────────────────────────────────────────────────────────
@@ -375,7 +375,11 @@ def main():
     ap.add_argument("--category", type=str, default=None, help="Only fill this one category slug.")
     ap.add_argument("--dry-run", action="store_true", help="Don't call the API; emit placeholders.")
     ap.add_argument("--sleep", type=float, default=0.6, help="Seconds between API calls.")
+    ap.add_argument("--output", type=str, default=None, help="Write output to this path instead of backend/meditations.json. For parallel sharding.")
+    ap.add_argument("--input",  type=str, default=None, help="Seed existing state from this path (for parallel shards that share dedup context with a master file).")
     args = ap.parse_args()
+    out_path = Path(args.output).resolve() if args.output else OUT_PATH
+    in_path  = Path(args.input).resolve()  if args.input  else out_path
 
     if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: set ANTHROPIC_API_KEY in env (or backend/.env)")
@@ -383,7 +387,7 @@ def main():
 
     client = Anthropic() if not args.dry_run else None  # type: ignore
 
-    lib = load_library()
+    lib = load_library(in_path)
     existing = lib["meditations"]
     # Index by category + dedupe key.
     by_category: dict[str, list[dict]] = {slug: [] for slug in CATEGORIES}
@@ -400,7 +404,9 @@ def main():
 
     print(f"\nSoulMD Concierge · meditation library generator")
     print(f"  model:      {MODEL}{' (dry-run)' if args.dry_run else ''}")
-    print(f"  output:     {OUT_PATH}")
+    print(f"  output:     {out_path}")
+    if in_path != out_path:
+        print(f"  input seed: {in_path}")
     print(f"  target/cat: {args.target}")
     print(f"  batch:      {args.batch_size}")
     print()
@@ -454,7 +460,7 @@ def main():
                 # Save after every batch.
                 lib["meditations"] = existing
                 lib["meta"]["last_run_at"] = int(time.time())
-                save_library(lib)
+                save_library(lib, out_path)
                 success = True
                 break
             if not success:
