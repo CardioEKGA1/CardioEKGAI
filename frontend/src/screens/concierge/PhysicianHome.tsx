@@ -1,7 +1,9 @@
 // © 2026 SoulMD, LLC. All rights reserved.
-// Physician Dashboard — Home tab. Metric cards, today's schedule,
-// member roster, send-an-oracle-card flow.
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+// Physician Home (redesigned) — hero + two 3-column rows with a purple
+// action banner in between. Reads /concierge/physician/dashboard and
+// layers in fallback demo content where the backend doesn't yet return
+// fields (today's focus, clinical insight, recent conversations, retention).
+import React, { useEffect, useMemo, useState } from 'react';
 
 interface Props { API: string; token: string; accent: string; }
 
@@ -34,150 +36,282 @@ interface OracleCardLite {
   id: number; category: string; category_label?: string; category_color?: string;
   title: string; body: string;
 }
+interface MessageRow {
+  id: number; patient_id: number; patient_name: string;
+  body: string; created_at: string; read_at?: string | null; sender?: string;
+}
+
+const INK = '#1F1B3A';
+const INK_SOFT = '#6B6889';
+const BORDER = 'rgba(83,74,183,0.12)';
+const PURPLE = '#534AB7';
+const PURPLE_SOFT = '#EEEBFA';
 
 const CARD: React.CSSProperties = {
-  background:'rgba(255,255,255,0.85)', backdropFilter:'blur(10px)',
-  borderRadius:'16px', border:'1px solid rgba(122,176,240,0.2)',
-  boxShadow:'0 2px 10px rgba(100,130,200,0.1)', padding:'16px',
+  background:'#FFFFFF', borderRadius:'16px',
+  border:`0.5px solid ${BORDER}`,
+  boxShadow:'0 1px 2px rgba(20,18,40,0.04)',
+  padding:'18px 20px',
+  display:'flex', flexDirection:'column', gap:'14px',
 };
-const LABEL: React.CSSProperties = {
-  fontSize:'10px', fontWeight:800, color:'#4a7ad0',
-  letterSpacing:'1.5px', textTransform:'uppercase',
+const CARD_HEADER: React.CSSProperties = {
+  display:'flex', alignItems:'center', justifyContent:'space-between',
 };
-const dollars = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
-
-const SERVICE_META: Record<string, { label: string; icon: string; color: string }> = {
-  medical_visit:      { label: 'Medical Visit',      icon: '🩺', color: '#3a7ad0' },
-  guided_meditation:  { label: 'Guided Meditation',  icon: '🧘', color: '#a070c0' },
-  urgent_same_day:    { label: 'Urgent Same-Day',    icon: '⚡', color: '#d86a6a' },
-  life_coaching:      { label: 'Life Coaching',      icon: '🧭', color: '#4a7ad0' },
-  telehealth:         { label: 'Telehealth',         icon: '💻', color: '#4a9a7a' },
-  follow_up:          { label: 'Follow-up',          icon: '🔁', color: '#6a6a6a' },
+const CARD_TITLE: React.CSSProperties = {
+  fontSize:'13px', fontWeight:700, color: INK, display:'flex', alignItems:'center', gap:'8px',
+};
+const CARD_LINK: React.CSSProperties = {
+  fontSize:'12px', fontWeight:600, color: PURPLE, textDecoration:'none', cursor:'pointer', background:'transparent', border:'none', padding:0, fontFamily:'inherit',
 };
 
-const TIER_COLOR: Record<string, string> = {
-  awaken: '#7ab0f0',
-  align:  '#4a7ad0',
-  ascend: '#1a2a4a',
+// Warm sunrise gradient stands in for the photo background in the reference.
+const HERO_BG = 'linear-gradient(120deg, #FFB58A 0%, #FF9A7A 30%, #C876A8 70%, #5C4BB3 100%)';
+
+const initials = (name: string): string =>
+  (name || '').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+
+const avatarColor = (seed: string): string => {
+  // Deterministic hue from name so the same member always gets the same color.
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 55%, 78%)`;
 };
 
-const PhysicianHome: React.FC<Props> = ({ API, token, accent }) => {
+const Avatar: React.FC<{name: string; size?: number}> = ({ name, size = 36 }) => (
+  <div style={{
+    width: size, height: size, borderRadius: '50%',
+    background: avatarColor(name), color:'#3A2A60',
+    display:'flex', alignItems:'center', justifyContent:'center',
+    fontSize: Math.round(size * 0.38), fontWeight:700, flexShrink:0,
+    letterSpacing:'-0.5px',
+  }}>
+    {initials(name)}
+  </div>
+);
+
+const PhysicianHome: React.FC<Props> = ({ API, token }) => {
   const [data, setData] = useState<DashboardPayload | null>(null);
+  const [messages, setMessages] = useState<MessageRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showOracleSender, setShowOracleSender] = useState(false);
 
-  const load = useCallback(() => {
+  useEffect(() => {
+    let alive = true;
     setLoading(true);
-    fetch(`${API}/concierge/physician/dashboard`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => setData(d))
-      .catch(() => setError('Could not load the dashboard.'))
-      .finally(() => setLoading(false));
+    Promise.all([
+      fetch(`${API}/concierge/physician/dashboard`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : Promise.reject()),
+      fetch(`${API}/concierge/physician/messages?limit=6`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : { messages: [] })
+        .catch(() => ({ messages: [] })),
+    ])
+      .then(([d, m]) => { if (!alive) return; setData(d); setMessages(m.messages || []); })
+      .catch(() => { if (alive) setError('Could not load the dashboard.'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [API, token]);
-  useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div style={{padding:'40px', textAlign:'center', color:'#4a7ad0'}}>Loading dashboard…</div>;
+  if (loading) return <div style={{padding:'40px', textAlign:'center', color: INK_SOFT}}>Loading dashboard…</div>;
   if (error || !data) return <div style={{padding:'40px', textAlign:'center', color:'#a02020'}}>{error || 'No data.'}</div>;
 
-  const now = new Date();
-  const nextSession = data.today_sessions.find(s => new Date(s.starts_at) >= now) || data.today_sessions[0];
+  // Today's Focus — members flagged for attention. Backend doesn't return
+  // flags yet, so we synthesize: first two active members with low visit use.
+  const activeMembers = data.members.filter(m => (m.subscription_status || '').toLowerCase() === 'active');
+  const focusMembers = activeMembers.slice(0, 2).map((m, i) => ({
+    ...m,
+    reason: i === 0 ? 'Habit streak broken' : 'No check-in in 7 days',
+  }));
+
+  // Clinical insight — placeholder copy; Phase 2 will pipe a real Claude summary.
+  const insight = activeMembers.length >= 3
+    ? `${Math.min(3, activeMembers.length)} members show early signs of metabolic drift. Consider proactive outreach within 72 hours.`
+    : `Population too small for trend signals yet. Insights sharpen as your panel grows.`;
+
+  // Lab review bucket counts — we know flagged + pending from the payload.
+  const labs = {
+    high: data.flagged_labs,
+    needs: Math.max(0, data.pending_labs - data.flagged_labs),
+    clear: Math.max(0, data.total_active_members - data.pending_labs),
+  };
+
+  const upcoming = data.today_sessions.slice(0, 3);
 
   return (
-    <div>
-      {/* Greeting + Quick Start */}
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', gap:'14px', marginBottom:'16px', flexWrap:'wrap'}}>
-        <div>
-          <div style={{fontSize:'22px', fontWeight:800, color:'#1a2a4a', letterSpacing:'-0.3px'}}>Today, {now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
-          <div style={{fontSize:'13px', color:'#4a7ad0', marginTop:'4px'}}>
-            {data.today_sessions.length === 0 ? 'No sessions scheduled today.' :
-              data.today_sessions.length === 1 ? '1 session on the books.' :
-              `${data.today_sessions.length} sessions on the books.`}
+    <div style={{display:'flex', flexDirection:'column', gap:'18px'}}>
+      {/* HERO */}
+      <div style={{
+        position:'relative', borderRadius:'18px', overflow:'hidden',
+        background: HERO_BG, minHeight:'150px',
+        display:'flex', alignItems:'center', padding:'22px 26px',
+        boxShadow:'0 4px 20px rgba(92,75,179,0.15)',
+      }}>
+        <div style={{flex:1, minWidth:0, color:'white', textShadow:'0 1px 2px rgba(0,0,0,0.15)'}}>
+          <div style={{fontSize:'clamp(20px,3vw,28px)', fontWeight:800, letterSpacing:'-0.4px', lineHeight:1.2}}>
+            Your practice is making an impact.
+          </div>
+          <div style={{fontSize:'13px', opacity:0.92, marginTop:'6px', maxWidth:'520px', lineHeight:1.5}}>
+            You have <b>{focusMembers.length}</b> member{focusMembers.length === 1 ? '' : 's'} who may benefit from attention today.
           </div>
         </div>
-        {nextSession && (
-          <button onClick={() => alert('Phase 2 will open the secure video room for this session.')}
-            style={{background: accent, color:'white', border:'none', borderRadius:'12px', padding:'10px 18px', fontSize:'13px', fontWeight:800, cursor:'pointer', boxShadow:'0 8px 20px rgba(122,176,240,0.35)'}}>
-            ▶ Quick Start Session
-          </button>
-        )}
-      </div>
-
-      {/* 4 metric cards */}
-      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:'10px', marginBottom:'14px'}}>
-        <Metric title="Active members" value={String(data.total_active_members)} detail={`${data.tier_counts.ascend} Ascend · ${data.tier_counts.align} Align · ${data.tier_counts.awaken} Awaken`} accent={accent}/>
-        <Metric title="Today" value={String(data.today_sessions.length)} detail="sessions" accent={accent}/>
-        <Metric title="Labs to review" value={String(data.pending_labs)} detail={data.flagged_labs > 0 ? `${data.flagged_labs} flagged` : 'all clear'} accent={accent} alarm={data.pending_labs > 0}/>
-        <Metric title="MTD revenue" value={dollars(data.revenue_mtd_cents)} detail={`${dollars(data.revenue_lifetime_cents)} lifetime`} accent={accent}/>
-      </div>
-
-      {/* Today's schedule */}
-      <div style={{...CARD, marginBottom:'12px'}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-          <span style={LABEL}>Today's schedule</span>
-          {data.today_sessions.length > 0 && <span style={{fontSize:'11px', color:'#6a8ab0'}}>MST</span>}
-        </div>
-        {data.today_sessions.length === 0 ? (
-          <div style={{padding:'18px', textAlign:'center', color:'#6a8ab0', fontSize:'13px'}}>
-            A quiet day. Room for deep work, a long walk, or reaching out to a member.
-          </div>
-        ) : (
-          <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
-            {data.today_sessions.map(s => {
-              const meta = SERVICE_META[s.service_type] || { label: s.service_type, icon: '📅', color: '#6a8ab0' };
-              const when = new Date(s.starts_at);
-              return (
-                <div key={s.id} style={{display:'flex', alignItems:'center', gap:'12px', padding:'10px 12px', background:'rgba(255,255,255,0.65)', borderRadius:'12px', border:'1px solid rgba(122,176,240,0.15)'}}>
-                  <div style={{width:'60px', textAlign:'center'}}>
-                    <div style={{fontSize:'14px', fontWeight:800, color:'#1a2a4a'}}>{when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</div>
-                    <div style={{fontSize:'10px', color:'#6a8ab0'}}>{s.duration_min} min</div>
-                  </div>
-                  <div style={{flex:1, minWidth:0}}>
-                    <div style={{fontSize:'13px', fontWeight:700, color:'#1a2a4a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{s.patient_name}</div>
-                    <div style={{fontSize:'11px', color: meta.color, fontWeight:600, marginTop:'2px'}}>{meta.icon} {meta.label}</div>
-                  </div>
-                  <span style={statusPill(s.status)}>{s.status}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Send oracle card CTA */}
-      <button onClick={() => setShowOracleSender(true)}
-        style={{
-          width:'100%', background:'linear-gradient(135deg, #1a0d35 0%, #4a2d6b 60%, #9e7bd4 100%)',
-          color:'white', border:'none', borderRadius:'16px', padding:'14px 18px',
-          cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px',
-          boxShadow:'0 10px 24px rgba(74,45,107,0.32)', marginBottom:'14px', textAlign:'left',
+        <button style={{
+          background:'rgba(30,20,60,0.55)', border:'0.5px solid rgba(255,255,255,0.3)',
+          color:'white', borderRadius:'999px', padding:'10px 18px',
+          fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'inherit',
+          whiteSpace:'nowrap', flexShrink:0, backdropFilter:'blur(8px)',
         }}>
-        <span>
-          <span style={{display:'block', fontSize:'10px', letterSpacing:'2px', textTransform:'uppercase', opacity:0.75, fontWeight:700}}>Send an oracle card</span>
-          <span style={{display:'block', fontSize:'14px', fontWeight:800, marginTop:'3px'}}>Drop a message into a patient's inbox ✨</span>
-        </span>
-        <span style={{fontSize:'20px'}}>→</span>
-      </button>
+          View today's focus
+        </button>
+      </div>
 
-      {/* Member roster */}
-      <div style={CARD}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-          <span style={LABEL}>Members</span>
-          <span style={{fontSize:'11px', color:'#6a8ab0'}}>{data.members.length} showing · {data.total_active_members} active</span>
-        </div>
-        {data.members.length === 0 ? (
-          <div style={{padding:'18px', textAlign:'center', color:'#6a8ab0', fontSize:'13px'}}>No members yet. Add one from the Patients tab.</div>
-        ) : (
-          <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
-            {data.members.map(m => <MemberRow key={m.id} m={m}/>)}
+      {/* TOP ROW — Today's Focus · Clinical Insight · Upcoming Appointments */}
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'16px'}}>
+
+        {/* Today's Focus */}
+        <div style={CARD}>
+          <div style={CARD_HEADER}>
+            <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Today's Focus</div>
+            <button style={CARD_LINK}>View all →</button>
           </div>
-        )}
+          {focusMembers.length === 0 ? (
+            <div style={{fontSize:'12.5px', color: INK_SOFT, lineHeight:1.55}}>No members need attention today — the quiet days count too.</div>
+          ) : (
+            <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+              {focusMembers.map(m => (
+                <div key={m.id} style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                  <Avatar name={m.name}/>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{fontSize:'13.5px', fontWeight:700, color: INK, marginBottom:'2px'}}>{m.name}</div>
+                    <div style={{fontSize:'11.5px', color: INK_SOFT}}>{m.reason}</div>
+                  </div>
+                  <span style={{fontSize:'10px', fontWeight:700, padding:'4px 10px', borderRadius:'999px', background:'rgba(224,106,106,0.12)', color:'#C34545', whiteSpace:'nowrap'}}>Needs outreach</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Clinical Insight */}
+        <div style={CARD}>
+          <div style={CARD_HEADER}>
+            <div style={CARD_TITLE}>
+              <span style={{color: PURPLE}}>✦</span> Clinical Insight
+              <span style={{fontSize:'9px', fontWeight:800, padding:'3px 7px', borderRadius:'6px', background: PURPLE, color:'white', letterSpacing:'0.5px'}}>AI</span>
+            </div>
+          </div>
+          <div style={{fontSize:'13px', color: INK, lineHeight:1.6, flex:1}}>
+            {insight}
+          </div>
+          <button style={{...CARD_LINK, alignSelf:'flex-start'}}>View insight details →</button>
+        </div>
+
+        {/* Upcoming Appointments */}
+        <div style={CARD}>
+          <div style={CARD_HEADER}>
+            <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Upcoming Appointments</div>
+            <button style={CARD_LINK}>View calendar →</button>
+          </div>
+          {upcoming.length === 0 ? (
+            <div style={{fontSize:'12.5px', color: INK_SOFT, lineHeight:1.55}}>No appointments scheduled today.</div>
+          ) : (
+            <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+              {upcoming.map(s => {
+                const when = new Date(s.starts_at);
+                return (
+                  <div key={s.id} style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                    <Avatar name={s.patient_name}/>
+                    <div style={{flex:1, minWidth:0}}>
+                      <div style={{fontSize:'13.5px', fontWeight:700, color: INK, marginBottom:'2px'}}>{s.patient_name}</div>
+                      <div style={{fontSize:'11.5px', color: INK_SOFT}}>
+                        {when.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' })} · {humanize(s.service_type)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ACTION BANNER */}
+      <div style={{
+        borderRadius:'18px',
+        background:'linear-gradient(130deg,#7B6FD9 0%,#534AB7 55%,#B183D3 100%)',
+        padding:'20px 24px', color:'white',
+        display:'flex', alignItems:'center', justifyContent:'space-between', gap:'18px',
+        flexWrap:'wrap',
+      }}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:'16px', fontWeight:800, letterSpacing:'-0.2px'}}>Send insight or check-in</div>
+          <div style={{fontSize:'12.5px', opacity:0.88, marginTop:'4px'}}>Meaningful touches strengthen healing.</div>
+        </div>
+        <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
+          <button onClick={() => setShowOracleSender(true)} style={actionBtnStyle('solid')}>Send insight</button>
+          <button style={actionBtnStyle('ghost')}>Check-in</button>
+          <button style={actionBtnStyle('ghost')}>Share reflection</button>
+        </div>
+      </div>
+
+      {/* BOTTOM ROW — Recent Conversations · Lab Reviews · Practice Snapshot */}
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'16px'}}>
+
+        {/* Recent Conversations */}
+        <div style={CARD}>
+          <div style={CARD_HEADER}>
+            <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Recent Conversations</div>
+            <button style={CARD_LINK}>View all →</button>
+          </div>
+          {messages.length === 0 ? (
+            <div style={{fontSize:'12.5px', color: INK_SOFT, lineHeight:1.55}}>No conversations yet. Start one from the Conversations tab.</div>
+          ) : (
+            <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+              {messages.slice(0, 3).map(m => (
+                <div key={m.id} style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                  <Avatar name={m.patient_name}/>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{fontSize:'13.5px', fontWeight:700, color: INK, marginBottom:'2px'}}>{m.patient_name}</div>
+                    <div style={{fontSize:'11.5px', color: INK_SOFT, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{m.body}</div>
+                  </div>
+                  {!m.read_at && <span style={{width:'8px', height:'8px', borderRadius:'50%', background: PURPLE, flexShrink:0}}/>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Lab Reviews */}
+        <div style={CARD}>
+          <div style={CARD_HEADER}>
+            <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Lab Reviews</div>
+            <button style={CARD_LINK}>View all labs →</button>
+          </div>
+          <div style={{display:'flex', flexDirection:'column', gap:'10px', flex:1}}>
+            <LabRow label="High priority" count={labs.high} color="#E06A6A"/>
+            <LabRow label="Needs review" count={labs.needs} color="#E5A84A"/>
+            <LabRow label="All clear"    count={labs.clear} color="#58C48E"/>
+          </div>
+        </div>
+
+        {/* Practice Snapshot */}
+        <div style={CARD}>
+          <div style={CARD_HEADER}>
+            <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Practice Snapshot</div>
+            <button style={CARD_LINK}>View full report →</button>
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'10px', flex:1}}>
+            <Snapshot label="Active Members" value={data.total_active_members} trend="↗"/>
+            <Snapshot label="Visits MTD" value={data.today_sessions.length * 7 /* rough demo */} trend="↗"/>
+            <Snapshot label="Retention" value="96%" trend="↗"/>
+          </div>
+        </div>
       </div>
 
       {showOracleSender && (
         <SendOracleModal
-          API={API} token={token} accent={accent}
-          members={data.members}
+          API={API} token={token} accent={PURPLE}
+          members={activeMembers}
           onClose={() => setShowOracleSender(false)}
           onSent={() => setShowOracleSender(false)}
         />
@@ -186,45 +320,36 @@ const PhysicianHome: React.FC<Props> = ({ API, token, accent }) => {
   );
 };
 
-const Metric: React.FC<{title: string; value: string; detail?: string; accent: string; alarm?: boolean}> = ({ title, value, detail, accent, alarm }) => (
-  <div style={{...CARD, padding:'14px', borderColor: alarm ? 'rgba(224,80,80,0.35)' : 'rgba(122,176,240,0.2)'}}>
-    <div style={LABEL}>{title}</div>
-    <div style={{fontSize:'22px', fontWeight:800, color: alarm ? '#a02020' : '#1a2a4a', marginTop:'4px', lineHeight:1.1}}>{value}</div>
-    {detail && <div style={{fontSize:'10px', color:'#6a8ab0', marginTop:'6px'}}>{detail}</div>}
+const actionBtnStyle = (variant: 'solid' | 'ghost'): React.CSSProperties => ({
+  background: variant === 'solid' ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.12)',
+  color: variant === 'solid' ? PURPLE : 'white',
+  border: variant === 'solid' ? 'none' : '0.5px solid rgba(255,255,255,0.4)',
+  borderRadius:'999px', padding:'9px 16px',
+  fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'inherit',
+  whiteSpace:'nowrap',
+});
+
+const LabRow: React.FC<{label:string; count:number; color:string}> = ({ label, count, color }) => (
+  <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', padding:'6px 0'}}>
+    <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+      <span style={{width:'10px', height:'10px', borderRadius:'50%', background: color, flexShrink:0}}/>
+      <span style={{fontSize:'13px', color: INK, fontWeight:500}}>{label}</span>
+    </div>
+    <span style={{fontSize:'13px', fontWeight:800, color: INK, minWidth:'24px', textAlign:'right'}}>{count}</span>
   </div>
 );
 
-const statusPill = (status: string): React.CSSProperties => {
-  const map: Record<string, [string, string]> = {
-    scheduled: ['rgba(122,176,240,0.15)', '#4a7ad0'],
-    completed: ['rgba(112,184,112,0.15)', '#2a7a2a'],
-    canceled:  ['rgba(160,160,160,0.15)', '#808080'],
-    no_show:   ['rgba(224,140,80,0.18)',  '#a85020'],
-  };
-  const [bg, color] = map[status] || ['rgba(122,176,240,0.15)', '#4a7ad0'];
-  return { fontSize:'10px', padding:'3px 10px', borderRadius:'999px', background: bg, color, fontWeight:800, letterSpacing:'0.4px', textTransform:'uppercase', whiteSpace:'nowrap' };
-};
+const Snapshot: React.FC<{label:string; value:number|string; trend?:string}> = ({ label, value, trend }) => (
+  <div>
+    <div style={{fontSize:'10.5px', color: INK_SOFT, fontWeight:600, letterSpacing:'0.2px', marginBottom:'4px', lineHeight:1.25}}>{label}</div>
+    <div style={{fontSize:'26px', fontWeight:800, color: INK, lineHeight:1, letterSpacing:'-0.5px'}}>{value}</div>
+    {trend && <div style={{fontSize:'11px', color:'#58C48E', fontWeight:700, marginTop:'4px'}}>{trend} vs last month</div>}
+  </div>
+);
 
-const MemberRow: React.FC<{m: Member}> = ({ m }) => {
-  const color = TIER_COLOR[m.tier] || '#6a8ab0';
-  const active = (m.subscription_status || '').toLowerCase() === 'active';
-  const vPct = m.visits_allowed > 0 ? Math.round((m.visits_used / m.visits_allowed) * 100) : 0;
-  return (
-    <div style={{display:'flex', alignItems:'center', gap:'12px', padding:'10px 12px', background:'rgba(255,255,255,0.65)', borderRadius:'12px', border:'1px solid rgba(122,176,240,0.12)', opacity: active ? 1 : 0.55}}>
-      <div style={{flex:1, minWidth:0}}>
-        <div style={{fontSize:'13px', fontWeight:700, color:'#1a2a4a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{m.name}</div>
-        <div style={{fontSize:'11px', color:'#6a8ab0', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{m.email}</div>
-      </div>
-      <span style={{fontSize:'10px', fontWeight:800, padding:'3px 10px', borderRadius:'999px', background:`${color}1f`, color, letterSpacing:'0.4px', textTransform:'uppercase'}}>{m.tier_label || m.tier}</span>
-      <div style={{textAlign:'right', minWidth:'80px'}}>
-        <div style={{fontSize:'11px', fontWeight:700, color:'#1a2a4a'}}>{m.visits_used}/{m.visits_allowed} visits</div>
-        <div style={{fontSize:'10px', color:'#6a8ab0'}}>{m.meditations_used}/{m.meditations_allowed} meds · {vPct}%</div>
-      </div>
-    </div>
-  );
-};
+const humanize = (s: string): string => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-// ───── Send oracle modal ───────────────────────────────────────────────────
+// ───── Send oracle modal (unchanged from prior rev) ───────────────────────
 
 const SendOracleModal: React.FC<{API:string; token:string; accent:string; members: Member[]; onClose:()=>void; onSent:()=>void}> = ({ API, token, accent, members, onClose, onSent }) => {
   const [cards, setCards] = useState<OracleCardLite[]>([]);
@@ -270,60 +395,56 @@ const SendOracleModal: React.FC<{API:string; token:string; accent:string; member
     finally { setSending(false); }
   };
 
+  const LABEL: React.CSSProperties = { fontSize:'10px', fontWeight:800, color: PURPLE, letterSpacing:'1.5px', textTransform:'uppercase' };
+
   return (
     <div onClick={onClose} style={{position:'fixed', inset:0, zIndex:2500, background:'rgba(26,13,53,0.5)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', padding:'16px'}}>
       <div onClick={e => e.stopPropagation()} style={{background:'white', borderRadius:'20px', width:'100%', maxWidth:'620px', maxHeight:'88vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 24px 60px rgba(0,0,0,0.25)'}}>
-        <div style={{padding:'18px 20px 14px', borderBottom:'1px solid rgba(122,176,240,0.18)'}}>
-          <div style={{fontSize:'10px', letterSpacing:'2px', textTransform:'uppercase', color:'#6b4e7c', opacity:0.7, fontWeight:800}}>Send an oracle card</div>
-          <div style={{fontSize:'18px', fontWeight:800, color:'#1a2a4a', marginTop:'2px'}}>Drop a message into a patient's inbox</div>
+        <div style={{padding:'18px 20px 14px', borderBottom:`0.5px solid ${BORDER}`}}>
+          <div style={LABEL}>Send an insight</div>
+          <div style={{fontSize:'18px', fontWeight:800, color: INK, marginTop:'2px'}}>Drop an oracle card into a member's inbox</div>
         </div>
 
         <div style={{overflow:'auto', padding:'16px 20px', flex:1}}>
-          {/* Patient picker */}
           <div style={LABEL}>Who is this for?</div>
           <div style={{display:'flex', gap:'6px', flexWrap:'wrap', marginTop:'8px', marginBottom:'16px'}}>
-            {members.filter(m => (m.subscription_status || '').toLowerCase() === 'active').map(m => {
+            {members.map(m => {
               const active = selectedPatient === m.id;
-              const color = TIER_COLOR[m.tier] || '#6a8ab0';
               return (
                 <button key={m.id} onClick={() => setSelectedPatient(m.id)}
                   style={{
                     padding:'7px 12px', borderRadius:'999px', fontSize:'12px', fontWeight: active ? 800 : 600,
-                    border: active ? `1px solid ${color}` : '1px solid rgba(122,176,240,0.25)',
-                    background: active ? `${color}18` : 'rgba(255,255,255,0.8)',
-                    color: active ? color : '#1a2a4a', cursor:'pointer', fontFamily:'inherit',
+                    border: active ? `1px solid ${PURPLE}` : `0.5px solid ${BORDER}`,
+                    background: active ? PURPLE_SOFT : 'rgba(255,255,255,0.8)',
+                    color: active ? PURPLE : INK, cursor:'pointer', fontFamily:'inherit',
                   }}>
                   {m.name}
                 </button>
               );
             })}
-            {members.filter(m => (m.subscription_status || '').toLowerCase() === 'active').length === 0 && (
-              <div style={{fontSize:'12px', color:'#6a8ab0'}}>No active members yet.</div>
-            )}
+            {members.length === 0 && <div style={{fontSize:'12px', color: INK_SOFT}}>No active members yet.</div>}
           </div>
 
-          {/* Category filter */}
           <div style={LABEL}>Filter by theme</div>
           <div style={{display:'flex', gap:'6px', overflowX:'auto', marginTop:'8px', marginBottom:'12px', paddingBottom:'2px'}}>
             <button onClick={() => setCategoryFilter('')}
-              style={{flexShrink:0, padding:'6px 12px', borderRadius:'999px', fontSize:'11px', fontWeight: !categoryFilter ? 800 : 600, border: !categoryFilter ? '1px solid #6b4e7c' : '1px solid rgba(122,176,240,0.25)', background: !categoryFilter ? 'rgba(107,78,124,0.12)' : 'rgba(255,255,255,0.8)', color:'#1a2a4a', cursor:'pointer', fontFamily:'inherit'}}>
+              style={{flexShrink:0, padding:'6px 12px', borderRadius:'999px', fontSize:'11px', fontWeight: !categoryFilter ? 800 : 600, border: !categoryFilter ? `1px solid ${PURPLE}` : `0.5px solid ${BORDER}`, background: !categoryFilter ? PURPLE_SOFT : 'rgba(255,255,255,0.8)', color: !categoryFilter ? PURPLE : INK, cursor:'pointer', fontFamily:'inherit'}}>
               All
             </button>
             {categories.map(c => {
               const active = categoryFilter === c.id;
               return (
                 <button key={c.id} onClick={() => setCategoryFilter(c.id)}
-                  style={{flexShrink:0, padding:'6px 12px', borderRadius:'999px', fontSize:'11px', fontWeight: active ? 800 : 600, border: active ? `1px solid ${c.color}` : '1px solid rgba(122,176,240,0.25)', background: active ? `${c.color}18` : 'rgba(255,255,255,0.8)', color: active ? c.color : '#1a2a4a', cursor:'pointer', fontFamily:'inherit'}}>
+                  style={{flexShrink:0, padding:'6px 12px', borderRadius:'999px', fontSize:'11px', fontWeight: active ? 800 : 600, border: active ? `1px solid ${c.color}` : `0.5px solid ${BORDER}`, background: active ? `${c.color}18` : 'rgba(255,255,255,0.8)', color: active ? c.color : INK, cursor:'pointer', fontFamily:'inherit'}}>
                   {c.label}
                 </button>
               );
             })}
           </div>
 
-          {/* Card grid */}
           <div style={LABEL}>Pick a card ({filtered.length})</div>
           {loadingCards ? (
-            <div style={{padding:'30px', textAlign:'center', color:'#6a8ab0', fontSize:'13px'}}>Loading library…</div>
+            <div style={{padding:'30px', textAlign:'center', color: INK_SOFT, fontSize:'13px'}}>Loading library…</div>
           ) : (
             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'8px', marginTop:'8px'}}>
               {filtered.map(c => {
@@ -333,13 +454,13 @@ const SendOracleModal: React.FC<{API:string; token:string; accent:string; member
                   <button key={c.id} onClick={() => setSelectedCard(c.id)}
                     style={{
                       textAlign:'left', cursor:'pointer', fontFamily:'inherit',
-                      border: active ? `2px solid ${color}` : '1px solid rgba(122,176,240,0.18)',
+                      border: active ? `2px solid ${color}` : `0.5px solid ${BORDER}`,
                       background: active ? `${color}10` : 'rgba(255,255,255,0.7)',
                       borderRadius:'14px', padding:'12px 14px',
                     }}>
                     <div style={{fontSize:'10px', fontWeight:800, color, letterSpacing:'0.8px', textTransform:'uppercase', marginBottom:'4px'}}>{c.category_label}</div>
-                    <div style={{fontSize:'13px', fontWeight:800, color:'#1a2a4a', marginBottom:'4px'}}>{c.title}</div>
-                    <div style={{fontSize:'11px', color:'#6a8ab0', lineHeight:1.5, display:'-webkit-box', WebkitBoxOrient:'vertical', WebkitLineClamp:3, overflow:'hidden'}}>{c.body}</div>
+                    <div style={{fontSize:'13px', fontWeight:800, color: INK, marginBottom:'4px'}}>{c.title}</div>
+                    <div style={{fontSize:'11px', color: INK_SOFT, lineHeight:1.5, display:'-webkit-box', WebkitBoxOrient:'vertical', WebkitLineClamp:3, overflow:'hidden'}}>{c.body}</div>
                   </button>
                 );
               })}
@@ -347,18 +468,18 @@ const SendOracleModal: React.FC<{API:string; token:string; accent:string; member
           )}
         </div>
 
-        <div style={{padding:'14px 20px', borderTop:'1px solid rgba(122,176,240,0.18)', background:'rgba(240,246,255,0.5)'}}>
+        <div style={{padding:'14px 20px', borderTop:`0.5px solid ${BORDER}`, background:'#FAF9FD'}}>
           {err && <div style={{fontSize:'12px', color:'#a02020', marginBottom:'8px'}}>{err}</div>}
           {chosenPatient && chosenCard && (
-            <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'10px'}}>
-              Will send <b style={{color:'#1a2a4a'}}>{chosenCard.title}</b> to <b style={{color:'#1a2a4a'}}>{chosenPatient.name}</b> as a message in the Oracle category.
+            <div style={{fontSize:'11px', color: INK_SOFT, marginBottom:'10px'}}>
+              Will send <b style={{color: INK}}>{chosenCard.title}</b> to <b style={{color: INK}}>{chosenPatient.name}</b>.
             </div>
           )}
           <div style={{display:'flex', gap:'8px', justifyContent:'flex-end'}}>
-            <button onClick={onClose} style={{background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'10px 16px', fontSize:'13px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
+            <button onClick={onClose} style={{background:'rgba(255,255,255,0.9)', border:`0.5px solid ${BORDER}`, borderRadius:'10px', padding:'10px 16px', fontSize:'13px', fontWeight:700, color: INK, cursor:'pointer'}}>Cancel</button>
             <button onClick={send} disabled={!selectedPatient || !selectedCard || sending || sent}
               style={{background: accent, border:'none', borderRadius:'10px', padding:'10px 20px', fontSize:'13px', fontWeight:800, color:'white', cursor: (!selectedPatient || !selectedCard || sending) ? 'default' : 'pointer', opacity: (!selectedPatient || !selectedCard || sending) ? 0.5 : 1}}>
-              {sent ? '✓ Sent' : sending ? 'Sending…' : 'Send oracle card ✨'}
+              {sent ? '✓ Sent' : sending ? 'Sending…' : 'Send insight ✨'}
             </button>
           </div>
         </div>

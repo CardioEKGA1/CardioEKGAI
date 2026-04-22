@@ -4,7 +4,8 @@
 // Daily Oracle Card pulls on first open of the day.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ChoKuRei from './ChoKuRei';
-import OracleCard, { ensureOracleKeyframes } from './OracleCard';
+import OracleCardReel from './OracleCardReel';
+import { ensureOracleKeyframes } from './OracleCard';
 import EnergyLog from './EnergyLog';
 import MeditationPlayer from './MeditationPlayer';
 import CoachingModuleReader from './CoachingModuleReader';
@@ -199,9 +200,9 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
         </div>
       </nav>
 
-      {/* Oracle card overlay */}
+      {/* Oracle card overlay — 3D reel experience */}
       {showOracle && patient && (
-        <OracleCard
+        <OracleCardReel
           API={API}
           token={token}
           userName={firstName(patient.name)}
