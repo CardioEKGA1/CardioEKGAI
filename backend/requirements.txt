@@ -16,3 +16,4 @@ pydicom
 Pillow
 numpy
 sentry-sdk[fastapi]==2.18.0
+pywebpush==2.0.0

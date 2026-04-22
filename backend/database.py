@@ -250,6 +250,17 @@ class ConciergeLabRecord(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow, index=True)
     reviewed_at = Column(DateTime, nullable=True)
 
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    endpoint = Column(String, unique=True, nullable=False)  # browser's push endpoint URL
+    p256dh = Column(String, nullable=False)
+    auth = Column(String, nullable=False)
+    user_agent = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    last_delivery_at = Column(DateTime, nullable=True)
+
 class UserStyleProfile(Base):
     __tablename__ = "user_style_profiles"
     id = Column(Integer, primary_key=True, index=True)

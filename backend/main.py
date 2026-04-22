@@ -16,7 +16,7 @@ from database import (
     ConciergePatient, ConciergeMessage, ConciergeAppointment, ConciergeMembership, ConciergeInvoice,
     ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
     ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
-    ConciergeOraclePull, ConciergeLabRecord,
+    ConciergeOraclePull, ConciergeLabRecord, PushSubscription,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
@@ -3175,6 +3175,11 @@ def patient_bookings_create(
     db.add(appt)
     _bump_visit_counter(p, data.service_type, db)
     db.commit(); db.refresh(appt)
+    # Ping the physician so they can confirm promptly.
+    owner = db.query(User).filter(User.email.ilike(CONCIERGE_OWNER_EMAIL)).first()
+    if owner:
+        svc_label = {"medical_visit": "Medical visit", "guided_meditation": "Guided meditation", "urgent_same_day": "Urgent same-day"}.get(data.service_type, data.service_type)
+        send_push_to_user(owner.id, f"New booking · {p.name}", f"{svc_label} · {starts.strftime('%a %b %d %I:%M %p')} MST", url="/concierge", db=db)
     return {
         "id": appt.id,
         "service_type": appt.appointment_type,
@@ -3238,6 +3243,10 @@ def patient_messages_send(
         body=body, category=cat,
     )
     db.add(m); db.commit(); db.refresh(m)
+    # Notify the physician.
+    owner = db.query(User).filter(User.email.ilike(CONCIERGE_OWNER_EMAIL)).first()
+    if owner:
+        send_push_to_user(owner.id, f"New message from {p.name}", body[:120], url="/concierge", db=db)
     return {"id": m.id, "created_at": m.created_at.isoformat()}
 
 # ───── Labs ─────
@@ -3491,6 +3500,134 @@ def concierge_oracle_history(
     return {"pulls": out}
 
 
+# ─── Push notifications (Web Push via VAPID) ─────────────────────────────
+# Requires ENV:
+#   VAPID_PUBLIC_KEY     (also surfaced via /config so the PWA can subscribe)
+#   VAPID_PRIVATE_KEY    (server-only; signs each delivery)
+#   VAPID_CONTACT_EMAIL  (mailto used in the VAPID JWT; e.g. anderson@soulmd.us)
+#
+# Generate keypair with: `python -c "from py_vapid import Vapid; v=Vapid(); v.generate_keys(); print(v.public_key, v.private_key)"`
+# Or a one-liner via https://tools.reactpwa.com/vapid.
+
+try:
+    from pywebpush import webpush as _webpush, WebPushException as _WebPushException
+    _PYWEBPUSH_AVAILABLE = True
+except Exception:
+    _PYWEBPUSH_AVAILABLE = False
+
+class PushSubscribeRequest(BaseModel):
+    endpoint: str
+    keys: dict  # {"p256dh": "...", "auth": "..."}
+    user_agent: str | None = None
+
+class PushSubscribeResponse(BaseModel):
+    ok: bool
+    subscription_id: int | None = None
+
+def _vapid_claims() -> dict:
+    email = _clean_env(os.getenv("VAPID_CONTACT_EMAIL", "")) or "support@soulmd.us"
+    return {"sub": f"mailto:{email}"}
+
+def send_push_to_user(user_id: int, title: str, body: str, url: str = "/concierge", db: Session | None = None) -> int:
+    """Fan-out helper — sends a push to every registered subscription for
+    a given user_id. Returns delivery count. Safe to call from any endpoint;
+    silently no-ops if VAPID isn't configured or the pywebpush package is
+    missing. Cleans up subscriptions that return 410 Gone."""
+    priv = _clean_env(os.getenv("VAPID_PRIVATE_KEY", ""))
+    if not (priv and _PYWEBPUSH_AVAILABLE):
+        return 0
+    own_db = db is None
+    if own_db:
+        db = SessionLocal()
+    try:
+        subs = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
+        delivered = 0
+        for s in subs:
+            try:
+                _webpush(
+                    subscription_info={"endpoint": s.endpoint, "keys": {"p256dh": s.p256dh, "auth": s.auth}},
+                    data=json.dumps({"title": title, "body": body, "url": url}),
+                    vapid_private_key=priv,
+                    vapid_claims=_vapid_claims(),
+                )
+                s.last_delivery_at = datetime.utcnow()
+                delivered += 1
+            except _WebPushException as e:
+                # 410 Gone / 404 → subscription is dead, drop it.
+                status = getattr(e.response, "status_code", None) if getattr(e, "response", None) else None
+                if status in (404, 410):
+                    db.delete(s)
+                else:
+                    print(f"push delivery failed for sub {s.id}: {status} {e}")
+            except Exception as e:
+                print(f"push delivery failed for sub {s.id}: {type(e).__name__}: {e}")
+        db.commit()
+        return delivered
+    finally:
+        if own_db:
+            db.close()
+
+
+@app.post("/concierge/push/subscribe", response_model=PushSubscribeResponse)
+def push_subscribe(
+    data: PushSubscribeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Store the browser's push subscription for the current user. Upserts
+    on endpoint URL so re-subscribing from the same device is safe."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    endpoint = (data.endpoint or "").strip()
+    p256dh = (data.keys.get("p256dh") or "").strip()
+    auth = (data.keys.get("auth") or "").strip()
+    if not endpoint or not p256dh or not auth:
+        raise HTTPException(status_code=400, detail="Missing subscription fields.")
+    existing = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).first()
+    if existing:
+        existing.user_id = current_user.id
+        existing.p256dh = p256dh
+        existing.auth = auth
+        if data.user_agent: existing.user_agent = data.user_agent
+        db.commit()
+        return {"ok": True, "subscription_id": existing.id}
+    sub = PushSubscription(
+        user_id=current_user.id, endpoint=endpoint,
+        p256dh=p256dh, auth=auth, user_agent=data.user_agent,
+    )
+    db.add(sub); db.commit(); db.refresh(sub)
+    return {"ok": True, "subscription_id": sub.id}
+
+
+@app.delete("/concierge/push/subscribe")
+def push_unsubscribe(
+    endpoint: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    sub = db.query(PushSubscription).filter(
+        PushSubscription.endpoint == endpoint,
+        PushSubscription.user_id == current_user.id,
+    ).first()
+    if sub:
+        db.delete(sub); db.commit()
+    return {"ok": True}
+
+
+@app.post("/concierge/push/test")
+def push_test(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Send a test notification to the current user's device(s)."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    n = send_push_to_user(current_user.id, "SoulMD Concierge", "Notifications are working 🙌", url="/concierge", db=db)
+    return {"delivered": n}
+
+
 # ─── Physician Dashboard (owner-only aggregated view) ────────────────────
 
 @app.get("/concierge/physician/dashboard")
@@ -3637,6 +3774,9 @@ def physician_send_oracle(
         category="oracle",
     )
     db.add(m); db.commit(); db.refresh(m)
+    # Notify the patient.
+    if p.user_id:
+        send_push_to_user(p.user_id, "Dr. Anderson sent you something ✨", msg["title"], url="/concierge", db=db)
     return {"id": m.id, "created_at": m.created_at.isoformat(), "message_id": data.message_id}
 
 
@@ -3674,6 +3814,12 @@ def public_config():
             "dsn": _clean_env(os.getenv("REACT_APP_SENTRY_DSN", "") or os.getenv("SENTRY_FRONTEND_DSN", "")),
             "env": _clean_env(os.getenv("SENTRY_ENV", "")) or "production",
             "traces_sample_rate": float(_clean_env(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "")) or "0.1"),
+        },
+        "push": {
+            # VAPID public key — required to subscribe the browser to push.
+            # Pair with VAPID_PRIVATE_KEY (backend-only) for signed delivery.
+            "vapid_public_key": _clean_env(os.getenv("VAPID_PUBLIC_KEY", "")),
+            "enabled": bool(_clean_env(os.getenv("VAPID_PUBLIC_KEY", ""))),
         },
     }
 

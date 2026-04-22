@@ -552,14 +552,79 @@ const statusPill = (status: string): React.CSSProperties => {
 interface BillingInvoice { id:string; number:string|null; amount_paid_cents:number; amount_due_cents:number; status:string; created:string|null; hosted_invoice_url:string|null; description:string|null; }
 interface BillingSnapshot { tier:string; tier_label:string; status:string; current_period_end:string|null; total_paid_cents:number; invoices:BillingInvoice[]; upcoming_invoice:{amount_due_cents:number; next_payment_attempt:string|null}|null; }
 
+// Convert URL-safe base64 (VAPID key format) → Uint8Array for the Push API.
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const b64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+};
+
 const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|null}> = ({ API, token, patient }) => {
   const [billing, setBilling] = useState<BillingSnapshot | null>(null);
+  const [pushState, setPushState] = useState<'unknown'|'unsupported'|'prompt'|'denied'|'enabled'|'pending'>('unknown');
+  const [pushMsg, setPushMsg] = useState('');
+
   useEffect(() => {
     fetch(`${API}/concierge/me/billing`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setBilling(d); })
       .catch(() => {});
   }, [API, token]);
+
+  // Check current push state on mount.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      setPushState('unsupported'); return;
+    }
+    if (Notification.permission === 'denied') { setPushState('denied'); return; }
+    navigator.serviceWorker.ready.then(async reg => {
+      const sub = await reg.pushManager.getSubscription();
+      if (sub && Notification.permission === 'granted') setPushState('enabled');
+      else setPushState('prompt');
+    }).catch(() => setPushState('prompt'));
+  }, []);
+
+  const enablePush = async () => {
+    setPushMsg(''); setPushState('pending');
+    try {
+      const cfg = await fetch(`${API}/config`).then(r => r.json());
+      const key = cfg?.push?.vapid_public_key;
+      if (!cfg?.push?.enabled || !key) {
+        setPushMsg('Push not configured by the server yet.'); setPushState('prompt'); return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { setPushState(perm === 'denied' ? 'denied' : 'prompt'); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+      const json: any = sub.toJSON();
+      const res = await fetch(`${API}/concierge/push/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+        body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys, user_agent: navigator.userAgent }),
+      });
+      if (!res.ok) throw new Error('Server rejected subscription.');
+      setPushState('enabled');
+      setPushMsg('Notifications on. Test below anytime.');
+    } catch (e: any) {
+      setPushMsg(e.message || 'Could not enable notifications.');
+      setPushState('prompt');
+    }
+  };
+
+  const testPush = async () => {
+    setPushMsg('');
+    try {
+      const res = await fetch(`${API}/concierge/push/test`, { method: 'POST', headers: { Authorization:`Bearer ${token}` } });
+      const d = await res.json();
+      setPushMsg(d.delivered > 0 ? 'Test sent — check your device.' : 'No active device subscriptions. Re-enable notifications.');
+    } catch { setPushMsg('Test failed.'); }
+  };
 
   const openPortal = async () => {
     try {
@@ -623,6 +688,36 @@ const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|nul
           </div>
         )}
         <button onClick={openPortal} style={{...smallCtaStyle, marginTop:'10px'}}>Manage payment methods & invoices →</button>
+      </Card>
+
+      <Card style={{marginBottom:'12px'}}>
+        <Label>Notifications</Label>
+        {pushState === 'unsupported' ? (
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'6px', lineHeight:1.6}}>
+            Your browser doesn't support push notifications. On iPhone, add SoulMD Concierge to your Home Screen (Share → Add to Home Screen) and open it from the icon — push works from the installed app only.
+          </div>
+        ) : pushState === 'denied' ? (
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'6px', lineHeight:1.6}}>
+            Notifications are currently blocked. Enable them in your device settings and reload.
+          </div>
+        ) : pushState === 'enabled' ? (
+          <div>
+            <div style={{fontSize:'12px', color:DEEPP, marginTop:'6px', lineHeight:1.6}}>
+              🔔 Notifications are on — you'll get a ping for oracle cards, message replies, and session confirmations.
+            </div>
+            <button onClick={testPush} style={{...smallCtaStyle, marginTop:'10px'}}>Send test notification →</button>
+          </div>
+        ) : (
+          <div>
+            <div style={{fontSize:'12px', color:DEEPP, marginTop:'6px', lineHeight:1.6}}>
+              Want a gentle ping when Dr. Anderson replies or sends an oracle card?
+            </div>
+            <button onClick={enablePush} disabled={pushState === 'pending'} style={{...solidBtn, marginTop:'10px', width:'100%', opacity: pushState === 'pending' ? 0.6 : 1}}>
+              {pushState === 'pending' ? 'Enabling…' : '🔔 Enable notifications'}
+            </button>
+          </div>
+        )}
+        {pushMsg && <div style={{fontSize:'11px', color:DEEPP, opacity:0.75, marginTop:'8px'}}>{pushMsg}</div>}
       </Card>
 
       <Card style={{marginBottom:'12px'}}>

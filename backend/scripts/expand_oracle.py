@@ -21,6 +21,10 @@ import os
 import sys
 import time
 from pathlib import Path
+from dotenv import load_dotenv
+# Load backend/.env (same pattern as seed_stripe.py) so ANTHROPIC_API_KEY
+# resolves whether the user exports it or sets it in the .env file.
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 from anthropic import Anthropic
 
 TARGET_PER_CATEGORY = 200  # 10 cats × 200 = 2,000 total
