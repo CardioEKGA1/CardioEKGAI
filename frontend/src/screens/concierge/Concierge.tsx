@@ -5,6 +5,7 @@ import SoulMDLogo from '../../SoulMDLogo';
 import PatientsSection from './PatientsSection';
 import MessagesSection from './MessagesSection';
 import AppointmentsSection from './AppointmentsSection';
+import BillingSection from './BillingSection';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -99,7 +100,8 @@ const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
         {section === 'patients' && <PatientsSection API={API} token={token} accent={ACCENT}/>}
         {section === 'messages' && <MessagesSection API={API} token={token} accent={ACCENT}/>}
         {section === 'appointments' && <AppointmentsSection API={API} token={token} accent={ACCENT}/>}
-        {!['patients','messages','appointments'].includes(section) && <PlaceholderSection section={section} />}
+        {section === 'billing' && <BillingSection API={API} token={token} accent={ACCENT}/>}
+        {!['patients','messages','appointments','billing'].includes(section) && <PlaceholderSection section={section} />}
       </main>
 
       <footer style={{padding:'16px', textAlign:'center', fontSize:'10px', color:'#4a7ad0', borderTop:'1px solid rgba(122,176,240,0.2)', background:'rgba(255,255,255,0.3)'}}>

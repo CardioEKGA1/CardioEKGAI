@@ -18,7 +18,7 @@ const SUITE_TOOLS: {icon: string; name: string; desc: string}[] = [
   { icon: '🩻', name: 'XrayRead',        desc: 'Structured radiology report from any X-ray' },
   { icon: '💊', name: 'RxCheck',         desc: 'Medication interaction safety check' },
   { icon: '🦠', name: 'AntibioticAI',        desc: 'IDSA-based antibiotic recommendations' },
-  { icon: '📝', name: 'ClinicalNote AI', desc: 'Notes + prior-auth letters from bullet points' },
+  { icon: '📝', name: 'ClinicalNote AI', desc: 'Clinical notes in your voice — SOAP, H&P, discharge, consult, procedure + AI style learning' },
   { icon: '🧠', name: 'CerebralAI',      desc: 'Brain and spine MRI/CT interpretation' },
   { icon: '🫶', name: 'PalliativeMD',    desc: 'Goals of care, prognosis, family meetings' },
   { icon: '🧪', name: 'LabRead',         desc: 'AI lab-panel interpretation with flagged values' },

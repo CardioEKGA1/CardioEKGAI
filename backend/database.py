@@ -109,6 +109,13 @@ class ConciergePatient(Base):
     intake_data = Column(JSON, default=dict)  # chief_complaint, medical_history, medications, allergies, goals, comm_preference, etc.
     doctor_notes = Column(String, default="")  # free-text private notes
     last_contact_at = Column(DateTime, nullable=True)
+    # Billing — canonical Stripe pointers live on the patient so we can
+    # create subscriptions lazily without a Membership row existing yet.
+    stripe_customer_id = Column(String, nullable=True, index=True)
+    stripe_subscription_id = Column(String, nullable=True, index=True)
+    subscription_status = Column(String, nullable=True)  # active | paused | canceled | past_due | incomplete
+    current_period_end = Column(DateTime, nullable=True)
+    total_paid_cents = Column(Integer, default=0)  # rolling lifetime total of successful concierge invoices
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -208,6 +215,15 @@ class ConciergeHabitCheckin(Base):
     notes = Column(String, default="")
     checked_in_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+class UserStyleProfile(Base):
+    __tablename__ = "user_style_profiles"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True)
+    profile_text = Column(String, nullable=False)
+    sample_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:
@@ -223,6 +239,19 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE tool_feedback ADD COLUMN IF NOT EXISTS comment VARCHAR"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS overage_amount_this_month FLOAT DEFAULT 0.0"))
+    # Concierge patient billing columns — added for Billing section. Safe no-op
+    # if the concierge_patients table doesn't exist yet (table-less ALTER
+    # errors are caught by the outer try below).
+    try:
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS subscription_status VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS total_paid_cents INTEGER DEFAULT 0"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_customer_id ON concierge_patients(stripe_customer_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_subscription_id ON concierge_patients(stripe_subscription_id)"))
+    except Exception as e:
+        print(f"Concierge billing column migration skipped: {e}")
 
 try:
     with engine.begin() as conn:

@@ -30,7 +30,7 @@ CATALOG = [
     ("antibioticai",     "AntibioticAI",         "IDSA-based antibiotic recommendations",                                   999,  8999),
     ("nephroai",     "NephroAI",         "Comprehensive nephrology decision support",                               999,  8999),
     # Premium tier — $24.99/mo · $179.99/yr
-    ("clinicalnote", "ClinicalNote AI",  "SOAP notes from bullet points in seconds",                               2499, 17999),
+    ("clinicalnote", "ClinicalNote AI",  "AI clinical notes in your voice — SOAP, H&P, discharge, consult, procedure + style learning", 2499, 17999),
     ("cerebralai",   "CerebralAI",       "Brain and spine MRI and CT interpretation",                              2499, 17999),
     ("xrayread",     "XrayRead",         "Structured radiology report from any X-ray image",                       2499, 17999),
     ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings",  2499, 17999),
@@ -38,6 +38,13 @@ CATALOG = [
     ("suite",        "SoulMD Suite",     "All clinical AI tools in one subscription",                              8888, 88800),
     # LabRead and CliniScore are free (5/day) with unlimited access via Suite —
     # no standalone Stripe price at this time.
+
+    # ─── Anderson Concierge Medicine (monthly-only, no yearly) ───────────────
+    # Separate products from the AI tool suite — different product, different
+    # billing identity (anderson@soulmd.us practice).
+    ("concierge_awaken", "Awaken (Concierge Membership)", "Monthly concierge medicine membership — Awaken tier",  15000, 0),
+    ("concierge_align",  "Align (Concierge Membership)",  "Monthly concierge medicine membership — Align tier",   30000, 0),
+    ("concierge_ascend", "Ascend (Concierge Membership)", "Monthly concierge medicine membership — Ascend tier",  50000, 0),
 ]
 
 
@@ -81,7 +88,11 @@ def main():
     for slug, name, description, monthly_cents, yearly_cents in CATALOG:
         print(f"\n-- {name} ({slug}) --")
         product = find_or_create_product(slug, name, description)
-        for tier, cents in (("monthly", monthly_cents), ("yearly", yearly_cents)):
+        # yearly_cents == 0 means "monthly-only product" (e.g. concierge tiers)
+        tiers = [("monthly", monthly_cents)]
+        if yearly_cents and yearly_cents > 0:
+            tiers.append(("yearly", yearly_cents))
+        for tier, cents in tiers:
             pr = find_or_create_price(product.id, slug, tier, cents)
             price_map[f"{slug}_{tier}"] = pr.id
 

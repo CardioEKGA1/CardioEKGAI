@@ -278,14 +278,44 @@ CEREBRALAI_PROMPT = (
 )
 
 CLINICALNOTE_STYLE = {
-    "concise":          "bullet points, ED/hospitalist-focused, skip fluff",
+    "concise":          "bullet points, minimal prose, ED/hospitalist-focused, skip fluff",
+    "narrative":        "full paragraph style, flowing clinical prose",
+    "academic":         "formal, detailed, teaching-hospital style with explicit clinical reasoning",
+    "emergency":        "ultra-brief, action-focused, ED-triage cadence — what was found, what was done, what is next",
+    # Legacy keys retained so existing users' saved preferences still resolve.
     "standard":         "balanced prose, typical inpatient style",
     "detailed":         "full narrative, subspecialty-grade thoroughness",
-    "academic":         "teaching-hospital style with explicit clinical reasoning",
     "patient_friendly": "plain language, no jargon, suitable for patient portal",
 }
 
-CLINICALNOTE_TYPES = {"soap", "h&p", "hp", "discharge_summary", "progress_note", "consult_note", "procedure_note", "operative_note", "prior_auth_letter"}
+CLINICALNOTE_TYPES = {"soap", "h&p", "hp", "discharge_summary", "progress_note", "consult_note", "consult_request", "procedure_note", "operative_note", "prior_auth_letter"}
+
+# Per-note-type structural guidance — injected into the prompt so the model renders
+# the right section skeleton. Keys match _normalize_note_type() output.
+NOTE_TYPE_GUIDANCE = {
+    "soap":              "Use standard SOAP headers: Subjective, Objective, Assessment, Plan. Number problems in the Plan.",
+    "hp":                "Use full H&P structure: Chief Complaint, HPI, PMH, PSH, Medications, Allergies, Social History, Family History, ROS, Vitals, Physical Exam, Data (labs/imaging), Assessment, Plan.",
+    "discharge_summary": "Use sections: Admission Diagnosis, Hospital Course, Discharge Condition, Discharge Medications, Follow-up Instructions. After the clinician summary, append a clearly labeled 'Patient Instructions (Plain Language)' section written at 8th-grade reading level.",
+    "consult_request":   "Write a professional consult request addressed to the receiving service. Include: Reason for Consult, Urgency (routine/urgent/emergent), Relevant History, Clinical Question. Match the tone to the specialty — surgical consults are concise and focused; medical consults are more narrative.",
+    "consult_note":      "Use: Reason for Consult, History from Referring Team, ROS, Exam, Data, Impression, Recommendations (numbered).",
+    "procedure_note":    "Use sections: Procedure, Indication, Consent, Technique, Findings, Specimens, Complications, Post-Procedure Plan.",
+    "operative_note":    "Use sections: Preoperative Diagnosis, Postoperative Diagnosis, Procedure Performed, Surgeon, Anesthesia, Findings, Technique, EBL, Specimens, Complications, Disposition.",
+    "progress_note":     "Use SOAP-style progress note appropriate for a daily inpatient or outpatient follow-up.",
+}
+
+
+def style_learn_prompt() -> str:
+    return (
+        "Analyze these clinical notes written by the same physician. Identify and summarize their writing style "
+        "including: sentence structure, use of abbreviations, how they organize assessments and plans, typical "
+        "phrasing patterns, level of detail, tone, and any distinctive habits. Output a concise style profile that "
+        "can be used to generate future notes in their exact voice. "
+        "Respond ONLY with valid JSON with keys: "
+        'profile (string: the style profile, 150-400 words, written as direct instructions a downstream note-writer '
+        'can follow — not a meta-description. Start with "Writing style:" and describe structure, vocabulary, '
+        'abbreviation preferences, A/P organization, tone, and distinctive habits. Use plain prose, not markdown.), '
+        'sample_count (integer: number of distinct notes you analyzed).'
+    )
 
 def _normalize_note_type(note_type: str) -> str:
     return (note_type or "").strip().lower().replace(" ", "_").replace("&", "").replace("-", "_")
@@ -315,13 +345,23 @@ PALLIATIVE_PROMPT = (
     " Prefer [NCP Guidelines 2018], [AAHPM], [Center to Advance Palliative Care], or condition-specific guidelines for palliative recommendations."
 )
 
-def clinicalnote_prompt(note_type: str, style: str) -> str:
+def clinicalnote_prompt(note_type: str, style: str, my_style_profile: str | None = None) -> str:
     style_key = (style or "standard").lower().replace("-", "_").replace(" ", "_")
     style_desc = CLINICALNOTE_STYLE.get(style_key, "balanced prose")
+    note_key = _normalize_note_type(note_type)
+    structure = NOTE_TYPE_GUIDANCE.get(note_key, "")
+    personal_style_block = ""
+    if my_style_profile and my_style_profile.strip():
+        personal_style_block = (
+            "PERSONAL STYLE PROFILE — write in this physician's exact voice, overriding generic style defaults:\n"
+            f"{my_style_profile.strip()}\n\n"
+        )
     return (
+        personal_style_block +
         f"You are an expert physician writing a {note_type}. "
         f"Style: {style_desc}. "
-        "Expand the user's bullet points into a complete, professional note. "
+        + (f"Structure: {structure} " if structure else "")
+        + "Expand the user's bullet points into a complete, professional note. "
         "Preserve all clinical details provided — do not invent labs, vitals, or exam findings. "
         "If critical information is missing, note it in the appropriate section rather than fabricating it. "
         "Respond ONLY with valid JSON with keys: "

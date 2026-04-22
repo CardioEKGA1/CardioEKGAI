@@ -14,7 +14,7 @@ const TOOLS: LandingTool[] = [
   { slug: 'nephroai',     name: 'NephroAI',        icon: '🫘', desc: 'Comprehensive nephrology decision support',                              price: '$9.99 / mo · $89.99 / yr' },
   { slug: 'labread',      name: 'LabRead',         icon: '🧪', desc: 'AI lab-panel interpretation — paste, dictate, or upload',                price: 'Free · 5 / day · Suite = unlimited' },
   { slug: 'cliniscore',     name: 'CliniScore',        icon: '📊', desc: 'Clinical risk calculators with AI interpretation',                        price: 'Free · 5 / day · Suite = unlimited' },
-  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'SOAP notes + prior authorization letters from bullet points',            price: '$24.99 / mo · $179.99 / yr' },
+  { slug: 'clinicalnote', name: 'ClinicalNote AI', icon: '📝', desc: 'Clinical notes in your voice — SOAP, H&P, discharge, consult, procedure, with AI style learning',            price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'cerebralai',   name: 'CerebralAI',      icon: '🧠', desc: 'Brain and spine MRI and CT interpretation',                              price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'xrayread',     name: 'XrayRead',        icon: '🩻', desc: 'Structured radiology report from any X-ray image',                      price: '$24.99 / mo · $179.99 / yr' },
   { slug: 'palliativemd', name: 'PalliativeMD',    icon: '🫶', desc: 'AI-guided palliative care — goals of care, prognosis, family meetings', price: '$24.99 / mo · $179.99 / yr' },

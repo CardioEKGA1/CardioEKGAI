@@ -15,11 +15,11 @@ from database import (
     get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt,
     ConciergePatient, ConciergeMessage, ConciergeAppointment, ConciergeMembership, ConciergeInvoice,
     ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
-    ConciergeHabit, ConciergeHabitCheckin,
+    ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
-from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, ANTIBIOTICAI_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE, LABREAD_EXTRACT_PROMPT, LABREAD_ANALYZE_PROMPT, CLINISCORE_INTERPRET_PROMPT_TEMPLATE
+from prompts import NEPHRO_SUBTOOLS, XRAYREAD_PROMPT, RXCHECK_PROMPT, ANTIBIOTICAI_PROMPT, CEREBRALAI_PROMPT, CEREBRALAI_CONSOLIDATE_PROMPT, PALLIATIVE_PROMPT, clinicalnote_prompt, prior_auth_prompt, is_prior_auth_note, CLINICALNOTE_STYLE, CLINICALNOTE_TYPES, CITATION_GUIDANCE, LABREAD_EXTRACT_PROMPT, LABREAD_ANALYZE_PROMPT, CLINISCORE_INTERPRET_PROMPT_TEMPLATE, style_learn_prompt
 from email_utils import send_verification_email
 from pydantic import BaseModel
 from datetime import datetime
@@ -971,6 +971,12 @@ class ClinicalNoteRequest(BaseModel):
     justification: str | None = None
     insurance_type: str | None = None
 
+class StyleLearnRequest(BaseModel):
+    samples: str      # 3-5 of the physician's own notes, concatenated
+
+class StyleProfileUpdateRequest(BaseModel):
+    profile_text: str
+
 class LabReadAnalyzeRequest(BaseModel):
     lab_text: str
     clinical_context: str | None = None
@@ -1095,7 +1101,13 @@ def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_u
     if style_key in CLINICALNOTE_STYLE and current_user.note_style_preference != style_key:
         current_user.note_style_preference = style_key
         db.commit()
-    prompt = clinicalnote_prompt(data.note_type or "SOAP note", data.style or "standard")
+    my_style_text: str | None = None
+    if style_key == "my_style":
+        sp = db.query(UserStyleProfile).filter(UserStyleProfile.user_id == current_user.id).first()
+        if not sp or not (sp.profile_text or "").strip():
+            raise HTTPException(status_code=400, detail="No personal style learned yet. Paste 3-5 of your notes in ClinicalNote → Settings → My Style first.")
+        my_style_text = sp.profile_text
+    prompt = clinicalnote_prompt(data.note_type or "SOAP note", data.style or "standard", my_style_profile=my_style_text)
     user_input = "Bullet points to expand:\n\n" + data.bullets
     try:
         result = call_claude_json_text(prompt, user_input, max_tokens=3000)
@@ -1105,6 +1117,88 @@ def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_u
     log_usage(current_user, "clinicalnote", COST_PER_SCAN, db)
     save_case(current_user.id, "clinicalnote", f"{data.note_type} · {(data.bullets or '')[:50]}", {"note_type": data.note_type, "style": data.style, "bullets": data.bullets}, result, db)
     return result
+
+
+# ───── ClinicalNote AI · Personal Style Learning ───────────────────────────
+# Physicians can paste 3-5 of their own prior notes; Claude distills a style
+# profile that is stored per-user and prepended to the note-generation prompt
+# whenever they pick the "My Style" preset. See prompts.style_learn_prompt.
+
+def _style_profile_payload(sp: UserStyleProfile | None) -> dict:
+    if not sp:
+        return {"has_profile": False, "profile_text": "", "sample_count": 0, "updated_at": None, "created_at": None}
+    return {
+        "has_profile": bool((sp.profile_text or "").strip()),
+        "profile_text": sp.profile_text or "",
+        "sample_count": sp.sample_count or 0,
+        "updated_at": sp.updated_at.isoformat() if sp.updated_at else None,
+        "created_at": sp.created_at.isoformat() if sp.created_at else None,
+    }
+
+
+@app.get("/tools/clinicalnote/style")
+def clinicalnote_style_get(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sp = db.query(UserStyleProfile).filter(UserStyleProfile.user_id == current_user.id).first()
+    return _style_profile_payload(sp)
+
+
+@app.post("/tools/clinicalnote/style/learn")
+@limiter.limit("5/minute")
+def clinicalnote_style_learn(request: Request, data: StyleLearnRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gate_tool(current_user, "clinicalnote", db, COST_PER_SCAN)
+    samples = (data.samples or "").strip()
+    if len(samples) < 200:
+        raise HTTPException(status_code=400, detail="Paste at least a few sample notes (minimum ~200 characters combined) so the analysis is useful.")
+    try:
+        result = call_claude_json_text(style_learn_prompt(), "Sample notes from the same physician:\n\n" + samples, max_tokens=1500)
+    except Exception as e:
+        print(f"clinicalnote style_learn error: {e}")
+        raise HTTPException(status_code=502, detail="Style learning failed. Please retry.")
+    profile_text = (result.get("profile") or "").strip()
+    if not profile_text:
+        raise HTTPException(status_code=502, detail="Style analysis returned empty. Please retry.")
+    sample_count = int(result.get("sample_count") or 0) or max(1, samples.count("\n\n") + 1)
+    sp = db.query(UserStyleProfile).filter(UserStyleProfile.user_id == current_user.id).first()
+    now = datetime.utcnow()
+    if sp:
+        sp.profile_text = profile_text
+        sp.sample_count = sample_count
+        sp.updated_at = now
+    else:
+        sp = UserStyleProfile(user_id=current_user.id, profile_text=profile_text, sample_count=sample_count, created_at=now, updated_at=now)
+        db.add(sp)
+    db.commit()
+    db.refresh(sp)
+    log_usage(current_user, "clinicalnote:style_learn", COST_PER_SCAN, db)
+    return _style_profile_payload(sp)
+
+
+@app.put("/tools/clinicalnote/style")
+def clinicalnote_style_update(data: StyleProfileUpdateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    profile_text = (data.profile_text or "").strip()
+    if not profile_text:
+        raise HTTPException(status_code=400, detail="Profile text is required. Use DELETE to clear.")
+    sp = db.query(UserStyleProfile).filter(UserStyleProfile.user_id == current_user.id).first()
+    now = datetime.utcnow()
+    if sp:
+        sp.profile_text = profile_text
+        sp.updated_at = now
+    else:
+        sp = UserStyleProfile(user_id=current_user.id, profile_text=profile_text, sample_count=0, created_at=now, updated_at=now)
+        db.add(sp)
+    db.commit()
+    db.refresh(sp)
+    return _style_profile_payload(sp)
+
+
+@app.delete("/tools/clinicalnote/style")
+def clinicalnote_style_delete(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sp = db.query(UserStyleProfile).filter(UserStyleProfile.user_id == current_user.id).first()
+    if sp:
+        db.delete(sp)
+        db.commit()
+    return {"has_profile": False, "profile_text": "", "sample_count": 0, "updated_at": None, "created_at": None}
+
 
 @app.post("/tools/xrayread/analyze")
 @limiter.limit("5/minute")
@@ -2050,6 +2144,21 @@ def concierge_create_patient(
     db.add(patient)
     db.commit()
     db.refresh(patient)
+    # Best-effort Stripe customer creation. Non-blocking — if Stripe is down
+    # or unconfigured, the patient is saved anyway and the customer can be
+    # created lazily on first billing action via _get_or_create_stripe_customer.
+    if stripe.api_key:
+        try:
+            cust = stripe.Customer.create(
+                email=patient.email, name=patient.name,
+                phone=patient.phone or None,
+                metadata={"concierge_patient_id": str(patient.id), "source": "concierge"},
+            )
+            patient.stripe_customer_id = cust.id
+            db.commit()
+            db.refresh(patient)
+        except Exception as e:
+            print(f"Stripe customer provision skipped for patient {patient.id}: {e}")
     return _patient_dict(patient)
 
 @app.get("/concierge/patients/{patient_id}")
@@ -2339,6 +2448,314 @@ def concierge_delete_appointment(
     db.delete(a)
     db.commit()
     return {"ok": True}
+
+# ─── Concierge Billing ─────────────────────────────────────────────────────
+
+CONCIERGE_TIER_PRICE = {
+    "awaken": {"env": "STRIPE_PRICE_CONCIERGE_AWAKEN_MONTHLY", "cents": 15000, "label": "Awaken"},
+    "align":  {"env": "STRIPE_PRICE_CONCIERGE_ALIGN_MONTHLY",  "cents": 30000, "label": "Align"},
+    "ascend": {"env": "STRIPE_PRICE_CONCIERGE_ASCEND_MONTHLY", "cents": 50000, "label": "Ascend"},
+}
+
+class ConciergeSubscribeRequest(BaseModel):
+    tier: str  # awaken | align | ascend
+
+class ConciergeChargeRequest(BaseModel):
+    amount_cents: int
+    description: str
+
+def _get_or_create_stripe_customer(patient: ConciergePatient, db: Session) -> str:
+    """Lazily provision a Stripe customer for a concierge patient. Idempotent —
+    returns the existing customer_id if already set."""
+    if patient.stripe_customer_id:
+        return patient.stripe_customer_id
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe not configured (STRIPE_SECRET_KEY missing).")
+    cust = stripe.Customer.create(
+        email=patient.email,
+        name=patient.name,
+        phone=patient.phone or None,
+        metadata={"concierge_patient_id": str(patient.id), "source": "concierge"},
+    )
+    patient.stripe_customer_id = cust.id
+    patient.updated_at = datetime.utcnow()
+    db.commit()
+    return cust.id
+
+def _billing_snapshot(patient: ConciergePatient) -> dict:
+    """Live billing snapshot pulled from Stripe for a given patient. Returns
+    a dict safe to serialize to the frontend."""
+    out: dict = {
+        "patient_id": patient.id,
+        "name": patient.name,
+        "email": patient.email,
+        "tier": patient.membership_tier,
+        "tier_label": CONCIERGE_TIER_PRICE.get(patient.membership_tier, {}).get("label", patient.membership_tier),
+        "status": patient.subscription_status or "none",
+        "current_period_end": patient.current_period_end.isoformat() if patient.current_period_end else None,
+        "total_paid_cents": patient.total_paid_cents or 0,
+        "stripe_customer_id": patient.stripe_customer_id,
+        "stripe_subscription_id": patient.stripe_subscription_id,
+        "invoices": [],
+        "upcoming_invoice": None,
+    }
+    if not (stripe.api_key and patient.stripe_customer_id):
+        return out
+    try:
+        invoices = stripe.Invoice.list(customer=patient.stripe_customer_id, limit=24)
+        out["invoices"] = [{
+            "id": inv.id,
+            "number": inv.number,
+            "amount_paid_cents": inv.amount_paid,
+            "amount_due_cents": inv.amount_due,
+            "status": inv.status,
+            "created": datetime.fromtimestamp(inv.created).isoformat() if inv.created else None,
+            "hosted_invoice_url": inv.hosted_invoice_url,
+            "description": (inv.lines.data[0].description if inv.lines and inv.lines.data else None),
+        } for inv in invoices.data]
+    except Exception as e:
+        out["invoice_error"] = f"{type(e).__name__}: {str(e)[:160]}"
+    if patient.stripe_subscription_id:
+        try:
+            up = stripe.Invoice.upcoming(customer=patient.stripe_customer_id)
+            out["upcoming_invoice"] = {
+                "amount_due_cents": up.amount_due,
+                "next_payment_attempt": datetime.fromtimestamp(up.next_payment_attempt).isoformat() if up.next_payment_attempt else None,
+            }
+        except Exception:
+            # No upcoming invoice OR Stripe error — harmless, just skip.
+            pass
+    return out
+
+@app.get("/concierge/billing")
+def concierge_billing_list(
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Aggregate billing view for ALL patients — used by the billing list UI."""
+    rows = db.query(ConciergePatient).order_by(ConciergePatient.created_at.desc()).all()
+    return {"patients": [{
+        "id": p.id, "name": p.name, "email": p.email,
+        "tier": p.membership_tier,
+        "tier_label": CONCIERGE_TIER_PRICE.get(p.membership_tier, {}).get("label", p.membership_tier),
+        "status": p.subscription_status or ("active" if p.stripe_subscription_id else "none"),
+        "current_period_end": p.current_period_end.isoformat() if p.current_period_end else None,
+        "total_paid_cents": p.total_paid_cents or 0,
+        "has_customer": bool(p.stripe_customer_id),
+        "has_subscription": bool(p.stripe_subscription_id),
+    } for p in rows]}
+
+@app.get("/concierge/patients/{patient_id}/billing")
+def concierge_billing_detail(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return _billing_snapshot(p)
+
+def _resolve_tier_price_id(tier: str) -> str:
+    entry = CONCIERGE_TIER_PRICE.get(tier)
+    if not entry:
+        raise HTTPException(status_code=400, detail=f"Invalid tier {tier!r}. Must be awaken | align | ascend.")
+    price_id = os.getenv(entry["env"], "").strip().strip('"').strip("'")
+    if not price_id:
+        raise HTTPException(status_code=500, detail=f"{entry['env']} env var not set. Run seed_stripe.py and paste the price ID into Railway.")
+    return price_id
+
+def _sync_sub_to_patient(p: ConciergePatient, sub):
+    """Copy Stripe subscription state onto the patient row."""
+    p.stripe_subscription_id = sub.id
+    # Status mapping: Stripe 'active' → active. 'paused' → paused. 'canceled' → canceled.
+    # Everything else ('past_due','unpaid','incomplete') preserved as-is.
+    status = getattr(sub, "status", "active")
+    if sub.pause_collection:  # paused billing is signaled this way
+        status = "paused"
+    p.subscription_status = status
+    if getattr(sub, "current_period_end", None):
+        p.current_period_end = datetime.fromtimestamp(sub.current_period_end)
+    p.updated_at = datetime.utcnow()
+
+@app.post("/concierge/patients/{patient_id}/billing/subscribe")
+def concierge_billing_subscribe(
+    patient_id: int,
+    data: ConciergeSubscribeRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Create a new Stripe subscription on the chosen tier. No-op if one already
+    exists — use /change-tier for tier changes."""
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if p.stripe_subscription_id and (p.subscription_status or "") not in ("canceled",):
+        raise HTTPException(status_code=400, detail=f"Patient already has a {p.subscription_status or 'active'} subscription. Use change-tier or cancel first.")
+    price_id = _resolve_tier_price_id(data.tier)
+    customer_id = _get_or_create_stripe_customer(p, db)
+    try:
+        sub = stripe.Subscription.create(
+            customer=customer_id,
+            items=[{"price": price_id}],
+            metadata={"concierge_patient_id": str(p.id), "tier": data.tier},
+            payment_behavior="default_incomplete",  # so a PaymentIntent gets created if no card on file yet
+            collection_method="charge_automatically",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe subscription create failed: {type(e).__name__}: {str(e)[:200]}")
+    p.membership_tier = data.tier
+    _sync_sub_to_patient(p, sub)
+    db.commit()
+    return _billing_snapshot(p)
+
+@app.post("/concierge/patients/{patient_id}/billing/change-tier")
+def concierge_billing_change_tier(
+    patient_id: int,
+    data: ConciergeSubscribeRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if not p.stripe_subscription_id:
+        raise HTTPException(status_code=400, detail="No active subscription — use subscribe first.")
+    price_id = _resolve_tier_price_id(data.tier)
+    try:
+        sub = stripe.Subscription.retrieve(p.stripe_subscription_id)
+        item_id = sub["items"]["data"][0]["id"]
+        sub = stripe.Subscription.modify(
+            p.stripe_subscription_id,
+            items=[{"id": item_id, "price": price_id}],
+            proration_behavior="create_prorations",
+            metadata={"concierge_patient_id": str(p.id), "tier": data.tier},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe tier change failed: {type(e).__name__}: {str(e)[:200]}")
+    p.membership_tier = data.tier
+    _sync_sub_to_patient(p, sub)
+    db.commit()
+    return _billing_snapshot(p)
+
+@app.post("/concierge/patients/{patient_id}/billing/pause")
+def concierge_billing_pause(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p or not p.stripe_subscription_id:
+        raise HTTPException(status_code=404, detail="No subscription to pause")
+    try:
+        sub = stripe.Subscription.modify(
+            p.stripe_subscription_id,
+            pause_collection={"behavior": "void"},  # during pause, no invoices are created
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe pause failed: {type(e).__name__}")
+    _sync_sub_to_patient(p, sub)
+    db.commit()
+    return _billing_snapshot(p)
+
+@app.post("/concierge/patients/{patient_id}/billing/resume")
+def concierge_billing_resume(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p or not p.stripe_subscription_id:
+        raise HTTPException(status_code=404, detail="No subscription to resume")
+    try:
+        sub = stripe.Subscription.modify(
+            p.stripe_subscription_id,
+            pause_collection="",  # empty = unpause
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe resume failed: {type(e).__name__}")
+    _sync_sub_to_patient(p, sub)
+    db.commit()
+    return _billing_snapshot(p)
+
+@app.post("/concierge/patients/{patient_id}/billing/cancel")
+def concierge_billing_cancel(
+    patient_id: int,
+    at_period_end: bool = True,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p or not p.stripe_subscription_id:
+        raise HTTPException(status_code=404, detail="No subscription to cancel")
+    try:
+        if at_period_end:
+            sub = stripe.Subscription.modify(p.stripe_subscription_id, cancel_at_period_end=True)
+            p.subscription_status = "canceling"
+        else:
+            sub = stripe.Subscription.cancel(p.stripe_subscription_id)
+            p.subscription_status = "canceled"
+            p.stripe_subscription_id = None
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe cancel failed: {type(e).__name__}")
+    p.updated_at = datetime.utcnow()
+    db.commit()
+    return _billing_snapshot(p)
+
+@app.post("/concierge/patients/{patient_id}/billing/manual-charge")
+def concierge_billing_manual_charge(
+    patient_id: int,
+    data: ConciergeChargeRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """One-time charge outside of the membership — house visits, labs, etc.
+    Creates an invoice item + standalone invoice that auto-finalizes and
+    charges the customer's default payment method."""
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if data.amount_cents < 50:
+        raise HTTPException(status_code=400, detail="Minimum charge is $0.50.")
+    customer_id = _get_or_create_stripe_customer(p, db)
+    try:
+        stripe.InvoiceItem.create(
+            customer=customer_id,
+            amount=int(data.amount_cents),
+            currency="usd",
+            description=(data.description or "Concierge charge")[:500],
+        )
+        inv = stripe.Invoice.create(
+            customer=customer_id,
+            auto_advance=True,
+            collection_method="charge_automatically",
+            metadata={"concierge_patient_id": str(p.id), "manual_charge": "true"},
+        )
+        stripe.Invoice.finalize_invoice(inv.id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe manual charge failed: {type(e).__name__}: {str(e)[:200]}")
+    return {"ok": True, "invoice_id": inv.id}
+
+@app.post("/concierge/patients/{patient_id}/billing/portal")
+def concierge_billing_portal(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Return a Stripe Customer Portal URL the doctor can forward to the
+    patient so they can add/update a payment method themselves."""
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    customer_id = _get_or_create_stripe_customer(p, db)
+    try:
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=os.getenv("CONCIERGE_PORTAL_RETURN_URL", "https://soulmd.us/concierge"),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe portal failed: {type(e).__name__}: {str(e)[:200]}")
+    return {"url": session.url}
 
 # ─── Uptime monitoring ─────────────────────────────────────────────────────
 # Lightweight endpoint designed for external uptime monitors (UptimeRobot,
