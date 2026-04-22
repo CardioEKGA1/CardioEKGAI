@@ -39,12 +39,16 @@ CATALOG = [
     # LabRead and CliniScore are free (5/day) with unlimited access via Suite —
     # no standalone Stripe price at this time.
 
-    # ─── Anderson Concierge Medicine (monthly-only, no yearly) ───────────────
+    # ─── Anderson Concierge Medicine ────────────────────────────────────────
     # Separate products from the AI tool suite — different product, different
-    # billing identity (anderson@soulmd.us practice).
-    ("concierge_awaken", "Awaken (Concierge Membership)", "Monthly concierge medicine membership — Awaken tier",  15000, 0),
-    ("concierge_align",  "Align (Concierge Membership)",  "Monthly concierge medicine membership — Align tier",   30000, 0),
-    ("concierge_ascend", "Ascend (Concierge Membership)", "Monthly concierge medicine membership — Ascend tier",  50000, 0),
+    # billing identity (anderson@soulmd.us practice). Pricing uses angel-number
+    # structure (4/8/1+1). Annual plans reward commitment with a real discount.
+    #
+    # Prices in cents; the seeder creates a monthly and an annual price per tier.
+    #                 (slug,               product name,                               description,                                                              monthly, yearly)
+    ("concierge_awaken", "Awaken (Concierge Membership)", "Concierge medicine — Awaken tier · 2 visits + 1 guided meditation / month",                      44400,  500000),
+    ("concierge_align",  "Align (Concierge Membership)",  "Concierge medicine — Align tier · 3 visits + 2 guided meditations / month",                     88800, 1000000),
+    ("concierge_ascend", "Ascend (Concierge Membership)", "Concierge medicine — Ascend tier · 5 visits + 4 guided meditations + same-day + integrative",  111100, 1300000),
 ]
 
 

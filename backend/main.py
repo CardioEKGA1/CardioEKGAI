@@ -2330,7 +2330,7 @@ def concierge_delete_message(
 
 # ─── Concierge Appointments ───────────────────────────────────────────────
 
-CONCIERGE_APPT_TYPES = {"medical_visit", "life_coaching", "reiki", "telehealth", "follow_up"}
+CONCIERGE_APPT_TYPES = {"medical_visit", "life_coaching", "guided_meditation", "telehealth", "follow_up"}
 
 class ConciergeAppointmentCreate(BaseModel):
     patient_id: int
@@ -2451,14 +2451,42 @@ def concierge_delete_appointment(
 
 # ─── Concierge Billing ─────────────────────────────────────────────────────
 
+# Concierge pricing — angel-number structure. Each tier has a monthly and an
+# annual price wired through Stripe via separate env vars. The subscribe
+# endpoint accepts `cycle` = "monthly" | "yearly" to pick the right price.
 CONCIERGE_TIER_PRICE = {
-    "awaken": {"env": "STRIPE_PRICE_CONCIERGE_AWAKEN_MONTHLY", "cents": 15000, "label": "Awaken"},
-    "align":  {"env": "STRIPE_PRICE_CONCIERGE_ALIGN_MONTHLY",  "cents": 30000, "label": "Align"},
-    "ascend": {"env": "STRIPE_PRICE_CONCIERGE_ASCEND_MONTHLY", "cents": 50000, "label": "Ascend"},
+    "awaken": {
+        "label": "Awaken",
+        "monthly": {"env": "STRIPE_PRICE_CONCIERGE_AWAKEN_MONTHLY", "cents":  44400},
+        "yearly":  {"env": "STRIPE_PRICE_CONCIERGE_AWAKEN_YEARLY",  "cents": 500000},
+    },
+    "align":  {
+        "label": "Align",
+        "monthly": {"env": "STRIPE_PRICE_CONCIERGE_ALIGN_MONTHLY",  "cents":  88800},
+        "yearly":  {"env": "STRIPE_PRICE_CONCIERGE_ALIGN_YEARLY",   "cents":1000000},
+    },
+    "ascend": {
+        "label": "Ascend",
+        "monthly": {"env": "STRIPE_PRICE_CONCIERGE_ASCEND_MONTHLY", "cents": 111100},
+        "yearly":  {"env": "STRIPE_PRICE_CONCIERGE_ASCEND_YEARLY",  "cents":1300000},
+    },
 }
 
+# À la carte services — one-off charges via Stripe InvoiceItem + Invoice. These
+# are presets surfaced in the Billing UI's "Manual charge" modal; all prices
+# are also available to the frontend via /concierge/billing/catalog so the UI
+# can render up-to-date presets without hardcoding.
+CONCIERGE_ALA_CARTE = [
+    {"slug": "consult_30",       "label": "Medical consultation (30 min)",      "cents":  30000},
+    {"slug": "extended_15",      "label": "Extended visit (add'l 15 min)",      "cents":  15000},
+    {"slug": "guided_meditation","label": "Guided meditation (30 min)",         "cents":   4400},
+    {"slug": "urgent_same_day",  "label": "Urgent same-day consult",            "cents":  44400},
+    {"slug": "lab_review",       "label": "Lab result review + async message", "cents":   7500},
+]
+
 class ConciergeSubscribeRequest(BaseModel):
-    tier: str  # awaken | align | ascend
+    tier: str                # awaken | align | ascend
+    cycle: str | None = None # "monthly" (default) | "yearly"
 
 class ConciergeChargeRequest(BaseModel):
     amount_cents: int
@@ -2527,6 +2555,21 @@ def _billing_snapshot(patient: ConciergePatient) -> dict:
             pass
     return out
 
+@app.get("/concierge/billing/catalog")
+def concierge_billing_catalog(_: User = Depends(verify_concierge_owner)):
+    """Tier + à-la-carte pricing catalog surfaced to the frontend so pricing
+    copy lives in one place (backend) and can be updated without a frontend
+    deploy."""
+    tiers = []
+    for slug, entry in CONCIERGE_TIER_PRICE.items():
+        tiers.append({
+            "slug": slug,
+            "label": entry["label"],
+            "monthly_cents": entry["monthly"]["cents"],
+            "yearly_cents":  entry["yearly"]["cents"],
+        })
+    return {"tiers": tiers, "ala_carte": CONCIERGE_ALA_CARTE}
+
 @app.get("/concierge/billing")
 def concierge_billing_list(
     _: User = Depends(verify_concierge_owner),
@@ -2556,13 +2599,19 @@ def concierge_billing_detail(
         raise HTTPException(status_code=404, detail="Patient not found")
     return _billing_snapshot(p)
 
-def _resolve_tier_price_id(tier: str) -> str:
+def _resolve_tier_price_id(tier: str, cycle: str = "monthly") -> str:
     entry = CONCIERGE_TIER_PRICE.get(tier)
     if not entry:
         raise HTTPException(status_code=400, detail=f"Invalid tier {tier!r}. Must be awaken | align | ascend.")
-    price_id = os.getenv(entry["env"], "").strip().strip('"').strip("'")
+    cyc = (cycle or "monthly").lower()
+    if cyc not in ("monthly", "yearly"):
+        raise HTTPException(status_code=400, detail=f"Invalid cycle {cycle!r}. Must be monthly | yearly.")
+    sub = entry.get(cyc)
+    if not sub:
+        raise HTTPException(status_code=400, detail=f"Cycle {cyc} not configured for tier {tier}.")
+    price_id = os.getenv(sub["env"], "").strip().strip('"').strip("'")
     if not price_id:
-        raise HTTPException(status_code=500, detail=f"{entry['env']} env var not set. Run seed_stripe.py and paste the price ID into Railway.")
+        raise HTTPException(status_code=500, detail=f"{sub['env']} env var not set. Run seed_stripe.py and paste the price ID into Railway.")
     return price_id
 
 def _sync_sub_to_patient(p: ConciergePatient, sub):
@@ -2592,13 +2641,14 @@ def concierge_billing_subscribe(
         raise HTTPException(status_code=404, detail="Patient not found")
     if p.stripe_subscription_id and (p.subscription_status or "") not in ("canceled",):
         raise HTTPException(status_code=400, detail=f"Patient already has a {p.subscription_status or 'active'} subscription. Use change-tier or cancel first.")
-    price_id = _resolve_tier_price_id(data.tier)
+    cycle = (data.cycle or "monthly").lower()
+    price_id = _resolve_tier_price_id(data.tier, cycle)
     customer_id = _get_or_create_stripe_customer(p, db)
     try:
         sub = stripe.Subscription.create(
             customer=customer_id,
             items=[{"price": price_id}],
-            metadata={"concierge_patient_id": str(p.id), "tier": data.tier},
+            metadata={"concierge_patient_id": str(p.id), "tier": data.tier, "cycle": cycle},
             payment_behavior="default_incomplete",  # so a PaymentIntent gets created if no card on file yet
             collection_method="charge_automatically",
         )
@@ -2621,7 +2671,8 @@ def concierge_billing_change_tier(
         raise HTTPException(status_code=404, detail="Patient not found")
     if not p.stripe_subscription_id:
         raise HTTPException(status_code=400, detail="No active subscription — use subscribe first.")
-    price_id = _resolve_tier_price_id(data.tier)
+    cycle = (data.cycle or "monthly").lower()
+    price_id = _resolve_tier_price_id(data.tier, cycle)
     try:
         sub = stripe.Subscription.retrieve(p.stripe_subscription_id)
         item_id = sub["items"]["data"][0]["id"]

@@ -43,10 +43,20 @@ interface BillingDetail {
   invoice_error?: string;
 }
 
+// Angel-number tiers. Prices in whole dollars for display math; the backend
+// is the source of truth for cents and Stripe price IDs.
 const TIERS = [
-  { id: 'awaken', label: 'Awaken', price: 150, color: '#7ab0f0' },
-  { id: 'align',  label: 'Align',  price: 300, color: '#4a7ad0' },
-  { id: 'ascend', label: 'Ascend', price: 500, color: '#1a2a4a' },
+  { id: 'awaken', label: 'Awaken', monthly: 444,  yearly: 5000,  color: '#7ab0f0' },
+  { id: 'align',  label: 'Align',  monthly: 888,  yearly: 10000, color: '#4a7ad0' },
+  { id: 'ascend', label: 'Ascend', monthly: 1111, yearly: 13000, color: '#1a2a4a' },
+];
+
+const ALA_CARTE = [
+  { slug: 'consult_30',        label: 'Medical consultation (30 min)',      cents:  30000 },
+  { slug: 'extended_15',       label: "Extended visit (add'l 15 min)",       cents:  15000 },
+  { slug: 'guided_meditation', label: 'Guided meditation (30 min)',         cents:   4400 },
+  { slug: 'urgent_same_day',   label: 'Urgent same-day consult',            cents:  44400 },
+  { slug: 'lab_review',        label: 'Lab result review + async message', cents:   7500 },
 ];
 
 const STATUS_STYLES: Record<string, {bg: string; color: string; label: string}> = {
@@ -101,7 +111,7 @@ const BillingSection: React.FC<Props> = ({ API, token, accent }) => {
     lifetime_cents: patients.reduce((sum, p) => sum + (p.total_paid_cents || 0), 0),
     mrr_cents: patients.filter(p => p.status === 'active').reduce((sum, p) => {
       const t = TIERS.find(x => x.id === p.tier);
-      return sum + (t ? t.price * 100 : 0);
+      return sum + (t ? t.monthly * 100 : 0);
     }, 0),
   }), [patients]);
 
@@ -182,7 +192,7 @@ const BillingSection: React.FC<Props> = ({ API, token, accent }) => {
       )}
 
       <div style={{...CARD, marginTop:'12px', fontSize:'11px', color:'#6a8ab0', textAlign:'center', padding:'10px 12px'}}>
-        Membership tiers: Awaken $150/mo · Align $300/mo · Ascend $500/mo. Payment methods managed via Stripe Customer Portal.
+        Membership tiers: Awaken $444/mo ($5,000/yr) · Align $888/mo ($10,000/yr) · Ascend $1,111/mo ($13,000/yr). Payment methods managed via Stripe Customer Portal.
       </div>
     </div>
   );
@@ -270,7 +280,7 @@ const BillingDetailView: React.FC<{API:string; token:string; accent:string; pati
             <div style={{fontSize:'12px', color:'#6a8ab0', wordBreak:'break-all'}}>{data.email}</div>
             <div style={{display:'flex', gap:'8px', marginTop:'10px', flexWrap:'wrap'}}>
               <span style={{fontSize:'11px', padding:'4px 10px', borderRadius:'999px', background:`${tier?.color || '#6a8ab0'}1a`, color:tier?.color || '#6a8ab0', fontWeight:700, letterSpacing:'0.4px', textTransform:'uppercase'}}>
-                {data.tier_label} · {tier ? `$${tier.price}/mo` : ''}
+                {data.tier_label}{tier ? ` · $${tier.monthly.toLocaleString()}/mo` : ''}
               </span>
               <span style={{fontSize:'11px', padding:'4px 10px', borderRadius:'999px', background: ss.bg, color: ss.color, fontWeight:700, letterSpacing:'0.4px', textTransform:'uppercase'}}>{ss.label}</span>
             </div>
@@ -290,14 +300,20 @@ const BillingDetailView: React.FC<{API:string; token:string; accent:string; pati
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:'8px'}}>
           {!data.stripe_subscription_id ? (
             <>
-              {TIERS.map(t => (
-                <button key={t.id}
-                  onClick={() => action(`subscribe_${t.id}`, 'subscribe', 'POST', {tier:t.id})}
+              {TIERS.flatMap(t => ([
+                <button key={`${t.id}_m`}
+                  onClick={() => action(`subscribe_${t.id}_m`, 'subscribe', 'POST', {tier:t.id, cycle:'monthly'})}
                   disabled={!!busy}
-                  style={{background:accent, color:'white', border:'none', borderRadius:'10px', padding:'10px', fontSize:'12px', fontWeight:700, cursor:'pointer', opacity: busy ? 0.6 : 1}}>
-                  Start {t.label} — ${t.price}/mo
-                </button>
-              ))}
+                  style={{background:accent, color:'white', border:'none', borderRadius:'10px', padding:'10px', fontSize:'12px', fontWeight:700, cursor:'pointer', opacity: busy ? 0.6 : 1, lineHeight:1.3}}>
+                  Start {t.label}<br/><span style={{fontSize:'11px', opacity:0.9}}>${t.monthly.toLocaleString()}/mo</span>
+                </button>,
+                <button key={`${t.id}_y`}
+                  onClick={() => action(`subscribe_${t.id}_y`, 'subscribe', 'POST', {tier:t.id, cycle:'yearly'})}
+                  disabled={!!busy}
+                  style={{background:'rgba(255,255,255,0.85)', color: t.color, border:`1px solid ${t.color}`, borderRadius:'10px', padding:'10px', fontSize:'12px', fontWeight:700, cursor:'pointer', opacity: busy ? 0.6 : 1, lineHeight:1.3}}>
+                  {t.label} annual<br/><span style={{fontSize:'11px', opacity:0.85}}>${t.yearly.toLocaleString()}/yr</span>
+                </button>,
+              ]))}
             </>
           ) : (
             <>
@@ -351,15 +367,19 @@ const BillingDetailView: React.FC<{API:string; token:string; accent:string; pati
         <Modal title="Change tier" onClose={() => setShowTierChange(false)}>
           <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'12px', lineHeight:1.5}}>Change will be prorated for the current billing period.</div>
           <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
-            {TIERS.map(t => (
-              <button key={t.id}
-                onClick={() => { setShowTierChange(false); action(`change_${t.id}`, 'change-tier', 'POST', {tier:t.id}); }}
-                disabled={t.id === data.tier || !!busy}
-                style={{background: t.id === data.tier ? 'rgba(240,246,255,0.5)' : 'white', border:`1px solid ${t.id === data.tier ? 'rgba(122,176,240,0.3)' : 'rgba(122,176,240,0.45)'}`, borderRadius:'10px', padding:'12px 14px', fontSize:'13px', fontWeight:700, color: t.id === data.tier ? '#6a8ab0' : '#1a2a4a', cursor: t.id === data.tier ? 'default' : 'pointer', textAlign:'left', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                <span>{t.label} {t.id === data.tier && <span style={{fontSize:'10px', fontWeight:600, color:'#6a8ab0', marginLeft:'6px'}}>· current</span>}</span>
-                <span style={{color: t.color}}>${t.price}/mo</span>
-              </button>
-            ))}
+            {TIERS.flatMap(t => (['monthly','yearly'] as const).map(cyc => {
+              const amount = cyc === 'monthly' ? t.monthly : t.yearly;
+              const current = t.id === data.tier;
+              return (
+                <button key={`${t.id}_${cyc}`}
+                  onClick={() => { setShowTierChange(false); action(`change_${t.id}_${cyc}`, 'change-tier', 'POST', {tier:t.id, cycle:cyc}); }}
+                  disabled={!!busy}
+                  style={{background: current ? 'rgba(240,246,255,0.5)' : 'white', border:`1px solid ${current ? 'rgba(122,176,240,0.3)' : 'rgba(122,176,240,0.45)'}`, borderRadius:'10px', padding:'12px 14px', fontSize:'13px', fontWeight:700, color: '#1a2a4a', cursor: 'pointer', textAlign:'left', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                  <span>{t.label} · {cyc === 'monthly' ? 'Monthly' : 'Annual'} {current && <span style={{fontSize:'10px', fontWeight:600, color:'#6a8ab0', marginLeft:'6px'}}>· current tier</span>}</span>
+                  <span style={{color: t.color}}>${amount.toLocaleString()}{cyc === 'monthly' ? '/mo' : '/yr'}</span>
+                </button>
+              );
+            }))}
           </div>
         </Modal>
       )}
@@ -395,16 +415,31 @@ const ManualChargeModal: React.FC<{onClose:()=>void; onCharge:(cents:number, des
   const [amount, setAmount] = useState('');
   const [desc, setDesc] = useState('');
   const cents = Math.round(parseFloat(amount || '0') * 100);
+  const pickPreset = (p: typeof ALA_CARTE[number]) => {
+    setAmount((p.cents / 100).toFixed(2));
+    setDesc(p.label);
+  };
   return (
     <Modal title="Manual charge" onClose={onClose}>
-      <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'14px', lineHeight:1.5}}>One-time charge outside of the membership — house visit, labs, etc. Uses the patient's default payment method.</div>
+      <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'12px', lineHeight:1.5}}>One-time charge outside the membership. Pick a preset below or enter a custom amount. Uses the patient's default payment method.</div>
+
+      <div style={FIELD_LABEL}>À la carte presets</div>
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:'6px', marginBottom:'14px'}}>
+        {ALA_CARTE.map(p => (
+          <button key={p.slug} onClick={() => pickPreset(p)}
+            style={{background:'rgba(240,246,255,0.6)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'8px 10px', fontSize:'11px', fontWeight:700, color:'#1a2a4a', cursor:'pointer', textAlign:'left', lineHeight:1.3}}>
+            {p.label}<br/><span style={{color:'#4a7ad0', fontWeight:600}}>${(p.cents/100).toFixed(p.cents % 100 === 0 ? 0 : 2)}</span>
+          </button>
+        ))}
+      </div>
+
       <div style={{marginBottom:'10px'}}>
         <div style={FIELD_LABEL}>Amount (USD) *</div>
-        <input type="number" step="0.01" min="0.5" value={amount} onChange={e => setAmount(e.target.value)} placeholder="250.00" style={INPUT}/>
+        <input type="number" step="0.01" min="0.5" value={amount} onChange={e => setAmount(e.target.value)} placeholder="300.00" style={INPUT}/>
       </div>
       <div style={{marginBottom:'14px'}}>
         <div style={FIELD_LABEL}>Description *</div>
-        <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="House visit — Tuesday evening" style={INPUT}/>
+        <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Medical consultation (30 min) — Tuesday evening" style={INPUT}/>
       </div>
       <div style={{display:'flex', gap:'8px', justifyContent:'flex-end'}}>
         <button onClick={onClose} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'10px 16px', fontSize:'12px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>

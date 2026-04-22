@@ -134,7 +134,7 @@ class ConciergeAppointment(Base):
     patient_id = Column(Integer, index=True)
     starts_at = Column(DateTime, index=True)
     duration_min = Column(Integer, default=30)
-    appointment_type = Column(String)  # medical_visit | life_coaching | reiki | telehealth | follow_up
+    appointment_type = Column(String)  # medical_visit | life_coaching | guided_meditation | telehealth | follow_up
     status = Column(String, default="scheduled")  # scheduled | completed | canceled | no_show
     notes = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
