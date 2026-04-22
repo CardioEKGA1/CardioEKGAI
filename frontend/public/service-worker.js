@@ -11,7 +11,7 @@
  * placeholder push handler here so future backend work can deliver messages
  * without shipping a new SW.
  */
-const VERSION = 'soulmd-v1';
+const VERSION = 'soulmd-v2';
 const STATIC_CACHE = `${VERSION}-static`;
 const SHELL = [
   '/',

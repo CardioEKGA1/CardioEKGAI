@@ -112,35 +112,40 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
           {tab === 'book'     && <BookTab API={API} token={token} patient={patient}/>}
           {tab === 'messages' && <MessagesTab API={API} token={token}/>}
           {tab === 'labs'     && <LabsTab API={API} token={token}/>}
-          {tab === 'account'  && <AccountTab API={API} token={token} patient={patient}/>}
+          {tab === 'account'  && <AccountTab API={API} token={token} patient={patient} onSignOut={onBack}/>}
         </div>
       </div>
 
-      {/* Bottom tab bar — fixed, safe-area aware. */}
+      {/* Bottom tab bar — fixed, safe-area aware.
+          Uses `width:0 + flexBasis:20%` on each button so any overflow shows
+          up as shrunk width rather than a hidden 5th tab. Labels are
+          clamped with ellipsis so an accidental long label can never push
+          the next tab off-screen. */}
       <nav style={{
         position:'fixed', bottom:0, left:0, right:0, zIndex:5,
-        background:'rgba(255,255,255,0.85)',
+        background:'rgba(255,255,255,0.92)',
         backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)',
         borderTop:'1px solid rgba(107,78,124,0.12)',
         paddingBottom:'env(safe-area-inset-bottom, 0px)',
       }}>
-        <div style={{display:'flex', maxWidth:'560px', margin:'0 auto'}}>
+        <div style={{display:'flex', maxWidth:'560px', margin:'0 auto', width:'100%'}}>
           {TABS.map(t => {
             const active = tab === t.id;
             return (
               <button key={t.id} onClick={() => setTab(t.id)}
                 style={{
-                  flex:1, border:'none', background:'transparent', cursor:'pointer',
-                  padding:'10px 4px 12px 4px',
-                  display:'flex', flexDirection:'column', alignItems:'center', gap:'3px',
+                  width:0, flex:'1 1 0',  // equal share regardless of content width
+                  border:'none', background:'transparent', cursor:'pointer',
+                  padding:'8px 2px 10px 2px',
+                  display:'flex', flexDirection:'column', alignItems:'center', gap:'2px',
                   color: active ? DEEPP : 'rgba(107,78,124,0.55)',
-                  fontFamily:'inherit',
+                  fontFamily:'inherit', minWidth:0,
                 }}>
                 <span style={{display:'flex', alignItems:'center', justifyContent:'center', height:'22px', opacity: active ? 1 : 0.75, transform: active ? 'scale(1.08)' : 'none', transition:'transform 180ms ease'}}>
                   {t.id === 'account' ? <AvatarIcon active={active}/> : t.icon}
                 </span>
-                <span style={{fontSize:'10px', fontWeight: active ? 800 : 600, letterSpacing:'0.3px'}}>{t.label}</span>
-                {active && <span style={{width:'18px', height:'2px', borderRadius:'2px', background:TEAL, marginTop:'1px'}}/>}
+                <span style={{fontSize:'9.5px', fontWeight: active ? 800 : 600, letterSpacing:'0.2px', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{t.label}</span>
+                {active && <span style={{width:'16px', height:'2px', borderRadius:'2px', background:TEAL, marginTop:'1px'}}/>}
               </button>
             );
           })}
@@ -562,10 +567,17 @@ const urlBase64ToUint8Array = (base64String: string) => {
   return out;
 };
 
-const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|null}> = ({ API, token, patient }) => {
+const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|null; onSignOut:()=>void}> = ({ API, token, patient, onSignOut }) => {
   const [billing, setBilling] = useState<BillingSnapshot | null>(null);
   const [pushState, setPushState] = useState<'unknown'|'unsupported'|'prompt'|'denied'|'enabled'|'pending'>('unknown');
   const [pushMsg, setPushMsg] = useState('');
+  const [showDelete, setShowDelete] = useState(false);
+  const [showSignOut, setShowSignOut] = useState(false);
+
+  const signOut = () => {
+    try { localStorage.removeItem('token'); } catch {}
+    onSignOut();
+  };
 
   useEffect(() => {
     fetch(`${API}/concierge/me/billing`, { headers: { Authorization: `Bearer ${token}` } })
@@ -727,11 +739,85 @@ const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|nul
         </div>
       </Card>
 
+      <Card style={{marginBottom:'12px'}}>
+        <Label>Legal</Label>
+        <div style={{display:'flex', flexDirection:'column', gap:'6px', marginTop:'10px'}}>
+          <a href="/privacy" style={{...linkRow, textDecoration:'none'}}>Privacy Policy<span style={{opacity:0.5}}>↗</span></a>
+          <a href="/terms"   style={{...linkRow, textDecoration:'none'}}>Terms of Service<span style={{opacity:0.5}}>↗</span></a>
+        </div>
+      </Card>
+
+      <Card style={{marginBottom:'12px'}}>
+        <Label>Session</Label>
+        <button onClick={() => setShowSignOut(true)} style={{...smallCtaStyle, marginTop:'10px', width:'100%'}}>Sign out</button>
+      </Card>
+
       <Card>
         <Label>Danger zone</Label>
-        <button style={{...smallCtaStyle, marginTop:'10px', color:'#a02020', borderColor:'rgba(224,80,80,0.3)'}} onClick={() => alert('Phase 1b: account-delete flow + grace period.')}>Delete account</button>
+        <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, marginTop:'6px', lineHeight:1.6}}>
+          Delete your Concierge account and all associated data. This is irreversible; your subscription will be canceled and your billing history retained per legal requirements.
+        </div>
+        <button onClick={() => setShowDelete(true)} style={{...smallCtaStyle, marginTop:'10px', color:'#a02020', borderColor:'rgba(224,80,80,0.3)'}}>Delete my account</button>
       </Card>
+
+      {showSignOut && (
+        <SheetModal onClose={() => setShowSignOut(false)}>
+          <div style={{fontSize:'18px', fontWeight:800, color:DEEPP, marginBottom:'6px'}}>Sign out?</div>
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.75, lineHeight:1.6, marginBottom:'16px'}}>
+            You'll need to sign in again with your magic link to access the app. Any push notifications on this device will continue to deliver until you disable them from Settings.
+          </div>
+          <div style={{display:'flex', gap:'8px'}}>
+            <button onClick={() => setShowSignOut(false)} style={{flex:1, ...ghostBtn}}>Cancel</button>
+            <button onClick={signOut} style={{flex:1, ...solidBtn}}>Sign out</button>
+          </div>
+        </SheetModal>
+      )}
+
+      {showDelete && <DeleteAccountModal onClose={() => setShowDelete(false)} patientEmail={patient?.name || ''}/>}
     </div>
+  );
+};
+
+const linkRow: React.CSSProperties = {
+  display:'flex', justifyContent:'space-between', alignItems:'center',
+  padding:'10px 12px', borderRadius:'10px',
+  background:'rgba(255,255,255,0.55)', border:'1px solid rgba(107,78,124,0.1)',
+  fontSize:'13px', fontWeight:700, color:DEEPP, fontFamily:'inherit',
+};
+
+// ───── Delete account — confirmation modal ────────────────────────────────
+// True deletion during beta is a mailto to the physician so HIPAA review
+// can happen before data is wiped. The modal requires typing DELETE to
+// confirm, matching GitHub/Stripe-style destructive flows.
+const DeleteAccountModal: React.FC<{onClose:()=>void; patientEmail:string}> = ({ onClose, patientEmail }) => {
+  const [typed, setTyped] = useState('');
+  const ready = typed.trim().toUpperCase() === 'DELETE';
+  const submit = () => {
+    if (!ready) return;
+    const subject = encodeURIComponent('Concierge account deletion request');
+    const body = encodeURIComponent(
+      `Patient: ${patientEmail}\n\nI am requesting deletion of my SoulMD Concierge account. I understand this will cancel my subscription and remove my personal data from the platform.\n\nSigned.`
+    );
+    window.location.href = `mailto:anderson@soulmd.us?subject=${subject}&body=${body}`;
+  };
+  return (
+    <SheetModal onClose={onClose}>
+      <div style={{fontSize:'24px', marginBottom:'6px'}}>🗑️</div>
+      <div style={{fontSize:'18px', fontWeight:800, color:'#a02020'}}>Delete my account</div>
+      <div style={{fontSize:'12px', color:DEEPP, opacity:0.75, marginTop:'8px', lineHeight:1.6}}>
+        During beta, account deletion is processed manually by Dr. Anderson so your subscription is cleanly canceled and any HIPAA-protected data is removed with verification. This will open a pre-filled email; send it to complete your request.
+      </div>
+      <div style={{fontSize:'11px', color:DEEPP, fontWeight:700, marginTop:'14px', marginBottom:'6px', letterSpacing:'0.3px'}}>Type DELETE to confirm</div>
+      <input value={typed} onChange={e => setTyped(e.target.value)} placeholder="DELETE" autoFocus
+        style={{...msgInputStyle, letterSpacing:'2px', textTransform:'uppercase', borderColor: ready ? 'rgba(224,80,80,0.6)' : 'rgba(107,78,124,0.18)'}}/>
+      <div style={{display:'flex', gap:'8px', marginTop:'16px'}}>
+        <button onClick={onClose} style={{flex:1, ...ghostBtn}}>Cancel</button>
+        <button onClick={submit} disabled={!ready}
+          style={{flex:1, ...solidBtn, background: ready ? 'linear-gradient(135deg,#c04040,#7a1a1a)' : 'rgba(160,160,160,0.3)', color:'white', cursor: ready ? 'pointer' : 'default', opacity: ready ? 1 : 0.5}}>
+          Open email to delete
+        </button>
+      </div>
+    </SheetModal>
   );
 };
 
