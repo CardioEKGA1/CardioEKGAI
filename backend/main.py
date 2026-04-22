@@ -2114,6 +2114,232 @@ def concierge_delete_patient(
     db.commit()
     return {"ok": True, "deleted_patient_id": pid}
 
+# ─── Concierge Messages ───────────────────────────────────────────────────
+
+class ConciergeMessageCreate(BaseModel):
+    patient_id: int
+    subject: str | None = None
+    body: str
+    deliver_email: bool = True
+
+@app.get("/concierge/patients/{patient_id}/messages")
+def concierge_list_messages(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    rows = db.query(ConciergeMessage).filter(ConciergeMessage.patient_id == patient_id).order_by(ConciergeMessage.created_at.asc()).all()
+    return {
+        "patient": {"id": p.id, "name": p.name, "email": p.email},
+        "messages": [
+            {
+                "id": m.id,
+                "direction": m.direction,
+                "subject": m.subject,
+                "body": m.body,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            } for m in rows
+        ],
+    }
+
+@app.post("/concierge/messages")
+def concierge_send_message(
+    data: ConciergeMessageCreate,
+    owner: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == data.patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    body = (data.body or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Message body required.")
+    subject = (data.subject or f"Message from your physician").strip()
+
+    # Record the outbound message first. If email delivery fails, the record
+    # still exists so the doctor sees what they sent / tried to send.
+    msg = ConciergeMessage(patient_id=p.id, direction="outbound", subject=subject, body=body)
+    db.add(msg)
+    p.last_contact_at = datetime.utcnow()
+    p.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(msg)
+
+    delivered = False
+    delivery_error: str | None = None
+    if data.deliver_email and SENDGRID_API_KEY:
+        try:
+            # Deliver from the concierge practice identity. Replies go back to
+            # the owner's Gmail (they can forward / reply from that inbox).
+            sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
+            html = (
+                f'<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:560px;margin:0 auto;padding:32px;line-height:1.7;color:#3a2a1a">'
+                f'<div style="font-size:11px;color:#8a6e50;letter-spacing:2px;text-transform:uppercase;font-weight:700;margin-bottom:8px">Anderson Concierge Medicine</div>'
+                f'<div style="font-size:18px;font-weight:800;color:#3a2a1a;margin-bottom:18px">{subject}</div>'
+                f'<div style="font-size:14px;color:#3a2a1a;white-space:pre-wrap">{body}</div>'
+                f'<p style="font-size:11px;color:#a0947e;margin-top:32px;padding-top:16px;border-top:1px solid #e8e0d0">Reply directly to this email to reach your physician. This message is confidential.</p>'
+                f'</div>'
+            )
+            mail = Mail(from_email=CONCIERGE_OWNER_EMAIL, to_emails=p.email, subject=subject, html_content=html)
+            # Reply-to same as from so replies land in the owner's inbox.
+            mail.reply_to = CONCIERGE_OWNER_EMAIL
+            resp = sg.send(mail)
+            status = getattr(resp, "status_code", None)
+            delivered = status is not None and status < 300
+            if not delivered:
+                delivery_error = f"SendGrid returned {status}"
+        except Exception as e:
+            delivery_error = f"{type(e).__name__}: {str(e)[:200]}"
+
+    return {
+        "message": {
+            "id": msg.id,
+            "direction": msg.direction,
+            "subject": msg.subject,
+            "body": msg.body,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        },
+        "delivered": delivered,
+        "delivery_error": delivery_error,
+    }
+
+@app.delete("/concierge/messages/{message_id}")
+def concierge_delete_message(
+    message_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    m = db.query(ConciergeMessage).filter(ConciergeMessage.id == message_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Message not found")
+    db.delete(m)
+    db.commit()
+    return {"ok": True}
+
+# ─── Concierge Appointments ───────────────────────────────────────────────
+
+CONCIERGE_APPT_TYPES = {"medical_visit", "life_coaching", "reiki", "telehealth", "follow_up"}
+
+class ConciergeAppointmentCreate(BaseModel):
+    patient_id: int
+    starts_at: str  # ISO 8601 datetime string
+    duration_min: int = 30
+    appointment_type: str
+    notes: str | None = None
+
+class ConciergeAppointmentUpdate(BaseModel):
+    starts_at: str | None = None
+    duration_min: int | None = None
+    appointment_type: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+def _appt_dict(a: ConciergeAppointment, p: ConciergePatient | None = None) -> dict:
+    out = {
+        "id": a.id,
+        "patient_id": a.patient_id,
+        "starts_at": a.starts_at.isoformat() if a.starts_at else None,
+        "duration_min": a.duration_min,
+        "appointment_type": a.appointment_type,
+        "status": a.status,
+        "notes": a.notes or "",
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    }
+    if p:
+        out["patient_name"] = p.name
+        out["patient_email"] = p.email
+    return out
+
+@app.get("/concierge/appointments")
+def concierge_list_appointments(
+    start: str | None = None,  # ISO date — filter starts_at >= start
+    end: str | None = None,    # ISO date — filter starts_at <= end
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    q = db.query(ConciergeAppointment)
+    try:
+        if start: q = q.filter(ConciergeAppointment.starts_at >= datetime.fromisoformat(start.replace("Z", "+00:00")))
+        if end:   q = q.filter(ConciergeAppointment.starts_at <= datetime.fromisoformat(end.replace("Z", "+00:00")))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid start/end date — use ISO format.")
+    rows = q.order_by(ConciergeAppointment.starts_at.asc()).all()
+    # Bulk fetch patients for name resolution
+    patient_ids = list({a.patient_id for a in rows})
+    patients = {p.id: p for p in db.query(ConciergePatient).filter(ConciergePatient.id.in_(patient_ids)).all()} if patient_ids else {}
+    return {"appointments": [_appt_dict(a, patients.get(a.patient_id)) for a in rows]}
+
+@app.post("/concierge/appointments")
+def concierge_create_appointment(
+    data: ConciergeAppointmentCreate,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    if data.appointment_type not in CONCIERGE_APPT_TYPES:
+        raise HTTPException(status_code=400, detail=f"appointment_type must be one of {sorted(CONCIERGE_APPT_TYPES)}")
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == data.patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    try:
+        starts = datetime.fromisoformat(data.starts_at.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid starts_at — use ISO 8601.")
+    dur = max(5, min(int(data.duration_min or 30), 480))
+    appt = ConciergeAppointment(
+        patient_id=p.id, starts_at=starts, duration_min=dur,
+        appointment_type=data.appointment_type, notes=(data.notes or ""), status="scheduled",
+    )
+    db.add(appt)
+    db.commit()
+    db.refresh(appt)
+    return _appt_dict(appt, p)
+
+@app.patch("/concierge/appointments/{appointment_id}")
+def concierge_update_appointment(
+    appointment_id: int,
+    data: ConciergeAppointmentUpdate,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    a = db.query(ConciergeAppointment).filter(ConciergeAppointment.id == appointment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if data.starts_at is not None:
+        try:
+            a.starts_at = datetime.fromisoformat(data.starts_at.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid starts_at — use ISO 8601.")
+    if data.duration_min is not None: a.duration_min = max(5, min(int(data.duration_min), 480))
+    if data.appointment_type is not None:
+        if data.appointment_type not in CONCIERGE_APPT_TYPES:
+            raise HTTPException(status_code=400, detail=f"appointment_type must be one of {sorted(CONCIERGE_APPT_TYPES)}")
+        a.appointment_type = data.appointment_type
+    if data.status is not None:
+        if data.status not in {"scheduled", "completed", "canceled", "no_show"}:
+            raise HTTPException(status_code=400, detail="Invalid status.")
+        a.status = data.status
+    if data.notes is not None: a.notes = data.notes
+    db.commit()
+    db.refresh(a)
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == a.patient_id).first()
+    return _appt_dict(a, p)
+
+@app.delete("/concierge/appointments/{appointment_id}")
+def concierge_delete_appointment(
+    appointment_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    a = db.query(ConciergeAppointment).filter(ConciergeAppointment.id == appointment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    db.delete(a)
+    db.commit()
+    return {"ok": True}
+
 # ─── Uptime monitoring ─────────────────────────────────────────────────────
 # Lightweight endpoint designed for external uptime monitors (UptimeRobot,
 # BetterStack, etc.). No DB call, no auth, <1ms response. Use this instead
