@@ -3492,6 +3492,7 @@ def concierge_meditations_prescribe(
         subject=f"A meditation prescribed for you · {title}",
         body=msg_body,
         category="meditation",
+        related_id=med.id, related_kind="meditation",
     )
     db.add(concierge_msg); db.commit()
 
@@ -3947,6 +3948,8 @@ def patient_messages_list(
         "body": m.body,
         "category": m.category or "general",
         "read_at": m.read_at.isoformat() if m.read_at else None,
+        "related_id": m.related_id,
+        "related_kind": m.related_kind,
         "created_at": m.created_at.isoformat() if m.created_at else None,
     } for m in rows]}
 
@@ -4042,9 +4045,74 @@ async def patient_labs_upload(
         file_data=encoded,
     )
     db.add(rec); db.commit(); db.refresh(rec)
+    # Ping the physician so they know a lab is waiting.
+    owner = db.query(User).filter(User.email.ilike(CONCIERGE_OWNER_EMAIL)).first()
+    if owner:
+        send_push_to_user(owner.id, f"Lab uploaded · {p.name}", filename[:80], url="/concierge", db=db)
     return {
         "id": rec.id, "filename": rec.filename, "size_bytes": rec.size_bytes,
         "status": rec.status, "uploaded_at": rec.uploaded_at.isoformat(),
+    }
+
+
+# ───── Patient-scoped meditations ──────────────────────────────────────────
+# Every meditation the physician has prescribed to the patient, newest
+# first, with the full script inline. Powers the patient-side meditation
+# player — a distraction-free reading view accessible from the Messages
+# tab when a meditation-category message arrives.
+
+@app.get("/concierge/me/meditations")
+def patient_meditations_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    assigns = db.query(ConciergeMeditationAssignment).filter(
+        ConciergeMeditationAssignment.patient_id == p.id,
+    ).order_by(ConciergeMeditationAssignment.assigned_at.desc()).limit(60).all()
+    mids = [a.meditation_id for a in assigns]
+    meds = {m.id: m for m in db.query(ConciergeMeditation).filter(ConciergeMeditation.id.in_(mids)).all()} if mids else {}
+    out = []
+    for a in assigns:
+        m = meds.get(a.meditation_id)
+        if not m:
+            continue
+        out.append({
+            "assignment_id": a.id,
+            "assigned_at":   a.assigned_at.isoformat() if a.assigned_at else None,
+            "id":            m.id,
+            "title":         m.title,
+            "category":      m.category,
+            "duration_min":  m.duration_min or 0,
+            "description":   m.description or "",
+            "script":        m.script or "",
+            "audio_url":     m.audio_url or "",
+        })
+    return {"meditations": out}
+
+
+@app.get("/concierge/me/meditations/{med_id}")
+def patient_meditation_detail(
+    med_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Only returns the meditation if it has been assigned to this patient."""
+    p = _current_patient_for(current_user, db)
+    assign = db.query(ConciergeMeditationAssignment).filter(
+        ConciergeMeditationAssignment.patient_id == p.id,
+        ConciergeMeditationAssignment.meditation_id == med_id,
+    ).first()
+    if not assign:
+        raise HTTPException(status_code=404, detail="Not found")
+    m = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == med_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {
+        "id": m.id, "title": m.title, "category": m.category,
+        "duration_min": m.duration_min or 0, "description": m.description or "",
+        "script": m.script or "", "audio_url": m.audio_url or "",
+        "assigned_at": assign.assigned_at.isoformat() if assign.assigned_at else None,
     }
 
 
@@ -4652,6 +4720,65 @@ class LabReviewRequest(BaseModel):
     status: str                      # "reviewed" | "flagged"
     physician_note: str | None = None
 
+@app.get("/concierge/labs")
+def concierge_labs_list(
+    status: str | None = None,  # "pending" | "reviewed" | "flagged" | None for all
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Physician-facing list of every patient-uploaded lab record, newest
+    first. Used by the Lab Review UI. file_data deliberately omitted from
+    list responses (fetched separately via /concierge/labs/{id}/file)."""
+    q = db.query(ConciergeLabRecord).order_by(ConciergeLabRecord.uploaded_at.desc())
+    if status in ("pending", "reviewed", "flagged"):
+        q = q.filter(ConciergeLabRecord.status == status)
+    rows = q.limit(200).all()
+    patient_ids = list({r.patient_id for r in rows})
+    patients = {p.id: p for p in db.query(ConciergePatient).filter(ConciergePatient.id.in_(patient_ids)).all()} if patient_ids else {}
+    # Counts by status for the UI tab badges.
+    pending_count  = db.query(ConciergeLabRecord).filter(ConciergeLabRecord.status == "pending").count()
+    reviewed_count = db.query(ConciergeLabRecord).filter(ConciergeLabRecord.status == "reviewed").count()
+    flagged_count  = db.query(ConciergeLabRecord).filter(ConciergeLabRecord.status == "flagged").count()
+    return {
+        "labs": [{
+            "id": r.id,
+            "patient_id": r.patient_id,
+            "patient_name": patients.get(r.patient_id).name if patients.get(r.patient_id) else "—",
+            "filename": r.filename,
+            "mime_type": r.mime_type,
+            "size_bytes": r.size_bytes or 0,
+            "status": r.status or "pending",
+            "flagged": bool(r.flagged),
+            "physician_note": r.physician_note or "",
+            "uploaded_at": r.uploaded_at.isoformat() if r.uploaded_at else None,
+            "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+        } for r in rows],
+        "counts": {"pending": pending_count, "reviewed": reviewed_count, "flagged": flagged_count},
+    }
+
+
+@app.get("/concierge/labs/{lab_id}/file")
+def concierge_lab_file(
+    lab_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Serves the lab file bytes for the physician's in-browser viewer.
+    Returns the base64-encoded payload alongside mime type; frontend
+    reassembles to a blob URL. Patients fetch their own via a separate
+    endpoint (not yet implemented — not needed until Phase 2)."""
+    lab = db.query(ConciergeLabRecord).filter(ConciergeLabRecord.id == lab_id).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab record not found")
+    return {
+        "id": lab.id,
+        "filename": lab.filename,
+        "mime_type": lab.mime_type,
+        "size_bytes": lab.size_bytes or 0,
+        "file_b64": lab.file_data or "",
+    }
+
+
 @app.patch("/concierge/labs/{lab_id}")
 def concierge_lab_review(
     lab_id: int,
@@ -4784,6 +4911,37 @@ def job_appointment_reminders(
             pinged += 1
     db.commit()
     return {"ok": True, "candidates": len(appts), "delivered_to": pinged}
+
+
+@app.post("/internal/jobs/reset-visit-counters")
+def job_reset_visit_counters(
+    x_job_secret: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Monthly reset of visits_used / meditations_used for concierge
+    patients. Suggested Railway Cron: 0 0 1 * * (midnight UTC on the 1st)
+    OR any daily cadence — the endpoint is idempotent and only resets
+    patients whose period_counter_reset_at was > 28 days ago.
+
+    Using a "at least 28 days since last reset" heuristic rather than
+    tying to Stripe's current_period_end, because the webhook timing
+    isn't guaranteed and tiers renew on different calendar days."""
+    _require_job_secret(x_job_secret)
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=28)
+    patients = db.query(ConciergePatient).filter(
+        ConciergePatient.subscription_status == "active",
+    ).all()
+    reset_count = 0
+    for p in patients:
+        if p.period_counter_reset_at is None or p.period_counter_reset_at < cutoff:
+            p.visits_used = 0
+            p.meditations_used = 0
+            p.period_counter_reset_at = now
+            p.updated_at = now
+            reset_count += 1
+    db.commit()
+    return {"ok": True, "candidates": len(patients), "reset": reset_count}
 
 
 @app.get("/concierge/oracle/library")

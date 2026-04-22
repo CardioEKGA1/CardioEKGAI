@@ -137,8 +137,14 @@ class ConciergeMessage(Base):
     direction = Column(String)  # "outbound" (physician→patient) | "inbound" (patient→physician) | "note"
     subject = Column(String, nullable=True)
     body = Column(String)
-    category = Column(String, default="general")  # medical | lab_review | meditation | billing | general
+    category = Column(String, default="general")  # medical | lab_review | meditation | billing | oracle | general
     read_at = Column(DateTime, nullable=True)
+    # Optional link to another concierge entity the message is "about". Used
+    # today only for meditation-prescription messages so the patient's UI
+    # can open a dedicated reader instead of rendering the full script
+    # inline. Generic so new integrations can reuse it.
+    related_id = Column(Integer, nullable=True)
+    related_kind = Column(String, nullable=True)  # "meditation" | "lab" | "oracle" | ...
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 class ConciergeAppointment(Base):
@@ -322,6 +328,8 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflection VARCHAR"))
         conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflected_at TIMESTAMP"))
         conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS selected_tools JSON"))
+        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS related_id INTEGER"))
+        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS related_kind VARCHAR"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 

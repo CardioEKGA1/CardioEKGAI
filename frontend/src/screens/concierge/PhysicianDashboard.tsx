@@ -11,17 +11,19 @@ import BillingSection from './BillingSection';
 import HabitsSection from './HabitsSection';
 import MeditationsSection from './MeditationsSection';
 import CoachingSection from './CoachingSection';
+import LabReviewSection from './LabReviewSection';
 import PhysicianHome from './PhysicianHome';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
-type Section = 'home' | 'patients' | 'messages' | 'appointments' | 'billing' | 'coaching' | 'meditations' | 'habits';
+type Section = 'home' | 'patients' | 'messages' | 'appointments' | 'labs' | 'billing' | 'coaching' | 'meditations' | 'habits';
 
 const SECTIONS: {id: Section; label: string; icon: string}[] = [
   { id: 'home',         label: 'Home',         icon: '✨' },
   { id: 'patients',     label: 'Patients',     icon: '👥' },
   { id: 'messages',     label: 'Messages',     icon: '💬' },
   { id: 'appointments', label: 'Appointments', icon: '📅' },
+  { id: 'labs',         label: 'Labs',         icon: '🧪' },
   { id: 'billing',      label: 'Billing',      icon: '💳' },
   { id: 'coaching',     label: 'Coaching',     icon: '🧭' },
   { id: 'meditations',  label: 'Meditations',  icon: '🧘' },
@@ -83,11 +85,12 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
         {section === 'patients' && <PatientsSection API={API} token={token} accent={ACCENT}/>}
         {section === 'messages' && <MessagesSection API={API} token={token} accent={ACCENT}/>}
         {section === 'appointments' && <AppointmentsSection API={API} token={token} accent={ACCENT}/>}
+        {section === 'labs' && <LabReviewSection API={API} token={token} accent={ACCENT}/>}
         {section === 'billing' && <BillingSection API={API} token={token} accent={ACCENT}/>}
         {section === 'habits' && <HabitsSection API={API} token={token} accent={ACCENT}/>}
         {section === 'meditations' && <MeditationsSection API={API} token={token} accent={ACCENT}/>}
         {section === 'coaching' && <CoachingSection API={API} token={token} accent={ACCENT}/>}
-        {!['home','patients','messages','appointments','billing','habits','meditations','coaching'].includes(section) && (
+        {!['home','patients','messages','appointments','labs','billing','habits','meditations','coaching'].includes(section) && (
           <div style={{padding:'60px 20px', textAlign:'center', color:'#4a7ad0'}}>
             <div style={{fontSize:'48px', marginBottom:'16px', opacity:0.5}}>{SECTIONS.find(s => s.id === section)?.icon}</div>
             <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a', marginBottom:'6px'}}>{SECTIONS.find(s => s.id === section)?.label}</div>

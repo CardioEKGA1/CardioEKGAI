@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ChoKuRei from './ChoKuRei';
 import OracleCard, { ensureOracleKeyframes } from './OracleCard';
 import EnergyLog from './EnergyLog';
+import MeditationPlayer from './MeditationPlayer';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -930,7 +931,7 @@ const TierRow: React.FC<{label:string; monthly:string; yearly:string; desc:strin
 
 // ───── MESSAGES TAB ─────────────────────────────────────────────────────────
 
-interface PatientMessage { id:number; direction:'outbound'|'inbound'; subject:string; body:string; category:string; read_at:string|null; created_at:string; }
+interface PatientMessage { id:number; direction:'outbound'|'inbound'; subject:string; body:string; category:string; read_at:string|null; created_at:string; related_id?:number|null; related_kind?:string|null; }
 
 const MSG_CATEGORIES: {id: string; label: string; color: string}[] = [
   { id: 'general',    label: 'General',    color: DEEPP },
@@ -941,6 +942,7 @@ const MSG_CATEGORIES: {id: string; label: string; color: string}[] = [
 ];
 
 const MessagesTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
+  const [openMeditationId, setOpenMeditationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<PatientMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState('');
@@ -1028,6 +1030,12 @@ const MessagesTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
           {messages.map(m => {
             const cat = MSG_CATEGORIES.find(c => c.id === m.category) || MSG_CATEGORIES[0];
             const fromPhysician = m.direction === 'outbound';
+            const isMeditation = m.category === 'meditation' && m.related_kind === 'meditation' && !!m.related_id;
+            // For meditation prescriptions, show only the header lines of
+            // the body (title + duration) — the reader opens in its own
+            // distraction-free view. Splits at the first double-newline.
+            const split = m.body.split(/\n\s*\n/);
+            const meditationPreview = isMeditation ? split[0] : '';
             return (
               <div key={m.id} style={{
                 maxWidth:'86%', alignSelf: fromPhysician ? 'flex-start' : 'flex-end',
@@ -1052,10 +1060,23 @@ const MessagesTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
                   </span>
                 </div>
                 {m.subject && <div style={{fontSize:'13px', fontWeight:800, marginBottom:'4px'}}>{m.subject}</div>}
-                <div style={{fontSize:'13px', lineHeight:1.55, whiteSpace:'pre-wrap'}}>{m.body}</div>
+                {isMeditation ? (
+                  <>
+                    <div style={{fontSize:'13px', lineHeight:1.55, whiteSpace:'pre-wrap', fontStyle:'italic', color: DEEPP, opacity:0.9}}>{meditationPreview}</div>
+                    <button onClick={() => m.related_id && setOpenMeditationId(m.related_id)}
+                      style={{marginTop:'10px', background:'linear-gradient(135deg,#d4a86b,#9b8fe8)', border:'none', borderRadius:'10px', padding:'9px 14px', fontSize:'12px', fontWeight:800, color:'white', cursor:'pointer', fontFamily:'inherit', letterSpacing:'0.4px'}}>
+                      🕊️ Open in meditation view
+                    </button>
+                  </>
+                ) : (
+                  <div style={{fontSize:'13px', lineHeight:1.55, whiteSpace:'pre-wrap'}}>{m.body}</div>
+                )}
               </div>
             );
           })}
+          {openMeditationId && (
+            <MeditationPlayer API={API} token={token} medId={openMeditationId} onClose={() => setOpenMeditationId(null)}/>
+          )}
         </div>
       )}
     </div>
