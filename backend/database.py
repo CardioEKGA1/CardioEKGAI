@@ -46,6 +46,10 @@ class Subscription(Base):
     stripe_price_id = Column(String, nullable=True)
     stripe_customer_id = Column(String, index=True, nullable=True)
     current_period_end = Column(DateTime, nullable=True)
+    # For bundle subscriptions, the specific tool slugs the user chose at
+    # checkout. None for non-bundle subs. Example: ["clinicalnote","ekgscan",
+    # "nephroai","cerebralai"] for a Clinical Bundle.
+    selected_tools = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -317,6 +321,7 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS intention VARCHAR"))
         conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflection VARCHAR"))
         conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflected_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS selected_tools JSON"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 

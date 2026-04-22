@@ -110,9 +110,11 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
         <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>Simple, transparent, clinician-fair</div>
       </div>
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
-        <PriceCard title="Standard tool"       subtitle="EKGScan · RxCheck · AntibioticAI · NephroAI"                        monthly="$9.99"  yearly="$89.99"  cta="Start standard tool" onCta={onSignUp}/>
-        <PriceCard title="Premium tool"        subtitle="ClinicalNote AI · CerebralAI · XrayRead · PalliativeMD"         monthly="$24.99" yearly="$179.99" cta="Start premium tool" onCta={onSignUp}/>
-        <PriceCard title="SoulMD Suite"          subtitle="All 10 tools · one login"          monthly="$88.88" yearly="$888"    cta="Start Suite" onCta={onSignUp} highlighted/>
+        <PriceCard title="Standard tool"     subtitle="EKGScan · RxCheck · AntibioticAI · NephroAI"              monthly="$9.99"   yearly="$89.99"  cta="Start standard" onCta={onSignUp}/>
+        <PriceCard title="Premium tool"      subtitle="ClinicalNote AI · CerebralAI · XrayRead · PalliativeMD"   monthly="$24.99"  yearly="$179.99" cta="Start premium"  onCta={onSignUp}/>
+        <PriceCard title="Starter Bundle"    subtitle="4 basic + 1 premium · $15/mo AI budget"                   monthly="$58.88"  yearly="$499"    cta="Pick Starter"    onCta={onSignUp}/>
+        <PriceCard title="Clinical Bundle"   subtitle="2 basic + 2 premium · $20/mo AI budget"                   monthly="$55.55"  yearly="$444"    cta="Pick Clinical"   onCta={onSignUp}/>
+        <PriceCard title="SoulMD Suite"      subtitle="All 10 tools · one login · $60/mo AI budget"              monthly="$111.11" yearly="$1,199"  cta="Start Suite"     onCta={onSignUp} highlighted/>
       </div>
       <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>Cancel anytime.</div>
     </section>

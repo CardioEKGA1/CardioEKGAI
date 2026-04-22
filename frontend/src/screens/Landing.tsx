@@ -140,8 +140,8 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
           <div style={{background:WORDMARK, borderRadius:'22px', padding:'32px 28px', boxShadow:'0 12px 40px rgba(122,176,240,0.35)', color:'white', display:'flex', flexDirection:'column', position:'relative'}}>
             <div style={{position:'absolute', top:'16px', right:'16px', fontSize:'11px', fontWeight:700, background:'rgba(255,255,255,0.25)', padding:'4px 10px', borderRadius:'999px', letterSpacing:'0.5px'}}>BEST VALUE</div>
             <div style={{fontSize:'13px', fontWeight:700, color:'rgba(255,255,255,0.85)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>SoulMD Suite</div>
-            <div style={{fontSize:'40px', fontWeight:900, lineHeight:1, marginBottom:'4px'}}>$88.88<span style={{fontSize:'16px', fontWeight:600, opacity:0.8}}>/mo</span></div>
-            <div style={{fontSize:'13px', opacity:0.85, marginBottom:'20px'}}>or $888/year — save ~$179/yr</div>
+            <div style={{fontSize:'40px', fontWeight:900, lineHeight:1, marginBottom:'4px'}}>$111.11<span style={{fontSize:'16px', fontWeight:600, opacity:0.8}}>/mo</span></div>
+            <div style={{fontSize:'13px', opacity:0.85, marginBottom:'20px'}}>or $1,199/year · bundles from $55.55/mo</div>
             <ul style={{listStyle:'none', padding:0, margin:'0 0 24px 0', fontSize:'13px', lineHeight:1.9}}>
               <li>✓ All 10 clinical-AI tools</li>
               <li>✓ EKGScan · NephroAI · XrayRead · RxCheck</li>

@@ -4,6 +4,7 @@ import SoulMDLogo from '../SoulMDLogo';
 import DictationButton from '../DictationButton';
 import ComplianceDisclaimer from '../ComplianceDisclaimer';
 import { User } from '../App';
+import BundlePickerModal, { BUNDLE_SPECS } from '../BundlePickerModal';
 
 interface Props {
   API: string;
@@ -112,6 +113,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [cases, setCases] = useState<CasesResp | null>(null);
   const [trial, setTrial] = useState<TrialStatus | null>(null);
+  const [bundlePicker, setBundlePicker] = useState<'bundle_starter' | 'bundle_clinical' | null>(null);
   const [caseFilter, setCaseFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
@@ -181,12 +183,14 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const subscribe = async (tool_slug: string, tier: 'monthly'|'yearly') => {
+  const subscribe = async (tool_slug: string, tier: 'monthly'|'yearly', selectedTools?: string[]) => {
     setCheckoutLoading(`${tool_slug}_${tier}`);
     try {
+      const body: any = { tool_slug, tier };
+      if (selectedTools && selectedTools.length > 0) body.selected_tools = selectedTools;
       const res = await fetch(`${API}/billing/checkout-session`, {
         method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ tool_slug, tier }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error(data.detail || 'Could not start checkout');
@@ -329,7 +333,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 
       {suiteMonthly && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'14px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px'}}>
-          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save ~$179/year — switch to yearly Suite for $888.</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save ~$134/year — switch to yearly Suite for $1,199.</div>
           <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '…' : 'Upgrade to yearly'}</button>
         </div>
       )}
@@ -389,9 +393,49 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 
       {!isSuper && !suiteActive && lockedCount > 0 && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'16px', background:'linear-gradient(135deg,rgba(122,176,240,0.12),rgba(155,143,232,0.12))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
-          <div style={{fontSize:'13px', color:'#1a2a4a'}}>You have {lockedCount} tool{lockedCount===1?'':'s'} locked. Upgrade to Suite for $88.88/month and unlock everything.</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a'}}>You have {lockedCount} tool{lockedCount===1?'':'s'} locked. Bundle for $55.55/mo, or unlock everything with Suite at $111.11/mo.</div>
           <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_monthly' ? '…' : 'Unlock all 10'}</button>
         </div>
+      )}
+
+      {/* Bundles upsell row — two cards side-by-side, each opens the picker. */}
+      {!isSuper && !suiteActive && lockedCount > 0 && (
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'10px', marginBottom:'16px'}}>
+          {(['bundle_starter', 'bundle_clinical'] as const).map(slug => {
+            const spec = BUNDLE_SPECS[slug];
+            return (
+              <div key={slug} style={{...CARD, padding:'14px 16px', display:'flex', flexDirection:'column', gap:'6px'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline'}}>
+                  <div style={{fontSize:'11px', letterSpacing:'1.5px', textTransform:'uppercase', fontWeight:800, color: slug === 'bundle_starter' ? '#4a7ad0' : '#9b8fe8'}}>Bundle</div>
+                  <div style={{fontSize:'11px', color:'#6a8ab0'}}>${spec.aiBudget}/mo AI budget</div>
+                </div>
+                <div style={{fontSize:'15px', fontWeight:800, color:'#1a2a4a'}}>{spec.label}</div>
+                <div style={{fontSize:'12px', color:'#6a8ab0', lineHeight:1.5}}>
+                  {spec.autoAllBasic
+                    ? 'All 4 basic tools + 1 premium of your choice.'
+                    : 'Pick 2 basic + 2 premium tools.'}
+                </div>
+                <div style={{display:'flex', alignItems:'baseline', gap:'6px', marginTop:'4px'}}>
+                  <span style={{fontSize:'22px', fontWeight:800, color:'#1a2a4a'}}>${spec.monthly.toLocaleString(undefined, {minimumFractionDigits:2})}</span>
+                  <span style={{fontSize:'11px', color:'#6a8ab0'}}>/mo · or ${spec.yearly.toLocaleString()}/yr</span>
+                </div>
+                <button onClick={() => setBundlePicker(slug)}
+                  style={{marginTop:'8px', background: slug === 'bundle_starter' ? 'linear-gradient(135deg,#7ab0f0,#4a7ad0)' : 'linear-gradient(135deg,#9b8fe8,#7060c0)', border:'none', borderRadius:'10px', padding:'9px 14px', fontSize:'12px', fontWeight:800, color:'white', cursor:'pointer'}}>
+                  Pick your tools →
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {bundlePicker && (
+        <BundlePickerModal
+          bundleSlug={bundlePicker}
+          loading={checkoutLoading?.startsWith(bundlePicker) || false}
+          onClose={() => setBundlePicker(null)}
+          onConfirm={(tier, selectedTools) => subscribe(bundlePicker, tier, selectedTools)}
+        />
       )}
 
       {cases && cases.total > 0 && (
@@ -533,11 +577,11 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         <div style={{...CARD, marginTop:'20px', padding:'24px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'2px solid rgba(122,176,240,0.35)', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
           <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 10 tools</div>
-          <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'4px', fontWeight:600}}>Comparable tools elsewhere cost $1,259.90/yr — Suite gives you all 10 for $888/yr</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'4px', fontWeight:600}}>Comparable tools elsewhere cost $1,259.90/yr — Suite gives you all 10 for $1,199/yr, or start with a bundle from $55.55/mo</div>
           <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime · includes unlimited LabRead & CliniScore</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
-            <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $88.88'}</button>
-            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $888'}</button>
+            <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $111.11'}</button>
+            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $1,199'}</button>
           </div>
         </div>
       )}
