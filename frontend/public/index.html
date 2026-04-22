@@ -14,7 +14,13 @@
     <link rel="icon" type="image/svg+xml" href="%PUBLIC_URL%/favicon.svg" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link id="pwa-manifest" rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <!-- iOS PWA: makes "Add to Home Screen" launch full-screen (no Safari chrome). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta id="apple-mobile-web-app-title" name="apple-mobile-web-app-title" content="SoulMD" />
 
     <!-- Open Graph (Facebook, LinkedIn, iMessage) -->
     <meta property="og:type" content="website" />
@@ -34,7 +40,10 @@
     <meta name="twitter:image" content="https://soulmd.us/og-image.png" />
 
     <!-- Per-domain title fallback: sets the tab title before React boots,
-         based on the host. Crawlers see the static <title> above. -->
+         based on the host. Crawlers see the static <title> above.
+         Also swaps the PWA manifest when on /concierge so "Add to Home
+         Screen" installs a dedicated SoulMD Concierge app with its own
+         identity, theme color, and scope. -->
     <script>
       (function() {
         try {
@@ -42,8 +51,24 @@
           if (h.indexOf('ekgscan') !== -1) {
             document.title = 'EKGScan — 12-lead EKG interpretation in seconds';
           }
+          if (window.location.pathname.indexOf('/concierge') === 0) {
+            var m = document.getElementById('pwa-manifest');
+            if (m) m.setAttribute('href', '/manifest-concierge.json');
+            var tc = document.querySelector('meta[name="theme-color"]');
+            if (tc) tc.setAttribute('content', '#2ABFBF');
+            var t = document.getElementById('apple-mobile-web-app-title');
+            if (t) t.setAttribute('content', 'Concierge');
+            document.title = 'SoulMD Concierge';
+          }
         } catch (e) {}
       })();
+
+      // Register the service worker. Scoped to /, which covers /concierge too.
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js').catch(function() {});
+        });
+      }
     </script>
   </head>
   <body>

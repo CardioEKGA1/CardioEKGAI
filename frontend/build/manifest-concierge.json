@@ -1,0 +1,18 @@
+{
+  "name": "SoulMD Concierge",
+  "short_name": "Concierge",
+  "description": "Where science meets the soul — direct-pay integrative concierge medicine.",
+  "icons": [
+    { "src": "favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" },
+    { "src": "logo192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
+    { "src": "logo512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" },
+    { "src": "apple-touch-icon.png", "type": "image/png", "sizes": "180x180" }
+  ],
+  "start_url": "/concierge",
+  "scope": "/concierge",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#2ABFBF",
+  "background_color": "#E0F4FA",
+  "categories": ["medical", "health", "lifestyle"]
+}

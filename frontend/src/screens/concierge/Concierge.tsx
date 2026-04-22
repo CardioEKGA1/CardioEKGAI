@@ -25,8 +25,8 @@ const SECTIONS: {id: Section; label: string; icon: string}[] = [
 const BG = 'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)';  // SoulMD standard palette — seamless extension of the main suite
 const ACCENT = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 
-const HIPAA_ACK_KEY = 'concierge_hipaa_ack_v1';
-const HIPAA_TEXT = 'SoulMD Concierge is not yet HIPAA compliant. Do not enter personally identifiable patient information. This platform is currently for demonstration and development purposes only. Full HIPAA compliance including Business Associate Agreements will be implemented before clinical launch.';
+const HIPAA_ACK_KEY = 'concierge_hipaa_ack_v2';
+const HIPAA_TEXT = 'SoulMD Concierge is a direct-pay medical practice. Not insurance. Not HIPAA compliant yet — do not enter identifying patient information during beta. For emergencies call 911.';
 
 const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -112,7 +112,7 @@ const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
         <div style={{maxWidth:'1200px', margin:'0 auto', background:'rgba(232,168,64,0.12)', border:'1px solid rgba(232,168,64,0.45)', borderRadius:'12px', padding:'10px 14px', display:'flex', alignItems:'flex-start', gap:'10px'}}>
           <span style={{fontSize:'16px', lineHeight:1.3, flexShrink:0}}>⚠️</span>
           <div style={{fontSize:'11px', color:'#8a5a10', lineHeight:1.55}}>
-            <strong style={{color:'#6e4208'}}>Not HIPAA compliant — development use only.</strong> Do not enter personally identifiable patient information (real names, MRNs, DOB, SSN, addresses, phone numbers, photos). Full HIPAA compliance including Business Associate Agreements will be implemented before clinical launch.
+            <strong style={{color:'#6e4208'}}>Direct-pay · Not insurance · Not HIPAA compliant yet (beta).</strong> Do not enter identifying patient information during beta. For emergencies call 911.
           </div>
         </div>
       </div>

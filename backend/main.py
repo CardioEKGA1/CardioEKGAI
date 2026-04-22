@@ -3078,6 +3078,34 @@ _build = os.path.join(os.path.dirname(__file__), "build")
 if os.path.exists(_build):
     app.mount("/static", StaticFiles(directory=os.path.join(_build, "static")), name="static")
 
+    # Files that must be served AS-IS from build root (not as the SPA shell),
+    # otherwise browsers get index.html HTML in place of the actual file and
+    # silently break (service worker fails to install, manifest fails to
+    # parse, favicon/icons return 200 with bad mime type).
+    _ROOT_FILES = {
+        "service-worker.js":      "application/javascript",
+        "manifest.json":          "application/manifest+json",
+        "manifest-concierge.json":"application/manifest+json",
+        "favicon.svg":            "image/svg+xml",
+        "favicon.ico":            "image/x-icon",
+        "apple-touch-icon.png":   "image/png",
+        "og-image.png":           "image/png",
+        "logo192.png":            "image/png",
+        "logo512.png":            "image/png",
+        "robots.txt":             "text/plain",
+    }
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
+        # First segment of the path (e.g. "service-worker.js", or "" for "/").
+        first = full_path.split("/", 1)[0] if full_path else ""
+        if first in _ROOT_FILES:
+            fp = os.path.join(_build, first)
+            if os.path.exists(fp):
+                resp = FileResponse(fp, media_type=_ROOT_FILES[first])
+                # SW must never be cached or iOS will hold onto the old copy.
+                if first == "service-worker.js":
+                    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                    resp.headers["Service-Worker-Allowed"] = "/"
+                return resp
         return FileResponse(os.path.join(_build, "index.html"))
