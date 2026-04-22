@@ -7,6 +7,7 @@ import ChoKuRei from './ChoKuRei';
 import OracleCard, { ensureOracleKeyframes } from './OracleCard';
 import EnergyLog from './EnergyLog';
 import MeditationPlayer from './MeditationPlayer';
+import CoachingModuleReader from './CoachingModuleReader';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -59,6 +60,8 @@ const ORACLE_SEEN_KEY = (patientId: number, date: string) => `concierge_oracle_s
 const todayKey = () => new Date().toISOString().slice(0,10);
 
 interface OracleTodaySlim { pulled: boolean; card: { id:number; title:string; category_label?:string; reflection?:string; saved?:boolean } | null; }
+interface PatientMeditation { id:number; title:string; category:string; duration_min:number; description:string; assigned_at:string|null; }
+interface PatientCoachingModule { id:number; title:string; description:string; progress_pct:number; completed_at:string|null; exercise_count:number; assigned_at:string|null; }
 
 const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
   const [tab, setTab] = useState<Tab>('home');
@@ -68,6 +71,10 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
   const [oracleEntry, setOracleEntry] = useState<'intention'|'card'|'reflection'>('intention');
   const [todaysCard, setTodaysCard] = useState<OracleTodaySlim | null>(null);
   const [showEnergyLog, setShowEnergyLog] = useState(false);
+  const [myMeditations, setMyMeditations] = useState<PatientMeditation[]>([]);
+  const [myModules, setMyModules] = useState<PatientCoachingModule[]>([]);
+  const [openMeditationId, setOpenMeditationId] = useState<number | null>(null);
+  const [openModuleId, setOpenModuleId] = useState<number | null>(null);
 
   const loadToday = useCallback(() => {
     fetch(`${API}/concierge/oracle/today`, { headers: { Authorization: `Bearer ${token}` } })
@@ -76,6 +83,18 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
       .catch(() => {});
   }, [API, token]);
   useEffect(() => { loadToday(); }, [loadToday]);
+
+  const loadAssigned = useCallback(() => {
+    fetch(`${API}/concierge/me/meditations`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { meditations: [] })
+      .then(d => setMyMeditations(d.meditations || []))
+      .catch(() => {});
+    fetch(`${API}/concierge/me/coaching/modules`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { modules: [] })
+      .then(d => setMyModules(d.modules || []))
+      .catch(() => {});
+  }, [API, token]);
+  useEffect(() => { loadAssigned(); }, [loadAssigned]);
 
   // Inject oracle animation keyframes upfront so the Home-tab CTA glow
   // works even before the oracle overlay is opened.
@@ -136,9 +155,9 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
 
         {/* Tab body */}
         <div style={{marginTop:'14px'}}>
-          {tab === 'home'     && <HomeTab patient={patient} todaysCard={todaysCard} onOracle={openOracle} onOpenEnergyLog={() => setShowEnergyLog(true)} onGo={setTab}/>}
+          {tab === 'home'     && <HomeTab patient={patient} todaysCard={todaysCard} meditations={myMeditations} modules={myModules} onOracle={openOracle} onOpenEnergyLog={() => setShowEnergyLog(true)} onOpenMeditation={(id) => setOpenMeditationId(id)} onOpenModule={(id) => setOpenModuleId(id)} onGo={setTab}/>}
           {tab === 'book'     && <BookTab API={API} token={token} patient={patient}/>}
-          {tab === 'messages' && <MessagesTab API={API} token={token}/>}
+          {tab === 'messages' && <MessagesTab API={API} token={token} onOpenMeditation={(id) => setOpenMeditationId(id)}/>}
           {tab === 'labs'     && <LabsTab API={API} token={token}/>}
           {tab === 'account'  && <AccountTab API={API} token={token} patient={patient} onSignOut={onBack} onOpenEnergyLog={() => setShowEnergyLog(true)}/>}
         </div>
@@ -196,6 +215,14 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
       {showEnergyLog && (
         <EnergyLog API={API} token={token} onClose={() => setShowEnergyLog(false)}/>
       )}
+
+      {/* Prescribed content readers */}
+      {openMeditationId && (
+        <MeditationPlayer API={API} token={token} medId={openMeditationId} onClose={() => { setOpenMeditationId(null); loadAssigned(); }}/>
+      )}
+      {openModuleId && (
+        <CoachingModuleReader API={API} token={token} moduleId={openModuleId} onClose={() => { setOpenModuleId(null); loadAssigned(); }}/>
+      )}
     </div>
   );
 };
@@ -247,7 +274,17 @@ const BetaDisclaimer: React.FC = () => {
 
 // ───── HOME TAB ─────────────────────────────────────────────────────────────
 
-const HomeTab: React.FC<{patient: PatientPayload | null; todaysCard: OracleTodaySlim | null; onOracle: (entry?: 'intention'|'card'|'reflection') => void; onOpenEnergyLog: () => void; onGo: (t: Tab) => void}> = ({ patient, todaysCard, onOracle, onOpenEnergyLog, onGo }) => {
+const HomeTab: React.FC<{
+  patient: PatientPayload | null;
+  todaysCard: OracleTodaySlim | null;
+  meditations: PatientMeditation[];
+  modules: PatientCoachingModule[];
+  onOracle: (entry?: 'intention'|'card'|'reflection') => void;
+  onOpenEnergyLog: () => void;
+  onOpenMeditation: (id: number) => void;
+  onOpenModule: (id: number) => void;
+  onGo: (t: Tab) => void;
+}> = ({ patient, todaysCard, meditations, modules, onOracle, onOpenEnergyLog, onOpenMeditation, onOpenModule, onGo }) => {
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const pulled = todaysCard?.pulled && todaysCard.card;
@@ -345,6 +382,66 @@ const HomeTab: React.FC<{patient: PatientPayload | null; todaysCard: OracleToday
           Three slow exhales before opening your first message. Your nervous system reads a long exhale as safety — and your decisions for the rest of the day will be measured against it.
         </div>
       </Card>
+
+      {/* Prescribed meditations — horizontal scroll of cards matching the
+          warm gold aesthetic of the player itself. */}
+      {meditations.length > 0 && (
+        <div style={{marginTop:'4px'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', padding:'0 4px'}}>
+            <Label>Your meditations</Label>
+            <span style={{fontSize:'11px', color:DEEPP, opacity:0.6}}>{meditations.length} prescribed</span>
+          </div>
+          <div style={{display:'flex', gap:'10px', overflowX:'auto', paddingBottom:'10px', marginBottom:'6px', WebkitOverflowScrolling:'touch'}}>
+            {meditations.slice(0, 12).map(m => (
+              <button key={m.id} onClick={() => onOpenMeditation(m.id)}
+                style={{
+                  flexShrink:0, width:'200px', textAlign:'left', fontFamily:'inherit', cursor:'pointer',
+                  background:'linear-gradient(180deg, #fff8ec, #f5e6cf)',
+                  border:'1px solid rgba(212,168,107,0.35)', borderRadius:'16px',
+                  padding:'14px', boxShadow:'0 6px 14px rgba(107,78,41,0.12)',
+                }}>
+                <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px'}}>
+                  <ChoKuRei size={26} color="#d4a86b" opacity={0.65}/>
+                  <div style={{fontSize:'10px', letterSpacing:'1.4px', textTransform:'uppercase', color:'#8a6e50', fontWeight:800}}>{m.duration_min} min</div>
+                </div>
+                <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'16px', fontWeight:600, color:'#4a3a2e', lineHeight:1.25, marginBottom:'4px', minHeight:'40px'}}>{m.title}</div>
+                <div style={{fontSize:'10px', color:'#8a6e50', opacity:0.8}}>
+                  {m.assigned_at ? new Date(m.assigned_at).toLocaleDateString() : ''}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Assigned coaching modules */}
+      {modules.length > 0 && (
+        <div style={{marginTop:'4px'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', padding:'0 4px'}}>
+            <Label>Your coaching</Label>
+            <span style={{fontSize:'11px', color:DEEPP, opacity:0.6}}>{modules.length} assigned</span>
+          </div>
+          <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
+            {modules.slice(0, 6).map(m => (
+              <button key={m.id} onClick={() => onOpenModule(m.id)}
+                style={{textAlign:'left', fontFamily:'inherit', cursor:'pointer', background: CARD_BG, backdropFilter:'blur(10px)', border: CARD_BORDER, borderRadius:'14px', padding:'12px 14px', boxShadow: CARD_SHADOW, display:'flex', alignItems:'center', gap:'12px'}}>
+                <div style={{flexShrink:0, width:'40px', height:'40px', borderRadius:'10px', background:'rgba(155,143,232,0.18)', border:'1px solid rgba(155,143,232,0.35)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px'}}>🧭</div>
+                <div style={{flex:1, minWidth:0}}>
+                  <div style={{fontSize:'13px', fontWeight:800, color:DEEPP, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{m.title}</div>
+                  <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, marginTop:'3px'}}>
+                    {m.completed_at ? 'Completed' : `${m.progress_pct}% complete`}
+                    {m.exercise_count > 0 ? ` · ${m.exercise_count} reflection${m.exercise_count === 1 ? '' : 's'}` : ''}
+                  </div>
+                  <div style={{height:'4px', borderRadius:'999px', background:'rgba(155,143,232,0.12)', overflow:'hidden', marginTop:'6px'}}>
+                    <div style={{width:`${m.progress_pct}%`, height:'100%', background:'linear-gradient(135deg,#9b8fe8,#6b4e7c)', transition:'width 0.3s'}}/>
+                  </div>
+                </div>
+                <span style={{color: DEEPP, opacity:0.5, fontSize:'16px'}}>→</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -941,8 +1038,7 @@ const MSG_CATEGORIES: {id: string; label: string; color: string}[] = [
   { id: 'billing',    label: 'Billing',    color: '#D4A659' },
 ];
 
-const MessagesTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
-  const [openMeditationId, setOpenMeditationId] = useState<number | null>(null);
+const MessagesTab: React.FC<{API:string; token:string; onOpenMeditation: (id: number) => void}> = ({ API, token, onOpenMeditation }) => {
   const [messages, setMessages] = useState<PatientMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState('');
@@ -1063,7 +1159,7 @@ const MessagesTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
                 {isMeditation ? (
                   <>
                     <div style={{fontSize:'13px', lineHeight:1.55, whiteSpace:'pre-wrap', fontStyle:'italic', color: DEEPP, opacity:0.9}}>{meditationPreview}</div>
-                    <button onClick={() => m.related_id && setOpenMeditationId(m.related_id)}
+                    <button onClick={() => m.related_id && onOpenMeditation(m.related_id)}
                       style={{marginTop:'10px', background:'linear-gradient(135deg,#d4a86b,#9b8fe8)', border:'none', borderRadius:'10px', padding:'9px 14px', fontSize:'12px', fontWeight:800, color:'white', cursor:'pointer', fontFamily:'inherit', letterSpacing:'0.4px'}}>
                       🕊️ Open in meditation view
                     </button>
@@ -1074,9 +1170,6 @@ const MessagesTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
               </div>
             );
           })}
-          {openMeditationId && (
-            <MeditationPlayer API={API} token={token} medId={openMeditationId} onClose={() => setOpenMeditationId(null)}/>
-          )}
         </div>
       )}
     </div>

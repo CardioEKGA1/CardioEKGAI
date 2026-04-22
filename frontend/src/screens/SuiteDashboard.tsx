@@ -5,6 +5,7 @@ import DictationButton from '../DictationButton';
 import ComplianceDisclaimer from '../ComplianceDisclaimer';
 import { User } from '../App';
 import BundlePickerModal, { BUNDLE_SPECS } from '../BundlePickerModal';
+import { readTrialsLocal, writeTrialsLocal } from '../trialHelpers';
 
 interface Props {
   API: string;
@@ -37,24 +38,10 @@ const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','
 
 // The 8 tools with the 1-use-free-trial model. labread + cliniscore are
 // already 5/day free for everyone so they stay out of the trial system.
+// Trial state helpers (readTrialsLocal/writeTrialsLocal/notifyTrialUsed)
+// live in ../trialHelpers so the tool components and this dashboard
+// share a single localStorage key + event bus.
 const TRIAL_TOOLS = new Set(['ekgscan','nephroai','xrayread','rxcheck','antibioticai','clinicalnote','cerebralai','palliativemd']);
-
-const TRIAL_LS_KEY = 'soulmd_trials_v1';
-
-const readTrialsLocal = (): Record<string, boolean> => {
-  try {
-    const raw = localStorage.getItem(TRIAL_LS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return typeof parsed === 'object' && parsed ? parsed : {};
-  } catch { return {}; }
-};
-const writeTrialsLocal = (next: Record<string, boolean>) => {
-  try { localStorage.setItem(TRIAL_LS_KEY, JSON.stringify(next)); } catch {}
-};
-export const markTrialUsed = (slug: string) => {
-  writeTrialsLocal({ ...readTrialsLocal(), [slug]: true });
-};
 
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'20px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)'};

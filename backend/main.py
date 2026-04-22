@@ -4091,6 +4091,97 @@ def patient_meditations_list(
     return {"meditations": out}
 
 
+# ───── Patient-scoped coaching ────────────────────────────────────────────
+
+@app.get("/concierge/me/coaching/modules")
+def patient_coaching_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    assigns = db.query(ConciergeModuleAssignment).filter(
+        ConciergeModuleAssignment.patient_id == p.id,
+    ).order_by(ConciergeModuleAssignment.assigned_at.desc()).all()
+    mids = [a.module_id for a in assigns]
+    mods = {m.id: m for m in db.query(ConciergeCoachingModule).filter(ConciergeCoachingModule.id.in_(mids)).all()} if mids else {}
+    out = []
+    for a in assigns:
+        m = mods.get(a.module_id)
+        if not m:
+            continue
+        out.append({
+            "assignment_id": a.id,
+            "assigned_at":   a.assigned_at.isoformat() if a.assigned_at else None,
+            "progress_pct":  a.progress_pct or 0,
+            "completed_at":  a.completed_at.isoformat() if a.completed_at else None,
+            "id":            m.id,
+            "title":         m.title,
+            "description":   m.description or "",
+            "exercise_count": len(m.exercises or []),
+        })
+    return {"modules": out}
+
+
+@app.get("/concierge/me/coaching/modules/{mod_id}")
+def patient_coaching_detail(
+    mod_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    assign = db.query(ConciergeModuleAssignment).filter(
+        ConciergeModuleAssignment.patient_id == p.id,
+        ConciergeModuleAssignment.module_id == mod_id,
+    ).first()
+    if not assign:
+        raise HTTPException(status_code=404, detail="Not found")
+    m = db.query(ConciergeCoachingModule).filter(ConciergeCoachingModule.id == mod_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {
+        "id": m.id, "title": m.title,
+        "description": m.description or "",
+        "content": m.content or "",
+        "exercises": m.exercises or [],
+        "assignment_id": assign.id,
+        "assigned_at": assign.assigned_at.isoformat() if assign.assigned_at else None,
+        "progress_pct": assign.progress_pct or 0,
+        "completed_at": assign.completed_at.isoformat() if assign.completed_at else None,
+    }
+
+
+class PatientCoachingProgressRequest(BaseModel):
+    progress_pct: int
+
+
+@app.post("/concierge/me/coaching/assignments/{assign_id}/progress")
+def patient_coaching_progress(
+    assign_id: int,
+    data: PatientCoachingProgressRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Patient-self-report progress. Checks the assignment belongs to the
+    current patient before updating."""
+    p = _current_patient_for(current_user, db)
+    a = db.query(ConciergeModuleAssignment).filter(
+        ConciergeModuleAssignment.id == assign_id,
+        ConciergeModuleAssignment.patient_id == p.id,
+    ).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Not found")
+    a.progress_pct = max(0, min(100, int(data.progress_pct)))
+    if a.progress_pct >= 100 and a.completed_at is None:
+        a.completed_at = datetime.utcnow()
+        # Ping physician when patient completes a module.
+        owner = db.query(User).filter(User.email.ilike(CONCIERGE_OWNER_EMAIL)).first()
+        mod = db.query(ConciergeCoachingModule).filter(ConciergeCoachingModule.id == a.module_id).first()
+        if owner and mod:
+            send_push_to_user(owner.id, f"{p.name} completed a module ✓", mod.title, url="/concierge", db=db)
+    db.commit()
+    return {"id": a.id, "progress_pct": a.progress_pct, "completed_at": a.completed_at.isoformat() if a.completed_at else None}
+
+
 @app.get("/concierge/me/meditations/{med_id}")
 def patient_meditation_detail(
     med_id: int,
