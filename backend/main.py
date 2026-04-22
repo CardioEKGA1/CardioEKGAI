@@ -411,28 +411,9 @@ def gate_tool_with_trial(user, tool_slug: str, request: Request, db: Session) ->
     return "trial"
 
 
-@app.get("/trial/status")
-def trial_status(request: Request, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Tells the PWA frontend which free trials are still available so the
-    dashboard can order untried tools first. Server-side state is the
-    source of truth — localStorage is used for optimistic UI only."""
-    fp = _client_fingerprint(request)
-    out: dict = {"superuser": False, "subscriber_of": [], "used": [], "eligible": sorted(TRIAL_ELIGIBLE_TOOLS)}
-    if current_user:
-        if current_user.is_superuser:
-            out["superuser"] = True
-            return out
-        for slug in TRIAL_ELIGIBLE_TOOLS:
-            if has_tool_access(current_user, slug, db):
-                out["subscriber_of"].append(slug)
-    uid = current_user.id if current_user else None
-    q = db.query(ToolTrialUse).filter(ToolTrialUse.tool_slug.in_(TRIAL_ELIGIBLE_TOOLS))
-    if uid is not None:
-        q = q.filter((ToolTrialUse.client_fp == fp) | (ToolTrialUse.user_id == uid))
-    else:
-        q = q.filter(ToolTrialUse.client_fp == fp)
-    out["used"] = sorted({u.tool_slug for u in q.all()})
-    return out
+# The /trial/status endpoint that surfaces trial state to the frontend
+# is registered later in this module, AFTER get_current_user is defined.
+# Previously it lived here and crashed at import time.
 
 MAX_CASES_PER_TOOL = 3
 CASE_RETENTION_DAYS = 90
@@ -582,6 +563,34 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
     if not payload:
         return None
     return db.query(User).filter(User.email == payload.get("sub")).first()
+
+
+# Trial status — lives here because it depends on get_current_user and
+# get_current_user depends on get_db (declared earlier). Route was moved
+# down from the trial-gate section after a Railway import-time crash.
+@app.get("/trial/status")
+def trial_status(request: Request, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Tells the PWA frontend which free trials are still available so the
+    dashboard can order untried tools first. Server-side state is the
+    source of truth — localStorage is used for optimistic UI only."""
+    fp = _client_fingerprint(request)
+    out: dict = {"superuser": False, "subscriber_of": [], "used": [], "eligible": sorted(TRIAL_ELIGIBLE_TOOLS)}
+    if current_user:
+        if current_user.is_superuser:
+            out["superuser"] = True
+            return out
+        for slug in TRIAL_ELIGIBLE_TOOLS:
+            if has_tool_access(current_user, slug, db):
+                out["subscriber_of"].append(slug)
+    uid = current_user.id if current_user else None
+    q = db.query(ToolTrialUse).filter(ToolTrialUse.tool_slug.in_(TRIAL_ELIGIBLE_TOOLS))
+    if uid is not None:
+        q = q.filter((ToolTrialUse.client_fp == fp) | (ToolTrialUse.user_id == uid))
+    else:
+        q = q.filter(ToolTrialUse.client_fp == fp)
+    out["used"] = sorted({u.tool_slug for u in q.all()})
+    return out
+
 
 def verify_admin(x_admin_token: str = Header(None)):
     if not ADMIN_TOKEN:
