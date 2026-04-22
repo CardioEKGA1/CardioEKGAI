@@ -9,6 +9,8 @@ import MessagesSection from './MessagesSection';
 import AppointmentsSection from './AppointmentsSection';
 import BillingSection from './BillingSection';
 import HabitsSection from './HabitsSection';
+import MeditationsSection from './MeditationsSection';
+import CoachingSection from './CoachingSection';
 import PhysicianHome from './PhysicianHome';
 
 interface Props { API: string; token: string; onBack: () => void; }
@@ -83,11 +85,13 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
         {section === 'appointments' && <AppointmentsSection API={API} token={token} accent={ACCENT}/>}
         {section === 'billing' && <BillingSection API={API} token={token} accent={ACCENT}/>}
         {section === 'habits' && <HabitsSection API={API} token={token} accent={ACCENT}/>}
-        {!['home','patients','messages','appointments','billing','habits'].includes(section) && (
+        {section === 'meditations' && <MeditationsSection API={API} token={token} accent={ACCENT}/>}
+        {section === 'coaching' && <CoachingSection API={API} token={token} accent={ACCENT}/>}
+        {!['home','patients','messages','appointments','billing','habits','meditations','coaching'].includes(section) && (
           <div style={{padding:'60px 20px', textAlign:'center', color:'#4a7ad0'}}>
             <div style={{fontSize:'48px', marginBottom:'16px', opacity:0.5}}>{SECTIONS.find(s => s.id === section)?.icon}</div>
             <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a', marginBottom:'6px'}}>{SECTIONS.find(s => s.id === section)?.label}</div>
-            <div style={{fontSize:'13px', color:'#4a7ad0', maxWidth:'440px', margin:'0 auto', lineHeight:1.6}}>This section is scaffolded for Phase 1b.</div>
+            <div style={{fontSize:'13px', color:'#4a7ad0', maxWidth:'440px', margin:'0 auto', lineHeight:1.6}}>This section is scaffolded for a later phase.</div>
           </div>
         )}
       </main>

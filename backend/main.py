@@ -3227,6 +3227,289 @@ def _habit_summary(habit: ConciergeHabit, checkins: list) -> dict:
     }
 
 
+# ─── Concierge Meditations (physician library + assignments) ─────────────
+
+MEDITATION_CATEGORIES = {"breathwork", "body_scan", "visualization", "energy_healing", "sleep", "stress"}
+
+class MeditationCreateRequest(BaseModel):
+    title: str
+    category: str
+    description: str | None = None
+    duration_min: int | None = None
+    script: str | None = None
+    audio_url: str | None = None
+
+class MeditationUpdateRequest(BaseModel):
+    title: str | None = None
+    category: str | None = None
+    description: str | None = None
+    duration_min: int | None = None
+    script: str | None = None
+    audio_url: str | None = None
+
+class MeditationAssignRequest(BaseModel):
+    patient_id: int
+
+
+def _meditation_dict(m: ConciergeMeditation, assignments_by_med: dict | None = None) -> dict:
+    count = len(assignments_by_med.get(m.id, [])) if assignments_by_med else 0
+    return {
+        "id": m.id,
+        "title": m.title,
+        "category": m.category,
+        "description": m.description or "",
+        "duration_min": m.duration_min or 0,
+        "script": m.script or "",
+        "audio_url": m.audio_url or "",
+        "assignment_count": count,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    }
+
+
+@app.get("/concierge/meditations")
+def concierge_meditations_list(_: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    meds = db.query(ConciergeMeditation).order_by(ConciergeMeditation.created_at.desc()).all()
+    assigns = db.query(ConciergeMeditationAssignment).all()
+    by_med: dict = {}
+    for a in assigns:
+        by_med.setdefault(a.meditation_id, []).append(a)
+    return {"meditations": [_meditation_dict(m, by_med) for m in meds]}
+
+
+@app.post("/concierge/meditations")
+def concierge_meditations_create(data: MeditationCreateRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    if not (data.title or "").strip():
+        raise HTTPException(status_code=400, detail="Title is required.")
+    cat = (data.category or "").lower().replace("-", "_").replace(" ", "_")
+    if cat not in MEDITATION_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"category must be one of {sorted(MEDITATION_CATEGORIES)}")
+    dur = max(1, min(int(data.duration_min or 10), 90))
+    m = ConciergeMeditation(
+        title=data.title.strip(), category=cat,
+        description=(data.description or "").strip(),
+        duration_min=dur,
+        script=(data.script or "").strip(),
+        audio_url=(data.audio_url or "").strip() or None,
+    )
+    db.add(m); db.commit(); db.refresh(m)
+    return _meditation_dict(m)
+
+
+@app.patch("/concierge/meditations/{med_id}")
+def concierge_meditations_update(med_id: int, data: MeditationUpdateRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    m = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == med_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Meditation not found")
+    if data.title is not None:       m.title = data.title.strip()
+    if data.category is not None:
+        cat = data.category.lower().replace("-", "_").replace(" ", "_")
+        if cat not in MEDITATION_CATEGORIES:
+            raise HTTPException(status_code=400, detail=f"category must be one of {sorted(MEDITATION_CATEGORIES)}")
+        m.category = cat
+    if data.description is not None: m.description = data.description.strip()
+    if data.duration_min is not None: m.duration_min = max(1, min(int(data.duration_min), 90))
+    if data.script is not None:      m.script = data.script.strip()
+    if data.audio_url is not None:   m.audio_url = data.audio_url.strip() or None
+    db.commit(); db.refresh(m)
+    return _meditation_dict(m)
+
+
+@app.delete("/concierge/meditations/{med_id}")
+def concierge_meditations_delete(med_id: int, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    m = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == med_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Meditation not found")
+    db.query(ConciergeMeditationAssignment).filter(ConciergeMeditationAssignment.meditation_id == med_id).delete()
+    db.delete(m); db.commit()
+    return {"ok": True}
+
+
+@app.post("/concierge/meditations/{med_id}/assign")
+def concierge_meditations_assign(med_id: int, data: MeditationAssignRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    m = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == med_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Meditation not found")
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == data.patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    # Idempotent-ish: don't double-assign the same meditation on the same day.
+    recent = db.query(ConciergeMeditationAssignment).filter(
+        ConciergeMeditationAssignment.meditation_id == med_id,
+        ConciergeMeditationAssignment.patient_id == p.id,
+        ConciergeMeditationAssignment.assigned_at >= datetime.utcnow() - timedelta(days=1),
+    ).first()
+    if recent:
+        return {"id": recent.id, "assigned_at": recent.assigned_at.isoformat(), "duplicate": True}
+    a = ConciergeMeditationAssignment(meditation_id=med_id, patient_id=p.id)
+    db.add(a); db.commit(); db.refresh(a)
+    # Optional push to patient
+    if p.user_id:
+        send_push_to_user(p.user_id, "Dr. Anderson shared a meditation 🧘", m.title, url="/concierge", db=db)
+    return {"id": a.id, "assigned_at": a.assigned_at.isoformat(), "duplicate": False}
+
+
+@app.delete("/concierge/meditations/assignments/{assign_id}")
+def concierge_meditations_unassign(assign_id: int, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    a = db.query(ConciergeMeditationAssignment).filter(ConciergeMeditationAssignment.id == assign_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    db.delete(a); db.commit()
+    return {"ok": True}
+
+
+@app.get("/concierge/meditations/assignments")
+def concierge_meditations_assignments(_: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    assigns = db.query(ConciergeMeditationAssignment).order_by(ConciergeMeditationAssignment.assigned_at.desc()).limit(120).all()
+    pids = list({a.patient_id for a in assigns})
+    mids = list({a.meditation_id for a in assigns})
+    patients = {p.id: p for p in db.query(ConciergePatient).filter(ConciergePatient.id.in_(pids)).all()} if pids else {}
+    meds = {m.id: m for m in db.query(ConciergeMeditation).filter(ConciergeMeditation.id.in_(mids)).all()} if mids else {}
+    return {"assignments": [{
+        "id": a.id, "assigned_at": a.assigned_at.isoformat() if a.assigned_at else None,
+        "patient_id": a.patient_id, "patient_name": patients.get(a.patient_id).name if patients.get(a.patient_id) else "—",
+        "meditation_id": a.meditation_id, "meditation_title": meds.get(a.meditation_id).title if meds.get(a.meditation_id) else "—",
+        "category": meds.get(a.meditation_id).category if meds.get(a.meditation_id) else None,
+    } for a in assigns]}
+
+
+# ─── Concierge Coaching (module library + assignments) ───────────────────
+
+class CoachingCreateRequest(BaseModel):
+    title: str
+    description: str | None = None
+    content: str | None = None
+    exercises: list | None = None
+
+class CoachingUpdateRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    content: str | None = None
+    exercises: list | None = None
+
+class CoachingAssignRequest(BaseModel):
+    patient_id: int
+
+class CoachingProgressRequest(BaseModel):
+    progress_pct: int
+
+def _coaching_module_dict(m: ConciergeCoachingModule, assigns_by_mod: dict | None = None) -> dict:
+    count = len(assigns_by_mod.get(m.id, [])) if assigns_by_mod else 0
+    return {
+        "id": m.id,
+        "title": m.title,
+        "description": m.description or "",
+        "content": m.content or "",
+        "exercises": m.exercises or [],
+        "assignment_count": count,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    }
+
+
+@app.get("/concierge/coaching/modules")
+def concierge_coaching_list(_: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    mods = db.query(ConciergeCoachingModule).order_by(ConciergeCoachingModule.created_at.desc()).all()
+    assigns = db.query(ConciergeModuleAssignment).all()
+    by_mod: dict = {}
+    for a in assigns:
+        by_mod.setdefault(a.module_id, []).append(a)
+    return {"modules": [_coaching_module_dict(m, by_mod) for m in mods]}
+
+
+@app.post("/concierge/coaching/modules")
+def concierge_coaching_create(data: CoachingCreateRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    if not (data.title or "").strip():
+        raise HTTPException(status_code=400, detail="Title is required.")
+    m = ConciergeCoachingModule(
+        title=data.title.strip(),
+        description=(data.description or "").strip(),
+        content=(data.content or "").strip(),
+        exercises=data.exercises or [],
+    )
+    db.add(m); db.commit(); db.refresh(m)
+    return _coaching_module_dict(m)
+
+
+@app.patch("/concierge/coaching/modules/{mod_id}")
+def concierge_coaching_update(mod_id: int, data: CoachingUpdateRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    m = db.query(ConciergeCoachingModule).filter(ConciergeCoachingModule.id == mod_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Module not found")
+    if data.title is not None:       m.title = data.title.strip()
+    if data.description is not None: m.description = data.description.strip()
+    if data.content is not None:     m.content = data.content.strip()
+    if data.exercises is not None:   m.exercises = data.exercises
+    db.commit(); db.refresh(m)
+    return _coaching_module_dict(m)
+
+
+@app.delete("/concierge/coaching/modules/{mod_id}")
+def concierge_coaching_delete(mod_id: int, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    m = db.query(ConciergeCoachingModule).filter(ConciergeCoachingModule.id == mod_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Module not found")
+    db.query(ConciergeModuleAssignment).filter(ConciergeModuleAssignment.module_id == mod_id).delete()
+    db.delete(m); db.commit()
+    return {"ok": True}
+
+
+@app.post("/concierge/coaching/modules/{mod_id}/assign")
+def concierge_coaching_assign(mod_id: int, data: CoachingAssignRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    m = db.query(ConciergeCoachingModule).filter(ConciergeCoachingModule.id == mod_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Module not found")
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == data.patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    existing = db.query(ConciergeModuleAssignment).filter(
+        ConciergeModuleAssignment.module_id == mod_id,
+        ConciergeModuleAssignment.patient_id == p.id,
+    ).first()
+    if existing:
+        return {"id": existing.id, "progress_pct": existing.progress_pct, "duplicate": True}
+    a = ConciergeModuleAssignment(module_id=mod_id, patient_id=p.id, progress_pct=0)
+    db.add(a); db.commit(); db.refresh(a)
+    if p.user_id:
+        send_push_to_user(p.user_id, "Dr. Anderson assigned a coaching module 🧭", m.title, url="/concierge", db=db)
+    return {"id": a.id, "assigned_at": a.assigned_at.isoformat(), "duplicate": False}
+
+
+@app.patch("/concierge/coaching/assignments/{assign_id}")
+def concierge_coaching_progress(assign_id: int, data: CoachingProgressRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    a = db.query(ConciergeModuleAssignment).filter(ConciergeModuleAssignment.id == assign_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    a.progress_pct = max(0, min(100, int(data.progress_pct)))
+    if a.progress_pct >= 100 and a.completed_at is None:
+        a.completed_at = datetime.utcnow()
+    db.commit()
+    return {"id": a.id, "progress_pct": a.progress_pct, "completed_at": a.completed_at.isoformat() if a.completed_at else None}
+
+
+@app.delete("/concierge/coaching/assignments/{assign_id}")
+def concierge_coaching_unassign(assign_id: int, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    a = db.query(ConciergeModuleAssignment).filter(ConciergeModuleAssignment.id == assign_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    db.delete(a); db.commit()
+    return {"ok": True}
+
+
+@app.get("/concierge/coaching/assignments")
+def concierge_coaching_assignments(_: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+    assigns = db.query(ConciergeModuleAssignment).order_by(ConciergeModuleAssignment.assigned_at.desc()).limit(120).all()
+    pids = list({a.patient_id for a in assigns})
+    mids = list({a.module_id for a in assigns})
+    patients = {p.id: p for p in db.query(ConciergePatient).filter(ConciergePatient.id.in_(pids)).all()} if pids else {}
+    mods = {m.id: m for m in db.query(ConciergeCoachingModule).filter(ConciergeCoachingModule.id.in_(mids)).all()} if mids else {}
+    return {"assignments": [{
+        "id": a.id, "assigned_at": a.assigned_at.isoformat() if a.assigned_at else None,
+        "progress_pct": a.progress_pct or 0,
+        "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+        "patient_id": a.patient_id, "patient_name": patients.get(a.patient_id).name if patients.get(a.patient_id) else "—",
+        "module_id": a.module_id, "module_title": mods.get(a.module_id).title if mods.get(a.module_id) else "—",
+    } for a in assigns]}
+
+
 @app.get("/concierge/habits")
 def concierge_habits_list(
     _: User = Depends(verify_concierge_owner),
