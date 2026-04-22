@@ -231,6 +231,15 @@ const App: React.FC = () => {
   const goPrivacy = useCallback(() => navigate('privacy'), [navigate]);
   const goTerms = useCallback(() => navigate('terms'), [navigate]);
 
+  // If someone lands directly on /concierge without being signed in, redirect
+  // to the sign-in screen. Without this, the concierge render guard leaves
+  // the page blank forever (waiting for a user that will never exist).
+  useEffect(() => {
+    if (screen === 'concierge' && !user && !token) {
+      navigate('auth');
+    }
+  }, [screen, user, token, navigate]);
+
   if (isAdminRoute) {
     return (
       <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
@@ -266,6 +275,9 @@ const App: React.FC = () => {
       {screen==='tool_labread' && user && <LabReadTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='tool_cliniscore' && user && <CliniScoreTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='concierge' && user && <Concierge API={API} token={token} onBack={()=>navigate('dashboard')}/>}
+      {screen==='concierge' && !user && token && (
+        <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', color:'#8a6e50', fontSize:'14px'}}>Loading…</div>
+      )}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
