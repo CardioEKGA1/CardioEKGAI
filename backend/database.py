@@ -130,9 +130,11 @@ class ConciergeMessage(Base):
     __tablename__ = "concierge_messages"
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, index=True)
-    direction = Column(String)  # "outbound" | "inbound" | "note"
+    direction = Column(String)  # "outbound" (physician→patient) | "inbound" (patient→physician) | "note"
     subject = Column(String, nullable=True)
     body = Column(String)
+    category = Column(String, default="general")  # medical | lab_review | meditation | billing | general
+    read_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 class ConciergeAppointment(Base):
@@ -288,6 +290,8 @@ with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_customer_id ON concierge_patients(stripe_customer_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_subscription_id ON concierge_patients(stripe_subscription_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_user_id ON concierge_patients(user_id)"))
+        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS category VARCHAR DEFAULT 'general'"))
+        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 

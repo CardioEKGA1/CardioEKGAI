@@ -33,6 +33,7 @@ interface Props {
 // the app uses inline styles — keeping a tiny stylesheet for animations that
 // can't be expressed inline.
 const ORACLE_STYLE_ID = 'oracle-keyframes';
+export function ensureOracleKeyframes() { ensureKeyframes(); }
 function ensureKeyframes() {
   if (typeof document === 'undefined') return;
   if (document.getElementById(ORACLE_STYLE_ID)) return;
@@ -46,6 +47,8 @@ function ensureKeyframes() {
     @keyframes oracleTwinkle { 0%,100% { opacity: 0.25 } 50% { opacity: 1 } }
     @keyframes oracleFadeIn { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: translateY(0) } }
     @keyframes oracleDeckHover { 0%,100% { transform: translateY(0) rotate(-2deg) } 50% { transform: translateY(-4px) rotate(-2deg) } }
+    @keyframes oracleParticleRise { 0% { transform: translate(0, 0) scale(0.6); opacity: 0 } 15% { opacity: 1 } 100% { transform: translate(var(--dx,0), -220px) scale(1); opacity: 0 } }
+    @keyframes oracleCtaGlow { 0%,100% { box-shadow: 0 0 0 1px rgba(245,194,107,0.55), 0 0 18px rgba(245,194,107,0.35) } 50% { box-shadow: 0 0 0 1px rgba(245,194,107,0.85), 0 0 28px rgba(245,194,107,0.65) } }
   `;
   document.head.appendChild(s);
 }
@@ -177,9 +180,12 @@ const Deck: React.FC<{onPick: () => void; revealing: boolean}> = ({ onPick, reve
   );
 };
 
-// Revealed card — nebula top + opal bottom + message.
+// Revealed card — nebula top + opal bottom + message. Plus a 2-second
+// gold particle shower that fires once on mount, then fades.
 const RevealedCard: React.FC<{data: TodayPayload}> = ({ data }) => {
   const catColor = data.card.category_color || '#B08AE0';
+  const [burst, setBurst] = useState(true);
+  useEffect(() => { const t = setTimeout(() => setBurst(false), 2200); return () => clearTimeout(t); }, []);
   return (
     <div style={{
       position:'relative', width:'clamp(260px,78vw,340px)', borderRadius:'24px', overflow:'hidden',
@@ -189,6 +195,10 @@ const RevealedCard: React.FC<{data: TodayPayload}> = ({ data }) => {
     }}>
       {/* Glow ring behind the card */}
       <div style={{position:'absolute', inset:'-8px', borderRadius:'32px', background:`radial-gradient(ellipse at center, ${catColor}66, transparent 70%)`, filter:'blur(14px)', animation:'oracleGlowRing 4s ease-in-out infinite', zIndex:-1}}/>
+
+      {/* 2-second gold particle shower on reveal — 24 particles, seeded so
+          positions are stable across renders. */}
+      {burst && <ParticleBurst/>}
 
       {/* Nebula top 55% */}
       <div style={{position:'relative', height:'clamp(200px,50vw,260px)', background: 'radial-gradient(ellipse at 30% 30%, #6b3a7c 0%, transparent 55%), radial-gradient(ellipse at 70% 70%, #9e7bd4 0%, transparent 55%), linear-gradient(180deg, #1a0d35, #2d1b4e)'}}>
@@ -228,8 +238,8 @@ const RevealedCard: React.FC<{data: TodayPayload}> = ({ data }) => {
 
       {/* Opal bottom 45% */}
       <div style={{position:'relative', background: CARD_BOTTOM, padding:'20px 20px 22px 20px'}}>
-        {/* Pearly shimmer overlay */}
-        <div style={{position:'absolute', inset:0, background:'linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.6) 50%, transparent 70%)', backgroundSize:'200% 100%', animation:'oracleShimmer 6s linear infinite', pointerEvents:'none', opacity:0.5}}/>
+        {/* Pearly shimmer overlay — slower + dimmer so message text stays readable. */}
+        <div style={{position:'absolute', inset:0, background:'linear-gradient(110deg, transparent 35%, rgba(255,255,255,0.55) 50%, transparent 65%)', backgroundSize:'200% 100%', animation:'oracleShimmer 4s linear infinite', pointerEvents:'none', opacity:0.15}}/>
         <div style={{position:'relative'}}>
           <div style={{fontSize:'17px', fontWeight:800, color:'#4a2d6b', letterSpacing:'0.2px', marginBottom:'10px'}}>{data.card.title}</div>
           <div style={{fontSize:'13px', color:'#6b4e7c', lineHeight:1.7, fontStyle:'italic', marginBottom:'16px'}}>{data.card.body}</div>
@@ -242,6 +252,37 @@ const RevealedCard: React.FC<{data: TodayPayload}> = ({ data }) => {
     </div>
   );
 };
+
+// 2-second gold particle burst — 24 seeded particles rising from the
+// card edges outward. Fires once on reveal, then the parent un-mounts us.
+const PARTICLES = Array.from({length: 24}, (_, i) => {
+  const rx = Math.sin(i * 17.31) * 43758.5453;
+  const ry = Math.sin(i * 91.62) * 43758.5453;
+  const rd = Math.sin(i * 33.17) * 43758.5453;
+  const rs = Math.sin(i * 7.41)  * 43758.5453;
+  return {
+    left: (Math.abs(rx) % 100).toFixed(2) + '%',
+    dx:   ((Math.abs(ry) % 80) - 40).toFixed(1) + 'px',
+    delay:(Math.abs(rd) % 0.6).toFixed(2) + 's',
+    size: (1 + (Math.abs(rs) % 3)).toFixed(1),
+  };
+});
+const ParticleBurst: React.FC = () => (
+  <div style={{position:'absolute', inset:0, pointerEvents:'none', overflow:'hidden', borderRadius:'24px'}}>
+    {PARTICLES.map((p, i) => (
+      <div key={i} style={{
+        position:'absolute', bottom:'40%', left: p.left,
+        width:`${p.size}px`, height:`${p.size}px`,
+        borderRadius:'50%',
+        background:'radial-gradient(circle, rgba(255,223,150,1) 0%, rgba(245,194,107,0.8) 45%, rgba(245,194,107,0) 75%)',
+        boxShadow:'0 0 6px rgba(255,215,130,0.85)',
+        animation: `oracleParticleRise 2s ease-out ${p.delay} both`,
+        // @ts-ignore custom property consumed by the keyframe
+        ['--dx' as any]: p.dx,
+      } as React.CSSProperties}/>
+    ))}
+  </div>
+);
 
 // Seeded-random star field so stars don't re-shuffle on re-render.
 const STARS = Array.from({length: 40}, (_, i) => {

@@ -4,7 +4,7 @@
 // Daily Oracle Card pulls on first open of the day.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ChoKuRei from './ChoKuRei';
-import OracleCard from './OracleCard';
+import OracleCard, { ensureOracleKeyframes } from './OracleCard';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -23,12 +23,23 @@ interface PatientPayload {
 
 type Tab = 'home' | 'book' | 'messages' | 'labs' | 'account';
 
-const TABS: {id: Tab; label: string; icon: string}[] = [
-  { id: 'home',     label: 'Home',     icon: '✨' },
-  { id: 'book',     label: 'Book',     icon: '📅' },
-  { id: 'messages', label: 'Messages', icon: '💬' },
-  { id: 'labs',     label: 'Labs',     icon: '🧪' },
-  { id: 'account',  label: 'Account',  icon: '🌙' },
+// Soft-circle avatar icon for Account — rendered as SVG rather than emoji so
+// it reads as an avatar chip regardless of platform emoji set.
+const AvatarIcon: React.FC<{active: boolean}> = ({ active }) => (
+  <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="11" fill={active ? 'rgba(42,191,191,0.18)' : 'rgba(107,78,124,0.12)'} stroke={active ? '#2ABFBF' : 'rgba(107,78,124,0.55)'} strokeWidth="1.4"/>
+    <circle cx="12" cy="10" r="3.3" fill={active ? '#2ABFBF' : 'rgba(107,78,124,0.6)'}/>
+    <path d="M5.5 19c1.5-3 4-4.2 6.5-4.2s5 1.2 6.5 4.2" fill="none" stroke={active ? '#2ABFBF' : 'rgba(107,78,124,0.6)'} strokeWidth="1.6" strokeLinecap="round"/>
+  </svg>
+);
+
+type TabDef = { id: Tab; label: string; icon: React.ReactNode };
+const TABS: TabDef[] = [
+  { id: 'home',     label: 'Home',     icon: <span style={{fontSize:'19px'}}>✨</span> },
+  { id: 'book',     label: 'Book',     icon: <span style={{fontSize:'19px'}}>📅</span> },
+  { id: 'messages', label: 'Messages', icon: <span style={{fontSize:'19px'}}>💬</span> },
+  { id: 'labs',     label: 'Labs',     icon: <span style={{fontSize:'19px'}}>🧪</span> },
+  { id: 'account',  label: 'Account',  icon: null /* rendered per-button so active state flows in */ },
 ];
 
 // Opal palette.
@@ -50,6 +61,10 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
   const [patient, setPatient] = useState<PatientPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [showOracle, setShowOracle] = useState(false);
+
+  // Inject oracle animation keyframes upfront so the Home-tab CTA glow
+  // works even before the oracle overlay is opened.
+  useEffect(() => { ensureOracleKeyframes(); }, []);
 
   // Fetch role + patient info on mount. Role gating already happened upstream
   // in Concierge.tsx, so we can assume role='patient' when we land here.
@@ -95,8 +110,8 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
         <div style={{marginTop:'14px'}}>
           {tab === 'home'     && <HomeTab patient={patient} onOracle={() => setShowOracle(true)} onGo={setTab}/>}
           {tab === 'book'     && <BookTab API={API} token={token} patient={patient}/>}
-          {tab === 'messages' && <StubTab title="Messages" icon="💬" blurb="Your secure encrypted thread with Dr. Anderson. Lab reviews, visit follow-ups, and general questions. Physician responds within 24 hours."/>}
-          {tab === 'labs'     && <StubTab title="Lab Vault" icon="🧪" blurb="Upload labs (PDF/JPG/PNG, up to 25MB). Every record is HIPAA-tagged and reviewed by Dr. Anderson. Normal values in teal; flagged in blush pink."/>}
+          {tab === 'messages' && <MessagesTab API={API} token={token}/>}
+          {tab === 'labs'     && <LabsTab API={API} token={token}/>}
           {tab === 'account'  && <AccountTab API={API} token={token} patient={patient}/>}
         </div>
       </div>
@@ -116,14 +131,16 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
               <button key={t.id} onClick={() => setTab(t.id)}
                 style={{
                   flex:1, border:'none', background:'transparent', cursor:'pointer',
-                  padding:'10px 6px 12px 6px',
-                  display:'flex', flexDirection:'column', alignItems:'center', gap:'2px',
+                  padding:'10px 4px 12px 4px',
+                  display:'flex', flexDirection:'column', alignItems:'center', gap:'3px',
                   color: active ? DEEPP : 'rgba(107,78,124,0.55)',
                   fontFamily:'inherit',
                 }}>
-                <span style={{fontSize:'19px', opacity: active ? 1 : 0.75, transform: active ? 'scale(1.08)' : 'none', transition:'transform 180ms ease'}}>{t.icon}</span>
-                <span style={{fontSize:'10px', fontWeight: active ? 800 : 600, letterSpacing:'0.4px'}}>{t.label}</span>
-                {active && <span style={{width:'18px', height:'2px', borderRadius:'2px', background:TEAL, marginTop:'2px'}}/>}
+                <span style={{display:'flex', alignItems:'center', justifyContent:'center', height:'22px', opacity: active ? 1 : 0.75, transform: active ? 'scale(1.08)' : 'none', transition:'transform 180ms ease'}}>
+                  {t.id === 'account' ? <AvatarIcon active={active}/> : t.icon}
+                </span>
+                <span style={{fontSize:'10px', fontWeight: active ? 800 : 600, letterSpacing:'0.3px'}}>{t.label}</span>
+                {active && <span style={{width:'18px', height:'2px', borderRadius:'2px', background:TEAL, marginTop:'1px'}}/>}
               </button>
             );
           })}
@@ -161,14 +178,27 @@ const TopHeader: React.FC<{patient: PatientPayload | null; onBack: () => void}> 
   </div>
 );
 
-const BetaDisclaimer: React.FC = () => (
-  <div style={{background:'rgba(255,255,255,0.65)', border:'1px solid rgba(232,168,64,0.4)', borderRadius:'12px', padding:'8px 12px', display:'flex', alignItems:'flex-start', gap:'8px'}}>
-    <span style={{fontSize:'14px', flexShrink:0}}>⚠️</span>
-    <div style={{fontSize:'10px', color:'#8a5a10', lineHeight:1.5}}>
-      <strong style={{color:'#6e4208'}}>Direct-pay · Not insurance · Not HIPAA compliant yet (beta).</strong> Do not enter identifying patient information. Emergencies — call 911.
+const BETA_DISMISS_KEY = 'concierge_beta_banner_dismissed_v1';
+const BetaDisclaimer: React.FC = () => {
+  const [visible, setVisible] = useState<boolean>(() => {
+    try { return localStorage.getItem(BETA_DISMISS_KEY) !== '1'; } catch { return true; }
+  });
+  if (!visible) return null;
+  const dismiss = () => {
+    try { localStorage.setItem(BETA_DISMISS_KEY, '1'); } catch {}
+    setVisible(false);
+  };
+  return (
+    <div style={{background:'rgba(255,255,255,0.65)', border:'1px solid rgba(232,168,64,0.4)', borderRadius:'12px', padding:'8px 10px 8px 12px', display:'flex', alignItems:'flex-start', gap:'8px'}}>
+      <span style={{fontSize:'14px', flexShrink:0, lineHeight:1.4}}>⚠️</span>
+      <div style={{fontSize:'10px', color:'#8a5a10', lineHeight:1.5, flex:1}}>
+        <strong style={{color:'#6e4208'}}>Direct-pay · Not insurance · Not HIPAA compliant yet (beta).</strong> Do not enter identifying patient information. Emergencies — call 911.
+      </div>
+      <button onClick={dismiss} aria-label="Dismiss beta notice"
+        style={{background:'transparent', border:'none', color:'#8a5a10', cursor:'pointer', fontSize:'18px', lineHeight:1, padding:'0 2px', marginLeft:'4px', flexShrink:0, fontFamily:'inherit'}}>×</button>
     </div>
-  </div>
-);
+  );
+};
 
 // ───── HOME TAB ─────────────────────────────────────────────────────────────
 
@@ -197,7 +227,7 @@ const HomeTab: React.FC<{patient: PatientPayload | null; onOracle: () => void; o
         <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', opacity:0.75, fontWeight:700}}>Daily Oracle Card</div>
         <div style={{fontSize:'18px', fontWeight:800, marginTop:'6px', lineHeight:1.3}}>Your card for today is ready</div>
         <div style={{fontSize:'12px', opacity:0.85, marginTop:'4px', fontStyle:'italic'}}>The Universe has a message for you ✨</div>
-        <div style={{display:'inline-flex', alignItems:'center', gap:'6px', background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)', padding:'7px 14px', borderRadius:'999px', fontSize:'12px', fontWeight:700, marginTop:'14px'}}>Pull today's card →</div>
+        <div style={{display:'inline-flex', alignItems:'center', gap:'6px', background:'linear-gradient(135deg, rgba(255,223,150,0.18), rgba(255,255,255,0.18))', border:'1px solid rgba(245,194,107,0.7)', padding:'8px 16px', borderRadius:'999px', fontSize:'12px', fontWeight:700, marginTop:'14px', color:'#fff1d3', boxShadow:'0 0 0 1px rgba(245,194,107,0.45), 0 0 18px rgba(245,194,107,0.35)', animation:'oracleCtaGlow 3.6s ease-in-out infinite'}}>Pull today's card →</div>
       </button>
 
       {/* Next session — placeholder until appointments API wired */}
@@ -252,19 +282,25 @@ const VisitTracker: React.FC<{patient: PatientPayload}> = ({ patient }) => {
   );
 };
 
-const TrackerRow: React.FC<{icon:string; label:string; used:number; total:number; dots:boolean[]; color:string}> = ({ icon, label, used, total, dots, color }) => (
-  <div>
-    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'12px', color:DEEPP, marginBottom:'6px'}}>
-      <span style={{fontWeight:700}}>{icon} {label}</span>
-      <span style={{opacity:0.75}}>{used} of {total} used</span>
+const TrackerRow: React.FC<{icon:string; label:string; used:number; total:number; dots:boolean[]; color:string}> = ({ icon, label, used, total, dots, color }) => {
+  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+  return (
+    <div>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'12px', color:DEEPP, marginBottom:'6px'}}>
+        <span style={{fontWeight:700}}>{icon} {label}</span>
+        <span style={{opacity:0.75, display:'flex', alignItems:'center', gap:'8px'}}>
+          <span>{used} of {total} used</span>
+          <span style={{fontWeight:800, color, background:`${color}18`, padding:'2px 8px', borderRadius:'999px', fontSize:'11px', letterSpacing:'0.3px'}}>{pct}%</span>
+        </span>
+      </div>
+      <div style={{display:'flex', gap:'6px'}}>
+        {dots.map((d, i) => (
+          <div key={i} style={{flex:1, height:'10px', borderRadius:'999px', background: d ? color : `${color}28`, border: d ? `1px solid ${color}` : `1px dashed ${color}66`}}/>
+        ))}
+      </div>
     </div>
-    <div style={{display:'flex', gap:'6px'}}>
-      {dots.map((d, i) => (
-        <div key={i} style={{flex:1, height:'10px', borderRadius:'999px', background: d ? color : `${color}28`, border: d ? `1px solid ${color}` : `1px dashed ${color}66`}}/>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 const QuickTile: React.FC<{icon:string; label:string; onClick:()=>void; tint:string}> = ({ icon, label, onClick, tint }) => (
   <button onClick={onClick} style={{
@@ -288,44 +324,86 @@ const SERVICES: {id: Service; label: string; icon: string; color: string; price:
   { id: 'urgent_same_day',   label: 'Urgent Same-Day',    icon: '⚡', color: DEEPP, price: '$444 (Ascend free)' },
 ];
 
-const BookTab: React.FC<{API:string; token:string; patient:PatientPayload|null}> = ({ API, token, patient }) => {
+interface Booking { id: number; service_type: string; starts_at: string; duration_min: number; status: string; notes: string; }
+
+const BookTab: React.FC<{API:string; token:string; patient:PatientPayload|null; onChanged?:()=>void}> = ({ API, token, patient, onChanged }) => {
   const [service, setService] = useState<Service>('medical_visit');
   const [weekStart, setWeekStart] = useState(() => {
     const d = new Date();
     const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;  // Mon-anchored
+    const diff = day === 0 ? -6 : 1 - day;
     d.setDate(d.getDate() + diff);
     d.setHours(0,0,0,0);
     return d;
   });
-  const weekDays = useMemo(() => {
-    return Array.from({length:5}).map((_, i) => {  // Mon-Fri only
-      const d = new Date(weekStart);
-      d.setDate(d.getDate() + i);
-      return d;
-    });
-  }, [weekStart]);
-  // 8am to 8pm, 30-min slots.
+  const [activeDayIdx, setActiveDayIdx] = useState<number>(() => {
+    const t = new Date(); const wd = t.getDay();
+    // Snap to Mon-Fri only; if weekend, default to Monday.
+    if (wd === 0 || wd === 6) return 0;
+    return wd - 1;
+  });
+  const [pending, setPending] = useState<{day: Date; label: string; hour:number; min:number} | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmed, setConfirmed] = useState<Booking | null>(null);
+  const [error, setError] = useState('');
+  const [bookings, setBookings] = useState<Booking[]>([]);
+
+  const weekDays = useMemo(() =>
+    Array.from({length:5}).map((_, i) => {
+      const d = new Date(weekStart); d.setDate(d.getDate() + i); return d;
+    }), [weekStart]);
+
   const SLOTS = useMemo(() => {
     const arr: {label:string; hour:number; min:number}[] = [];
-    for (let h = 8; h < 20; h++) {
-      for (const m of [0, 30]) {
-        const hh = h % 12 === 0 ? 12 : h % 12;
-        const ap = h < 12 ? 'AM' : 'PM';
-        arr.push({ label: `${hh}:${m.toString().padStart(2,'0')} ${ap}`, hour: h, min: m });
-      }
+    for (let h = 8; h < 20; h++) for (const m of [0, 30]) {
+      const hh = h % 12 === 0 ? 12 : h % 12;
+      const ap = h < 12 ? 'AM' : 'PM';
+      arr.push({ label: `${hh}:${m.toString().padStart(2,'0')} ${ap}`, hour: h, min: m });
     }
     return arr;
   }, []);
+
+  const loadBookings = useCallback(() => {
+    fetch(`${API}/concierge/me/bookings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { bookings: [] })
+      .then(d => setBookings(d.bookings || []))
+      .catch(() => {});
+  }, [API, token]);
+  useEffect(() => { loadBookings(); }, [loadBookings]);
+
+  const svcMeta = SERVICES.find(s => s.id === service)!;
+  const allowanceLine =
+    service === 'guided_meditation' && patient ? `${patient.meditations_used} of ${patient.meditations_allowed} meditations used` :
+    service === 'medical_visit'     && patient ? `${patient.visits_used} of ${patient.visits_allowed} visits used` :
+    'Urgent same-day is à la carte unless you\'re on Ascend.';
+
+  const confirm = async () => {
+    if (!pending) return;
+    setError(''); setSaving(true);
+    try {
+      const starts = new Date(pending.day);
+      starts.setHours(pending.hour, pending.min, 0, 0);
+      const res = await fetch(`${API}/concierge/me/bookings`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+        body: JSON.stringify({ service_type: service, starts_at: starts.toISOString(), duration_min: 30 }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Booking failed');
+      setConfirmed(d); setPending(null);
+      loadBookings();
+      onChanged && onChanged();
+    } catch (e: any) { setError(e.message); }
+    finally { setSaving(false); }
+  };
 
   return (
     <div>
       <div style={{padding:'18px 4px 8px 4px'}}>
         <div style={{fontSize:'22px', fontWeight:800, color:DEEPP}}>Book a session</div>
-        <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'4px'}}>Mon–Fri, 8 AM – 8 PM MST. Confirmations sent by Dr. Anderson.</div>
+        <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'4px'}}>Mon–Fri, 8 AM – 8 PM MST. Confirmations arrive by secure message within minutes.</div>
       </div>
 
-      {/* Service filter */}
       <div style={{display:'flex', gap:'8px', overflowX:'auto', padding:'2px 0 10px 0', marginBottom:'10px'}}>
         {SERVICES.map(s => {
           const active = service === s.id;
@@ -344,67 +422,145 @@ const BookTab: React.FC<{API:string; token:string; patient:PatientPayload|null}>
         })}
       </div>
 
-      {patient && (
-        <Card style={{marginBottom:'12px'}}>
-          <Label>Your allowance this cycle</Label>
-          <div style={{fontSize:'13px', color:DEEPP, marginTop:'4px'}}>
-            {SERVICES.find(s => s.id === service)?.label === 'Guided Meditation'
-              ? `${patient.meditations_used} of ${patient.meditations_allowed} used`
-              : SERVICES.find(s => s.id === service)?.label === 'Medical Visit'
-                ? `${patient.visits_used} of ${patient.visits_allowed} used`
-                : 'Urgent same-day is à la carte unless you\'re on Ascend.'}
-          </div>
-        </Card>
-      )}
+      <Card style={{marginBottom:'12px'}}>
+        <Label>This cycle</Label>
+        <div style={{fontSize:'13px', color:DEEPP, marginTop:'4px'}}>{allowanceLine}</div>
+        <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'4px'}}>{svcMeta.price}</div>
+      </Card>
 
-      {/* Week navigator */}
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px'}}>
-        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); }}
-          style={navBtn}>← Prev</button>
+        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); }} style={navBtn}>← Prev</button>
         <div style={{fontSize:'12px', color:DEEPP, fontWeight:700}}>
           Week of {weekStart.toLocaleDateString(undefined, {month:'short', day:'numeric'})}
         </div>
-        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); }}
-          style={navBtn}>Next →</button>
+        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); }} style={navBtn}>Next →</button>
       </div>
 
-      {/* Day grid */}
       <div style={{display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'6px', marginBottom:'12px'}}>
-        {weekDays.map(d => (
-          <div key={d.toISOString()} style={{textAlign:'center', padding:'10px 4px', background:'rgba(255,255,255,0.6)', borderRadius:'12px', border:'1px solid rgba(107,78,124,0.12)'}}>
-            <div style={{fontSize:'10px', color:DEEPP, opacity:0.65, letterSpacing:'1px', textTransform:'uppercase', fontWeight:700}}>{d.toLocaleDateString(undefined, {weekday:'short'})}</div>
-            <div style={{fontSize:'18px', color:DEEPP, fontWeight:800, marginTop:'2px'}}>{d.getDate()}</div>
-          </div>
-        ))}
+        {weekDays.map((d, i) => {
+          const active = activeDayIdx === i;
+          return (
+            <button key={d.toISOString()} onClick={() => setActiveDayIdx(i)}
+              style={{
+                textAlign:'center', padding:'10px 4px',
+                background: active ? `linear-gradient(135deg, ${TEAL}33, ${PRIMARY})` : 'rgba(255,255,255,0.6)',
+                borderRadius:'12px',
+                border: active ? `1px solid ${TEAL}` : '1px solid rgba(107,78,124,0.12)',
+                cursor:'pointer', fontFamily:'inherit',
+              }}>
+              <div style={{fontSize:'10px', color:DEEPP, opacity:0.65, letterSpacing:'1px', textTransform:'uppercase', fontWeight:700}}>{d.toLocaleDateString(undefined, {weekday:'short'})}</div>
+              <div style={{fontSize:'18px', color:DEEPP, fontWeight:800, marginTop:'2px'}}>{d.getDate()}</div>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Slots — Phase 1a stub: show grid of slots, clicking one opens an
-          intent confirmation. Backend POST to existing /concierge/appointments
-          is Phase 1b so the patient side uses the right auth scope. */}
       <Card>
-        <Label>Available slots</Label>
-        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(90px,1fr))', gap:'6px', marginTop:'10px'}}>
-          {SLOTS.slice(0, 16).map(s => (
-            <button key={s.label} style={{
-              background: PRIMARY, border:`1px solid ${TEAL}55`, color: DEEPP,
-              borderRadius:'10px', padding:'10px 6px', fontSize:'12px', fontWeight:700, cursor:'pointer',
-              fontFamily:'inherit',
-            }} onClick={() => alert('Phase 1b will wire this to /concierge/appointments with the patient auth scope.')}>
+        <Label>Available slots · {weekDays[activeDayIdx]?.toLocaleDateString(undefined, {weekday:'long', month:'short', day:'numeric'})}</Label>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(86px,1fr))', gap:'6px', marginTop:'10px'}}>
+          {SLOTS.map(s => (
+            <button key={s.label}
+              onClick={() => setPending({ day: weekDays[activeDayIdx], label: s.label, hour: s.hour, min: s.min })}
+              style={{
+                background: PRIMARY, border:`1px solid ${TEAL}55`, color: DEEPP,
+                borderRadius:'10px', padding:'10px 6px', fontSize:'12px', fontWeight:700, cursor:'pointer',
+                fontFamily:'inherit',
+              }}>
               {s.label}
             </button>
           ))}
         </div>
         <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'12px', lineHeight:1.5, textAlign:'center'}}>
-          Booking confirmations arrive by secure message within minutes. HIPAA notice will appear at confirmation.
+          Slots reflect the calendar — Dr. Anderson will confirm and send a secure video link before your session.
         </div>
       </Card>
+
+      {/* Upcoming bookings */}
+      {bookings.length > 0 && (
+        <Card style={{marginTop:'12px'}}>
+          <Label>Your upcoming sessions</Label>
+          <div style={{display:'flex', flexDirection:'column', gap:'8px', marginTop:'10px'}}>
+            {bookings.slice(0, 6).map(b => {
+              const meta = SERVICES.find(s => s.id === b.service_type);
+              return (
+                <div key={b.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 12px', background:'rgba(255,255,255,0.65)', borderRadius:'12px', border:'1px solid rgba(107,78,124,0.1)'}}>
+                  <div>
+                    <div style={{fontSize:'12px', fontWeight:800, color:DEEPP}}>{meta?.icon} {meta?.label || b.service_type}</div>
+                    <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, marginTop:'2px'}}>{new Date(b.starts_at).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</div>
+                  </div>
+                  <span style={statusPill(b.status)}>{b.status}</span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Pending-confirm modal */}
+      {pending && (
+        <SheetModal onClose={() => setPending(null)}>
+          <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, letterSpacing:'2px', textTransform:'uppercase', fontWeight:800}}>Confirm booking</div>
+          <div style={{fontSize:'20px', fontWeight:800, color:DEEPP, marginTop:'4px'}}>{svcMeta.icon} {svcMeta.label}</div>
+          <div style={{fontSize:'13px', color:DEEPP, marginTop:'10px', lineHeight:1.6}}>
+            {pending.day.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'})} · <b>{pending.label}</b> MST · 30 min
+          </div>
+          <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'10px', lineHeight:1.5}}>{svcMeta.price}. Dr. Anderson will confirm and send a secure video link.</div>
+          <div style={{background:'rgba(232,168,64,0.1)', border:'1px solid rgba(232,168,64,0.35)', borderRadius:'10px', padding:'8px 12px', fontSize:'11px', color:'#8a5a10', marginTop:'12px', lineHeight:1.5}}>
+            ⚠️ Beta: do not share identifying patient information during booking.
+          </div>
+          {error && <div style={{color:'#a02020', fontSize:'12px', marginTop:'10px'}}>{error}</div>}
+          <div style={{display:'flex', gap:'8px', marginTop:'16px'}}>
+            <button onClick={() => setPending(null)} style={{flex:1, ...ghostBtn}}>Cancel</button>
+            <button onClick={confirm} disabled={saving} style={{flex:1, ...solidBtn, opacity: saving ? 0.6 : 1}}>
+              {saving ? 'Booking…' : 'Confirm booking'}
+            </button>
+          </div>
+        </SheetModal>
+      )}
+
+      {/* Success modal */}
+      {confirmed && (
+        <SheetModal onClose={() => setConfirmed(null)}>
+          <div style={{fontSize:'40px', textAlign:'center', marginBottom:'6px'}}>✨</div>
+          <div style={{fontSize:'20px', fontWeight:800, color:DEEPP, textAlign:'center'}}>Session booked</div>
+          <div style={{fontSize:'13px', color:DEEPP, opacity:0.75, textAlign:'center', marginTop:'6px'}}>
+            {new Date(confirmed.starts_at).toLocaleString(undefined, {weekday:'long', month:'long', day:'numeric', hour:'numeric', minute:'2-digit'})}
+          </div>
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.65, textAlign:'center', marginTop:'10px', lineHeight:1.6}}>
+            A confirmation message from Dr. Anderson is on its way to your inbox.
+          </div>
+          <button onClick={() => setConfirmed(null)} style={{...solidBtn, width:'100%', marginTop:'18px'}}>Done</button>
+        </SheetModal>
+      )}
     </div>
   );
 };
 
+const statusPill = (status: string): React.CSSProperties => {
+  const map: Record<string, [string, string]> = {
+    scheduled: ['rgba(42,191,191,0.15)',  '#147070'],
+    completed: ['rgba(112,184,112,0.15)', '#2a7a2a'],
+    canceled:  ['rgba(160,160,160,0.15)', '#808080'],
+    no_show:   ['rgba(224,140,80,0.18)',  '#a85020'],
+  };
+  const [bg, color] = map[status] || ['rgba(107,78,124,0.12)', DEEPP];
+  return { fontSize:'10px', padding:'3px 10px', borderRadius:'999px', background: bg, color, fontWeight:800, letterSpacing:'0.4px', textTransform:'uppercase' };
+};
+
 // ───── ACCOUNT TAB ──────────────────────────────────────────────────────────
 
+interface BillingInvoice { id:string; number:string|null; amount_paid_cents:number; amount_due_cents:number; status:string; created:string|null; hosted_invoice_url:string|null; description:string|null; }
+interface BillingSnapshot { tier:string; tier_label:string; status:string; current_period_end:string|null; total_paid_cents:number; invoices:BillingInvoice[]; upcoming_invoice:{amount_due_cents:number; next_payment_attempt:string|null}|null; }
+
 const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|null}> = ({ API, token, patient }) => {
+  const [billing, setBilling] = useState<BillingSnapshot | null>(null);
+  useEffect(() => {
+    fetch(`${API}/concierge/me/billing`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setBilling(d); })
+      .catch(() => {});
+  }, [API, token]);
+
   const openPortal = async () => {
     try {
       const res = await fetch(`${API}/billing/portal`, { method:'POST', headers: { Authorization: `Bearer ${token}` }});
@@ -445,7 +601,27 @@ const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|nul
       </Card>
 
       <Card style={{marginBottom:'12px'}}>
-        <Label>Billing & invoices</Label>
+        <Label>Billing history</Label>
+        {!billing || billing.invoices.length === 0 ? (
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'8px', lineHeight:1.6}}>
+            No invoices yet. Your first membership charge will appear here.
+          </div>
+        ) : (
+          <div style={{marginTop:'10px', display:'flex', flexDirection:'column', gap:'8px'}}>
+            {billing.invoices.slice(0, 8).map(inv => (
+              <div key={inv.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', background:'rgba(255,255,255,0.55)', borderRadius:'10px', border:'1px solid rgba(107,78,124,0.1)'}}>
+                <div style={{minWidth:0, flex:1}}>
+                  <div style={{fontSize:'12px', fontWeight:700, color:DEEPP, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{inv.description || inv.number || inv.id.slice(-8)}</div>
+                  <div style={{fontSize:'10px', color:DEEPP, opacity:0.65}}>{inv.created ? new Date(inv.created).toLocaleDateString() : ''}</div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:'12px', fontWeight:800, color:DEEPP}}>${((inv.amount_paid_cents || inv.amount_due_cents)/100).toFixed(2)}</div>
+                  <div style={{fontSize:'9px', textTransform:'uppercase', letterSpacing:'0.5px', color: inv.status === 'paid' ? TEAL : '#a02020', fontWeight:700}}>{inv.status}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         <button onClick={openPortal} style={{...smallCtaStyle, marginTop:'10px'}}>Manage payment methods & invoices →</button>
       </Card>
 
@@ -477,16 +653,258 @@ const TierRow: React.FC<{label:string; monthly:string; yearly:string; desc:strin
   </div>
 );
 
-// ───── STUB TAB ─────────────────────────────────────────────────────────────
+// ───── MESSAGES TAB ─────────────────────────────────────────────────────────
 
-const StubTab: React.FC<{title:string; icon:string; blurb:string}> = ({ title, icon, blurb }) => (
-  <div style={{padding:'40px 20px', textAlign:'center'}}>
-    <div style={{fontSize:'46px', marginBottom:'12px', opacity:0.8}}>{icon}</div>
-    <div style={{fontSize:'22px', fontWeight:800, color:DEEPP, marginBottom:'6px'}}>{title}</div>
-    <div style={{fontSize:'13px', color:DEEPP, opacity:0.75, lineHeight:1.7, maxWidth:'420px', margin:'0 auto'}}>{blurb}</div>
-    <div style={{marginTop:'18px', display:'inline-block', padding:'6px 14px', borderRadius:'999px', background:`${TEAL}18`, color: TEAL, fontSize:'10px', fontWeight:800, letterSpacing:'1.5px', textTransform:'uppercase'}}>Live in Phase 1b</div>
-  </div>
-);
+interface PatientMessage { id:number; direction:'outbound'|'inbound'; subject:string; body:string; category:string; read_at:string|null; created_at:string; }
+
+const MSG_CATEGORIES: {id: string; label: string; color: string}[] = [
+  { id: 'general',    label: 'General',    color: DEEPP },
+  { id: 'medical',    label: 'Medical',    color: TEAL },
+  { id: 'lab_review', label: 'Lab Review', color: '#E890B0' },
+  { id: 'meditation', label: 'Meditation', color: '#9E7BD4' },
+  { id: 'billing',    label: 'Billing',    color: '#D4A659' },
+];
+
+const MessagesTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
+  const [messages, setMessages] = useState<PatientMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [category, setCategory] = useState('general');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch(`${API}/concierge/me/messages`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { messages: [] })
+      .then(d => setMessages(d.messages || []))
+      .finally(() => setLoading(false));
+  }, [API, token]);
+  useEffect(() => { load(); }, [load]);
+
+  const send = async () => {
+    setError('');
+    if (!body.trim()) { setError('Type a message first.'); return; }
+    setSending(true);
+    try {
+      const res = await fetch(`${API}/concierge/me/messages`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+        body: JSON.stringify({ subject: subject.trim() || undefined, body: body.trim(), category }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Send failed');
+      setBody(''); setSubject(''); setCategory('general');
+      load();
+    } catch (e: any) { setError(e.message); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <div>
+      <div style={{padding:'18px 4px 8px 4px', display:'flex', justifyContent:'space-between', alignItems:'flex-end', gap:'12px'}}>
+        <div>
+          <div style={{fontSize:'22px', fontWeight:800, color:DEEPP}}>Messages</div>
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'4px'}}>Physician responds within 24 hours.</div>
+        </div>
+        <span style={{fontSize:'10px', fontWeight:800, color: TEAL, background:`${TEAL}18`, padding:'4px 10px', borderRadius:'999px', border:`1px solid ${TEAL}55`, letterSpacing:'0.4px', display:'inline-flex', alignItems:'center', gap:'4px'}}>
+          🔒 End-to-end
+        </span>
+      </div>
+
+      {/* Compose */}
+      <Card style={{marginBottom:'12px'}}>
+        <Label>New message</Label>
+        <div style={{display:'flex', gap:'6px', overflowX:'auto', marginTop:'8px', paddingBottom:'2px'}}>
+          {MSG_CATEGORIES.map(c => {
+            const active = category === c.id;
+            return (
+              <button key={c.id} onClick={() => setCategory(c.id)}
+                style={{
+                  flexShrink:0, padding:'6px 12px', borderRadius:'999px', fontSize:'11px', fontWeight: active ? 800 : 600,
+                  border: active ? `1px solid ${c.color}` : '1px solid rgba(107,78,124,0.15)',
+                  background: active ? `${c.color}1a` : 'rgba(255,255,255,0.7)',
+                  color: active ? c.color : DEEPP, cursor:'pointer', fontFamily:'inherit',
+                }}>{c.label}</button>
+            );
+          })}
+        </div>
+        <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject (optional)"
+          style={{...msgInputStyle, marginTop:'10px'}}/>
+        <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="What's on your mind? (avoid identifying info during beta)"
+          style={{...msgInputStyle, minHeight:'80px', resize:'vertical', marginTop:'8px', fontFamily:'inherit'}}/>
+        {error && <div style={{color:'#a02020', fontSize:'12px', marginTop:'8px'}}>{error}</div>}
+        <button onClick={send} disabled={sending} style={{...solidBtn, width:'100%', marginTop:'10px', opacity: sending ? 0.6 : 1}}>
+          {sending ? 'Sending…' : 'Send securely 🔒'}
+        </button>
+      </Card>
+
+      {/* Thread */}
+      {loading ? (
+        <Card style={{textAlign:'center', color:DEEPP, opacity:0.7, fontSize:'13px', padding:'28px'}}>Loading…</Card>
+      ) : messages.length === 0 ? (
+        <Card style={{textAlign:'center', color:DEEPP, opacity:0.7, padding:'28px'}}>
+          <div style={{fontSize:'32px', marginBottom:'6px'}}>💬</div>
+          <div style={{fontSize:'13px'}}>No messages yet. Send one above to start the conversation.</div>
+        </Card>
+      ) : (
+        <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+          {messages.map(m => {
+            const cat = MSG_CATEGORIES.find(c => c.id === m.category) || MSG_CATEGORIES[0];
+            const fromPhysician = m.direction === 'outbound';
+            return (
+              <div key={m.id} style={{
+                maxWidth:'86%', alignSelf: fromPhysician ? 'flex-start' : 'flex-end',
+                background: fromPhysician ? 'rgba(255,255,255,0.85)' : `linear-gradient(135deg, ${BLUSH}aa, ${ROSE}aa)`,
+                color: fromPhysician ? DEEPP : 'white',
+                borderRadius:'18px',
+                borderTopLeftRadius: fromPhysician ? '4px' : '18px',
+                borderTopRightRadius: fromPhysician ? '18px' : '4px',
+                padding:'12px 14px',
+                boxShadow: CARD_SHADOW,
+                border: fromPhysician ? '1px solid rgba(107,78,124,0.12)' : 'none',
+              }}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'8px', marginBottom:'6px'}}>
+                  <span style={{
+                    fontSize:'9px', fontWeight:800, letterSpacing:'0.5px', textTransform:'uppercase',
+                    padding:'2px 8px', borderRadius:'999px',
+                    background: fromPhysician ? `${cat.color}18` : 'rgba(255,255,255,0.25)',
+                    color: fromPhysician ? cat.color : 'white',
+                  }}>{cat.label}</span>
+                  <span style={{fontSize:'10px', opacity:0.7}}>
+                    {fromPhysician ? 'Dr. Anderson' : 'You'} · {new Date(m.created_at).toLocaleString(undefined,{month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}
+                  </span>
+                </div>
+                {m.subject && <div style={{fontSize:'13px', fontWeight:800, marginBottom:'4px'}}>{m.subject}</div>}
+                <div style={{fontSize:'13px', lineHeight:1.55, whiteSpace:'pre-wrap'}}>{m.body}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ───── LABS TAB ─────────────────────────────────────────────────────────────
+
+interface LabRecord { id:number; filename:string; size_bytes:number; status:'pending'|'reviewed'|'flagged'; flagged:boolean; physician_note:string; uploaded_at:string; reviewed_at:string|null; }
+
+const LabsTab: React.FC<{API:string; token:string}> = ({ API, token }) => {
+  const [labs, setLabs] = useState<LabRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch(`${API}/concierge/me/labs`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { labs: [] })
+      .then(d => setLabs(d.labs || []))
+      .finally(() => setLoading(false));
+  }, [API, token]);
+  useEffect(() => { load(); }, [load]);
+
+  const upload = async (file: File) => {
+    setError('');
+    if (file.size > 25 * 1024 * 1024) { setError('File exceeds 25MB.'); return; }
+    const form = new FormData(); form.append('file', file);
+    setUploading(true);
+    try {
+      const res = await fetch(`${API}/concierge/me/labs`, {
+        method:'POST',
+        headers:{ Authorization:`Bearer ${token}` },
+        body: form,
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Upload failed');
+      load();
+    } catch (e: any) { setError(e.message); }
+    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+
+  return (
+    <div>
+      <div style={{padding:'18px 4px 8px 4px'}}>
+        <div style={{fontSize:'22px', fontWeight:800, color:DEEPP}}>Lab Vault</div>
+        <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'4px'}}>
+          PDF, JPG, or PNG — up to 25MB per file. Dr. Anderson reviews and messages you with results.
+        </div>
+      </div>
+
+      {/* Upload tile */}
+      <button onClick={() => fileRef.current?.click()} disabled={uploading}
+        style={{
+          width:'100%', background:`linear-gradient(135deg, ${PRIMARY}, rgba(255,255,255,0.9))`,
+          border:`2px dashed ${TEAL}66`, borderRadius:'18px', padding:'22px 14px',
+          display:'flex', flexDirection:'column', alignItems:'center', gap:'6px',
+          color:DEEPP, cursor: uploading ? 'wait' : 'pointer', fontFamily:'inherit', marginBottom:'12px', boxShadow: CARD_SHADOW,
+          opacity: uploading ? 0.6 : 1,
+        }}>
+        <span style={{fontSize:'28px'}}>📤</span>
+        <span style={{fontSize:'13px', fontWeight:800}}>{uploading ? 'Uploading…' : 'Upload a lab result'}</span>
+        <span style={{fontSize:'11px', opacity:0.65}}>Every file is stored behind the HIPAA lock at launch.</span>
+      </button>
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+        style={{display:'none'}} onChange={e => e.target.files && e.target.files[0] && upload(e.target.files[0])}/>
+
+      {error && <div style={{background:'rgba(224,80,80,0.1)', border:'1px solid rgba(224,80,80,0.35)', borderRadius:'10px', padding:'8px 12px', color:'#a02020', fontSize:'12px', marginBottom:'10px'}}>{error}</div>}
+
+      {/* List */}
+      {loading ? (
+        <Card style={{textAlign:'center', color:DEEPP, opacity:0.7, fontSize:'13px', padding:'28px'}}>Loading…</Card>
+      ) : labs.length === 0 ? (
+        <Card style={{textAlign:'center', color:DEEPP, opacity:0.7, padding:'28px'}}>
+          <div style={{fontSize:'32px', marginBottom:'6px'}}>🧪</div>
+          <div style={{fontSize:'13px'}}>No labs uploaded yet.</div>
+        </Card>
+      ) : (
+        <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+          {labs.map(lab => <LabRow key={lab.id} lab={lab}/>)}
+        </div>
+      )}
+
+      <div style={{fontSize:'10px', color:DEEPP, opacity:0.6, marginTop:'14px', textAlign:'center', lineHeight:1.5}}>
+        🔒 HIPAA lock — full BAA infrastructure lands before clinical launch. Normal values are shown in teal, flagged values in blush pink once reviewed.
+      </div>
+    </div>
+  );
+};
+
+const LabRow: React.FC<{lab: LabRecord}> = ({ lab }) => {
+  const [expanded, setExpanded] = useState(false);
+  const bytes = lab.size_bytes > 1024*1024 ? `${(lab.size_bytes/1024/1024).toFixed(1)} MB` : `${Math.round(lab.size_bytes/1024)} KB`;
+  const pill = (() => {
+    if (lab.status === 'flagged') return { bg: `${ROSE}22`, color: '#a02060', label: 'Flagged' };
+    if (lab.status === 'reviewed') return { bg: `${TEAL}22`, color: TEAL, label: 'Reviewed' };
+    return { bg: 'rgba(232,168,64,0.18)', color: '#a06810', label: 'Pending' };
+  })();
+  return (
+    <button onClick={() => setExpanded(v => !v)} style={{
+      width:'100%', textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+      background: CARD_BG, backdropFilter:'blur(12px)', border: CARD_BORDER, borderRadius:'16px',
+      padding:'14px', boxShadow: CARD_SHADOW,
+    }}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px'}}>
+        <div style={{minWidth:0, flex:1}}>
+          <div style={{fontSize:'13px', fontWeight:800, color:DEEPP, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{lab.filename}</div>
+          <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'2px'}}>
+            {new Date(lab.uploaded_at).toLocaleDateString()} · {bytes} <span style={{marginLeft:'6px'}}>🔒</span>
+          </div>
+        </div>
+        <span style={{fontSize:'10px', padding:'4px 10px', borderRadius:'999px', background: pill.bg, color: pill.color, fontWeight:800, letterSpacing:'0.4px', textTransform:'uppercase'}}>{pill.label}</span>
+      </div>
+      {expanded && lab.physician_note && (
+        <div style={{marginTop:'12px', padding:'10px 12px', background:`${TEAL}12`, borderRadius:'10px', fontSize:'12px', color:DEEPP, lineHeight:1.6, whiteSpace:'pre-wrap'}}>
+          <div style={{fontSize:'10px', fontWeight:800, letterSpacing:'0.5px', textTransform:'uppercase', color: TEAL, marginBottom:'4px'}}>Dr. Anderson's note</div>
+          {lab.physician_note}
+        </div>
+      )}
+    </button>
+  );
+};
 
 // ───── Utility components ──────────────────────────────────────────────────
 
@@ -510,6 +928,32 @@ const navBtn: React.CSSProperties = {
   borderRadius:'10px', padding:'6px 10px', fontSize:'11px', fontWeight:700,
   color:DEEPP, cursor:'pointer', fontFamily:'inherit',
 };
+const ghostBtn: React.CSSProperties = {
+  background:'rgba(255,255,255,0.85)', border:'1px solid rgba(107,78,124,0.2)',
+  borderRadius:'12px', padding:'12px 16px', fontSize:'13px', fontWeight:700,
+  color:DEEPP, cursor:'pointer', fontFamily:'inherit',
+};
+const solidBtn: React.CSSProperties = {
+  background:`linear-gradient(135deg, ${TEAL}, ${DEEPP})`, border:'none',
+  borderRadius:'12px', padding:'12px 16px', fontSize:'13px', fontWeight:800,
+  color:'white', cursor:'pointer', fontFamily:'inherit',
+};
+const msgInputStyle: React.CSSProperties = {
+  width:'100%', padding:'10px 12px', borderRadius:'10px',
+  border:'1px solid rgba(107,78,124,0.18)',
+  fontSize:'13px', color: DEEPP, background:'rgba(255,255,255,0.7)',
+  outline:'none', boxSizing:'border-box', fontFamily:'inherit',
+};
+
+// Bottom-sheet style modal used by the Book tab's confirm + success flows.
+const SheetModal: React.FC<{onClose:()=>void; children: React.ReactNode}> = ({ onClose, children }) => (
+  <div onClick={onClose} style={{position:'fixed', inset:0, zIndex:2500, background:'rgba(26,13,53,0.45)', backdropFilter:'blur(6px)', display:'flex', alignItems:'flex-end', justifyContent:'center', padding:'0'}}>
+    <div onClick={e => e.stopPropagation()}
+      style={{background:'white', borderRadius:'24px 24px 0 0', width:'100%', maxWidth:'560px', padding:'24px 20px calc(28px + env(safe-area-inset-bottom, 0px)) 20px', boxShadow:'0 -16px 40px rgba(0,0,0,0.18)'}}>
+      {children}
+    </div>
+  </div>
+);
 
 const LoadingShell: React.FC = () => (
   <div style={{minHeight:'100vh', background: BG_GRADIENT, display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'system-ui'}}>

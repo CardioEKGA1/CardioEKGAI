@@ -3090,6 +3090,229 @@ def concierge_habit_checkin(
     return _habit_summary(h, checkins)
 
 
+# ─── Patient-scoped endpoints (the patient PWA) ───────────────────────────
+# These are patient-facing counterparts of the existing owner-only endpoints.
+# A patient logs in with their SoulMD account; if a concierge_patients row is
+# linked to them (via user_id or email match), they get access ONLY to their
+# own data — never another patient's. All bound through the
+# _current_patient_for() helper which raises 404 if there's no link (same
+# "pretend the section doesn't exist" pattern as the owner gate).
+
+from fastapi import UploadFile, File, Form  # imported here so this block stays self-contained
+
+def _current_patient_for(user: User, db: Session) -> ConciergePatient:
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _lookup_concierge_patient_for_user(user, db)
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+    return p
+
+# ───── Bookings ─────
+
+PATIENT_BOOKABLE_TYPES = {"medical_visit", "guided_meditation", "urgent_same_day"}
+
+class PatientBookingRequest(BaseModel):
+    service_type: str       # medical_visit | guided_meditation | urgent_same_day
+    starts_at: str          # ISO 8601
+    duration_min: int | None = None
+    notes: str | None = None
+
+def _bump_visit_counter(p: ConciergePatient, service_type: str, db: Session):
+    """Count a booking against the patient's monthly allowance. Idempotency
+    is not strictly enforced here — Phase 2 will add cancellation-aware
+    reconciliation; for now the physician can manually adjust if needed."""
+    if service_type in ("medical_visit", "urgent_same_day"):
+        p.visits_used = (p.visits_used or 0) + 1
+    elif service_type == "guided_meditation":
+        p.meditations_used = (p.meditations_used or 0) + 1
+    p.updated_at = datetime.utcnow()
+
+@app.get("/concierge/me/bookings")
+def patient_bookings_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    rows = db.query(ConciergeAppointment).filter(
+        ConciergeAppointment.patient_id == p.id,
+    ).order_by(ConciergeAppointment.starts_at.desc()).limit(100).all()
+    return {"bookings": [{
+        "id": a.id,
+        "service_type": a.appointment_type,
+        "starts_at": a.starts_at.isoformat() if a.starts_at else None,
+        "duration_min": a.duration_min,
+        "status": a.status,
+        "notes": a.notes,
+    } for a in rows]}
+
+@app.post("/concierge/me/bookings")
+def patient_bookings_create(
+    data: PatientBookingRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    if data.service_type not in PATIENT_BOOKABLE_TYPES:
+        raise HTTPException(status_code=400, detail=f"service_type must be one of {sorted(PATIENT_BOOKABLE_TYPES)}")
+    try:
+        starts = datetime.fromisoformat(data.starts_at.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid starts_at — use ISO 8601.")
+    dur = max(10, min(int(data.duration_min or 30), 120))
+    # Prevent obvious double-bookings on the same starting slot.
+    existing = db.query(ConciergeAppointment).filter(
+        ConciergeAppointment.patient_id == p.id,
+        ConciergeAppointment.starts_at == starts,
+        ConciergeAppointment.status == "scheduled",
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="You already have a booking at that time.")
+    appt = ConciergeAppointment(
+        patient_id=p.id, starts_at=starts, duration_min=dur,
+        appointment_type=data.service_type, notes=(data.notes or ""), status="scheduled",
+    )
+    db.add(appt)
+    _bump_visit_counter(p, data.service_type, db)
+    db.commit(); db.refresh(appt)
+    return {
+        "id": appt.id,
+        "service_type": appt.appointment_type,
+        "starts_at": appt.starts_at.isoformat(),
+        "duration_min": appt.duration_min,
+        "status": appt.status,
+        "notes": appt.notes,
+    }
+
+# ───── Messages ─────
+
+PATIENT_MESSAGE_CATEGORIES = {"general", "medical", "lab_review", "meditation", "billing"}
+
+class PatientMessageRequest(BaseModel):
+    body: str
+    subject: str | None = None
+    category: str = "general"
+
+@app.get("/concierge/me/messages")
+def patient_messages_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    rows = db.query(ConciergeMessage).filter(
+        ConciergeMessage.patient_id == p.id,
+        ConciergeMessage.direction.in_(["outbound", "inbound"]),  # hide private physician notes
+    ).order_by(ConciergeMessage.created_at.desc()).limit(200).all()
+    # Mark outbound (physician→patient) unread messages as read on list fetch.
+    now = datetime.utcnow()
+    for m in rows:
+        if m.direction == "outbound" and m.read_at is None:
+            m.read_at = now
+    db.commit()
+    return {"messages": [{
+        "id": m.id,
+        "direction": m.direction,
+        "subject": m.subject or "",
+        "body": m.body,
+        "category": m.category or "general",
+        "read_at": m.read_at.isoformat() if m.read_at else None,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    } for m in rows]}
+
+@app.post("/concierge/me/messages")
+def patient_messages_send(
+    data: PatientMessageRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    body = (data.body or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Message body is required.")
+    cat = (data.category or "general").lower()
+    if cat not in PATIENT_MESSAGE_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"category must be one of {sorted(PATIENT_MESSAGE_CATEGORIES)}")
+    m = ConciergeMessage(
+        patient_id=p.id, direction="inbound",
+        subject=(data.subject or "").strip() or None,
+        body=body, category=cat,
+    )
+    db.add(m); db.commit(); db.refresh(m)
+    return {"id": m.id, "created_at": m.created_at.isoformat()}
+
+# ───── Labs ─────
+
+# Cap uploads at 25MB to match the PWA spec. Uploads are base64-encoded into
+# the DB for Phase 1b simplicity; Phase 2 will move to S3/R2.
+LAB_MAX_BYTES = 25 * 1024 * 1024
+LAB_ALLOWED_MIME = {"application/pdf", "image/jpeg", "image/png"}
+LAB_EXT_TO_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+
+@app.get("/concierge/me/labs")
+def patient_labs_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    rows = db.query(ConciergeLabRecord).filter(
+        ConciergeLabRecord.patient_id == p.id,
+    ).order_by(ConciergeLabRecord.uploaded_at.desc()).limit(60).all()
+    return {"labs": [{
+        "id": r.id,
+        "filename": r.filename,
+        "size_bytes": r.size_bytes or 0,
+        "status": r.status or "pending",
+        "flagged": bool(r.flagged),
+        "physician_note": r.physician_note or "",
+        "uploaded_at": r.uploaded_at.isoformat() if r.uploaded_at else None,
+        "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+    } for r in rows]}
+
+@app.get("/concierge/me/billing")
+def patient_billing(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Patient-scoped billing snapshot — reuses the owner billing helper but
+    only ever returns the current user's own row."""
+    p = _current_patient_for(current_user, db)
+    return _billing_snapshot(p)
+
+@app.post("/concierge/me/labs")
+async def patient_labs_upload(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    filename = (file.filename or "").strip() or "upload"
+    ext = os.path.splitext(filename)[1].lower()
+    mime = file.content_type or LAB_EXT_TO_MIME.get(ext, "application/octet-stream")
+    if mime not in LAB_ALLOWED_MIME:
+        raise HTTPException(status_code=400, detail="Allowed types: PDF, JPG, PNG.")
+    # Read with a hard size cap.
+    buf = bytearray()
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > LAB_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="File exceeds 25MB.")
+    import base64 as _b64
+    encoded = _b64.b64encode(bytes(buf)).decode("ascii")
+    rec = ConciergeLabRecord(
+        patient_id=p.id, filename=filename, mime_type=mime,
+        size_bytes=len(buf), status="pending",
+        file_data=encoded,
+    )
+    db.add(rec); db.commit(); db.refresh(rec)
+    return {
+        "id": rec.id, "filename": rec.filename, "size_bytes": rec.size_bytes,
+        "status": rec.status, "uploaded_at": rec.uploaded_at.isoformat(),
+    }
+
+
 # ─── Concierge role resolution + Oracle Card + Lab Vault ──────────────────
 
 # Mountain Time offset — the practice operates in MST. Using a fixed offset
