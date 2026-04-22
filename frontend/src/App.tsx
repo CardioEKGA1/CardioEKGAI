@@ -22,6 +22,7 @@ import PalliativeMDTool from './screens/tools/PalliativeMDTool';
 import LabReadTool from './screens/tools/LabReadTool';
 import CliniScoreTool from './screens/tools/CliniScoreTool';
 import Concierge from './screens/concierge/Concierge';
+import TrialSignupModal from './TrialSignupModal';
 
 export interface EkgResult {
   rhythm: string;
@@ -265,15 +266,19 @@ const App: React.FC = () => {
         const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', antibioticai:'tool_antibioticai', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd', labread:'tool_labread', cliniscore:'tool_cliniscore'};
         if (map[slug]) navigate(map[slug]);
       }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}/>}
-      {screen==='tool_nephroai' && user && <NephroAITool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_rxcheck' && user && <RxCheckTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_antibioticai' && user && <AntibioticAITool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_clinicalnote' && user && <ClinicalNoteTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_xrayread' && user && <XrayReadTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_cerebralai' && user && <CerebralAITool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_palliativemd' && user && <PalliativeMDTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_labread' && user && <LabReadTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
-      {screen==='tool_cliniscore' && user && <CliniScoreTool API={API} token={token} onBack={()=>navigate('dashboard')}/>}
+      {/* Tool screens are accessible WITHOUT auth — the 8 trial tools run
+          one free call per browser via the server-side trial gate. labread
+          and cliniscore still allow 5/day for everyone. Tools themselves
+          handle the 402 from a used-trial server-side. */}
+      {screen==='tool_nephroai'     && <NephroAITool     API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_rxcheck'      && <RxCheckTool      API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_antibioticai' && <AntibioticAITool API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_clinicalnote' && <ClinicalNoteTool API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_xrayread'     && <XrayReadTool     API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_cerebralai'   && <CerebralAITool   API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_palliativemd' && <PalliativeMDTool API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_labread'      && <LabReadTool      API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_cliniscore'   && <CliniScoreTool   API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='concierge' && user && <Concierge API={API} token={token} onBack={()=>navigate('dashboard')}/>}
       {screen==='concierge' && !user && token && (
         <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', color:'#8a6e50', fontSize:'14px'}}>Loading…</div>
@@ -283,6 +288,11 @@ const App: React.FC = () => {
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
       {screen==='paywall' && <Paywall API={API} token={token} onBack={goBack}/>}
+      <TrialSignupModal
+        userAuthenticated={!!user}
+        onSignUp={() => navigate('auth')}
+        onSeePricing={() => navigate(user ? 'dashboard' : 'landing')}
+      />
       <CookieBanner onPrivacy={goPrivacy}/>
     </div>
   );

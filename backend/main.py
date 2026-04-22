@@ -17,6 +17,7 @@ from database import (
     ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
     ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
     ConciergeOraclePull, ConciergeLabRecord, PushSubscription,
+    ToolTrialUse,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
@@ -313,6 +314,90 @@ def gate_tool(user, tool_slug: str, db: Session, cost: float):
         raise HTTPException(status_code=402, detail=f"Subscribe to {tool_slug} or SoulMD Suite to use this tool.")
     # Soft overage model: never block on budget. Overage is tracked in log_usage.
 
+# Tools that offer a one-per-browser free trial before sign-up is required.
+# LabRead + CliniScore are already 5/day free for everyone and stay out of
+# this system.
+TRIAL_ELIGIBLE_TOOLS = {
+    "ekgscan", "nephroai", "xrayread", "rxcheck",
+    "antibioticai", "clinicalnote", "cerebralai", "palliativemd",
+}
+
+def _client_fingerprint(request: Request) -> str:
+    """Stable per-browser fingerprint used for trial enforcement. Not a
+    security boundary — determined users can reset it — just enough
+    friction to prevent casual abuse.
+
+    Hash of: IP (honors X-Forwarded-For), UA, Accept-Language. SHA-256
+    so we never store raw IPs in the DB."""
+    xff = request.headers.get("x-forwarded-for", "") or ""
+    ip = xff.split(",")[0].strip() or (request.client.host if request.client else "")
+    ua = request.headers.get("user-agent", "") or ""
+    al = request.headers.get("accept-language", "") or ""
+    return hashlib.sha256(f"{ip}|{ua}|{al}".encode()).hexdigest()
+
+def _trial_consumed(client_fp: str, tool_slug: str, user_id: int | None, db: Session) -> bool:
+    q = db.query(ToolTrialUse).filter(ToolTrialUse.tool_slug == tool_slug)
+    if user_id is not None:
+        q = q.filter((ToolTrialUse.client_fp == client_fp) | (ToolTrialUse.user_id == user_id))
+    else:
+        q = q.filter(ToolTrialUse.client_fp == client_fp)
+    return db.query(q.exists()).scalar()
+
+def gate_tool_with_trial(user, tool_slug: str, request: Request, db: Session) -> str:
+    """Unified gate used by the 8 tools offering a free trial.
+
+    Returns the "mode" for downstream: superuser | subscriber | trial.
+    - superuser / active subscriber → pass (gate_tool runs its normal
+      subscription-required check).
+    - authenticated non-subscriber or unauthenticated → allow exactly
+      one use per (client fingerprint, tool), record it, then block.
+    """
+    if user and user.is_superuser:
+        return "superuser"
+    if user and has_tool_access(user, tool_slug, db):
+        # Subscribed users never hit the trial rail; normal gate_tool logs
+        # usage + spend through the existing path.
+        gate_tool(user, tool_slug, db, COST_PER_SCAN)
+        return "subscriber"
+    if tool_slug not in TRIAL_ELIGIBLE_TOOLS:
+        # Not in the trial program → require subscription.
+        raise HTTPException(status_code=401 if not user else 402,
+                            detail=f"Sign in and subscribe to {tool_slug} to use this tool.")
+    fp = _client_fingerprint(request)
+    uid = user.id if user else None
+    if _trial_consumed(fp, tool_slug, uid, db):
+        raise HTTPException(
+            status_code=402,
+            detail=f"Your one free {tool_slug} trial has been used. Sign up for unlimited access.",
+        )
+    use = ToolTrialUse(client_fp=fp, tool_slug=tool_slug, user_id=uid)
+    db.add(use); db.commit()
+    return "trial"
+
+
+@app.get("/trial/status")
+def trial_status(request: Request, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Tells the PWA frontend which free trials are still available so the
+    dashboard can order untried tools first. Server-side state is the
+    source of truth — localStorage is used for optimistic UI only."""
+    fp = _client_fingerprint(request)
+    out: dict = {"superuser": False, "subscriber_of": [], "used": [], "eligible": sorted(TRIAL_ELIGIBLE_TOOLS)}
+    if current_user:
+        if current_user.is_superuser:
+            out["superuser"] = True
+            return out
+        for slug in TRIAL_ELIGIBLE_TOOLS:
+            if has_tool_access(current_user, slug, db):
+                out["subscriber_of"].append(slug)
+    uid = current_user.id if current_user else None
+    q = db.query(ToolTrialUse).filter(ToolTrialUse.tool_slug.in_(TRIAL_ELIGIBLE_TOOLS))
+    if uid is not None:
+        q = q.filter((ToolTrialUse.client_fp == fp) | (ToolTrialUse.user_id == uid))
+    else:
+        q = q.filter(ToolTrialUse.client_fp == fp)
+    out["used"] = sorted({u.tool_slug for u in q.all()})
+    return out
+
 MAX_CASES_PER_TOOL = 3
 CASE_RETENTION_DAYS = 90
 
@@ -344,7 +429,11 @@ def save_case(user_id: int, tool_slug: str, title: str, inputs: dict, result: di
         print(f"save_case error: {e}")
         db.rollback()
 
-def log_usage(user: User, tool_slug: str, cost: float, db: Session):
+def log_usage(user: User | None, tool_slug: str, cost: float, db: Session):
+    # Anonymous / trial callers have no row to update — the trial is already
+    # recorded in tool_trial_uses by gate_tool_with_trial.
+    if user is None:
+        return
     now = datetime.utcnow()
     if user.spend_reset_month != now.month:
         user.monthly_spend = 0.0
@@ -780,12 +869,10 @@ def me(current_user: User = Depends(get_current_user)):
 
 @app.post("/analyze")
 @limiter.limit("2/minute")
-async def analyze_ekg(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Please sign in to analyze EKGs")
-    if not current_user.is_subscribed and current_user.scan_count >= 1:
-        raise HTTPException(status_code=402, detail="Free scan used. Please upgrade to continue.")
-    # Soft overage: never block on budget here.
+async def analyze_ekg(request: Request, file: UploadFile = File(...), current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Trial gate replaces the old sign-in-required + 1-free-scan logic.
+    # Gives each browser one EKGScan without sign-up, then prompts signup.
+    mode = gate_tool_with_trial(current_user, "ekgscan", request, db)
     if file.content_type not in ["image/jpeg", "image/png", "image/jpg", "application/pdf"]:
         raise HTTPException(status_code=400, detail="Only JPEG PNG and PDF files are allowed")
     contents = await file.read()
@@ -811,11 +898,13 @@ async def analyze_ekg(request: Request, file: UploadFile = File(...), current_us
     text = response.content[0].text.strip()
     match = re.search(r"\{.*\}", text, re.DOTALL)
     result = json.loads(match.group() if match else text)
-    current_user.scan_count += 1
-    log_usage(current_user, "ekgscan", COST_PER_SCAN, db)
-    rhythm = (result.get("rhythm") if isinstance(result, dict) else None) or "EKG"
-    save_case(current_user.id, "ekgscan", f"EKG · {str(rhythm)[:40]}", {"filename": file.filename}, result, db)
-    return result
+    if current_user:
+        current_user.scan_count += 1
+        log_usage(current_user, "ekgscan", COST_PER_SCAN, db)
+        if mode != "trial":
+            rhythm = (result.get("rhythm") if isinstance(result, dict) else None) or "EKG"
+            save_case(current_user.id, "ekgscan", f"EKG · {str(rhythm)[:40]}", {"filename": file.filename}, result, db)
+    return {**result, "_trial_mode": mode == "trial"}
 
 @app.post("/chat")
 @limiter.limit("20/minute")
@@ -1049,8 +1138,8 @@ class PalliativeRequest(BaseModel):
 
 @app.post("/tools/nephroai/analyze")
 @limiter.limit("10/minute")
-def nephroai_analyze(request: Request, data: NephroRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "nephroai", db, COST_PER_SCAN)
+def nephroai_analyze(request: Request, data: NephroRequest, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    mode = gate_tool_with_trial(current_user, "nephroai", request, db)
     sub = data.sub_tool.lower().replace("-", "_")
     if sub not in NEPHRO_SUBTOOLS:
         raise HTTPException(status_code=400, detail=f"Unknown sub_tool '{data.sub_tool}'. Valid: {sorted(NEPHRO_SUBTOOLS.keys())}")
@@ -1061,14 +1150,15 @@ def nephroai_analyze(request: Request, data: NephroRequest, current_user: User =
         print(f"nephroai[{sub}] error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, f"nephroai:{sub}", COST_PER_SCAN, db)
-    ctx = (data.inputs or {}).get("clinical_context") or (data.inputs or {}).get("clinical_picture") or (data.inputs or {}).get("clinical_scenario") or ""
-    save_case(current_user.id, "nephroai", f"{sub.upper()} · {str(ctx)[:60]}" if ctx else f"{sub.upper()} case", data.inputs or {}, result, db)
-    return result
+    if current_user and mode != "trial":
+        ctx = (data.inputs or {}).get("clinical_context") or (data.inputs or {}).get("clinical_picture") or (data.inputs or {}).get("clinical_scenario") or ""
+        save_case(current_user.id, "nephroai", f"{sub.upper()} · {str(ctx)[:60]}" if ctx else f"{sub.upper()} case", data.inputs or {}, result, db)
+    return {**result, "_trial_mode": mode == "trial"}
 
 @app.post("/tools/rxcheck/analyze")
 @limiter.limit("10/minute")
-def rxcheck_analyze(request: Request, data: RxCheckRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "rxcheck", db, COST_PER_SCAN)
+def rxcheck_analyze(request: Request, data: RxCheckRequest, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    mode = gate_tool_with_trial(current_user, "rxcheck", request, db)
     meds = [m.strip() for m in (data.medications or []) if m and m.strip()]
     if not meds:
         raise HTTPException(status_code=400, detail="Provide at least one medication.")
@@ -1079,14 +1169,15 @@ def rxcheck_analyze(request: Request, data: RxCheckRequest, current_user: User =
         print(f"rxcheck error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, "rxcheck", COST_PER_SCAN, db)
-    title = f"{len(meds)} meds" + (f" · {meds[0][:30]}" if meds else "")
-    save_case(current_user.id, "rxcheck", title, {"medications": meds}, result, db)
-    return result
+    if current_user and mode != "trial":
+        title = f"{len(meds)} meds" + (f" · {meds[0][:30]}" if meds else "")
+        save_case(current_user.id, "rxcheck", title, {"medications": meds}, result, db)
+    return {**result, "_trial_mode": mode == "trial"}
 
 @app.post("/tools/antibioticai/analyze")
 @limiter.limit("10/minute")
-def antibioticai_analyze(request: Request, data: AntibioticAIRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "antibioticai", db, COST_PER_SCAN)
+def antibioticai_analyze(request: Request, data: AntibioticAIRequest, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    mode = gate_tool_with_trial(current_user, "antibioticai", request, db)
     if not data.infection_site or not data.infection_site.strip():
         raise HTTPException(status_code=400, detail="infection_site is required.")
     user_input = "Clinical inputs:\n" + json.dumps(data.dict(), indent=2)
@@ -1096,13 +1187,14 @@ def antibioticai_analyze(request: Request, data: AntibioticAIRequest, current_us
         print(f"antibioticai error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, "antibioticai", COST_PER_SCAN, db)
-    save_case(current_user.id, "antibioticai", data.infection_site[:70], data.dict(exclude_none=True), result, db)
-    return result
+    if current_user and mode != "trial":
+        save_case(current_user.id, "antibioticai", data.infection_site[:70], data.dict(exclude_none=True), result, db)
+    return {**result, "_trial_mode": mode == "trial"}
 
 @app.post("/tools/clinicalnote/generate")
 @limiter.limit("10/minute")
-def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "clinicalnote", db, COST_PER_SCAN)
+def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    mode = gate_tool_with_trial(current_user, "clinicalnote", request, db)
 
     # Prior Auth Letter: different required fields than a regular note.
     if is_prior_auth_note(data.note_type):
@@ -1125,24 +1217,27 @@ def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_u
             print(f"prior_auth error: {e}")
             raise HTTPException(status_code=502, detail="AI letter generation failed. Please retry.")
         log_usage(current_user, "clinicalnote", COST_PER_SCAN, db)
-        save_case(
-            current_user.id, "clinicalnote",
-            f"Prior Auth · {med[:30]} for {dx[:30]}",
-            {"note_type": "Prior Auth Letter", "medication_name": med, "diagnosis": dx,
-             "justification": data.justification, "insurance_type": data.insurance_type, "bullets": data.bullets},
-            result, db,
-        )
-        return result
+        if current_user and mode != "trial":
+            save_case(
+                current_user.id, "clinicalnote",
+                f"Prior Auth · {med[:30]} for {dx[:30]}",
+                {"note_type": "Prior Auth Letter", "medication_name": med, "diagnosis": dx,
+                 "justification": data.justification, "insurance_type": data.insurance_type, "bullets": data.bullets},
+                result, db,
+            )
+        return {**result, "_trial_mode": mode == "trial"}
 
     # Regular clinical note path.
     if not data.bullets or not data.bullets.strip():
         raise HTTPException(status_code=400, detail="Bullet points are required.")
     style_key = (data.style or "standard").lower().replace("-", "_").replace(" ", "_")
-    if style_key in CLINICALNOTE_STYLE and current_user.note_style_preference != style_key:
+    if current_user and style_key in CLINICALNOTE_STYLE and current_user.note_style_preference != style_key:
         current_user.note_style_preference = style_key
         db.commit()
     my_style_text: str | None = None
     if style_key == "my_style":
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Sign in to use your learned personal style.")
         sp = db.query(UserStyleProfile).filter(UserStyleProfile.user_id == current_user.id).first()
         if not sp or not (sp.profile_text or "").strip():
             raise HTTPException(status_code=400, detail="No personal style learned yet. Paste 3-5 of your notes in ClinicalNote → Settings → My Style first.")
@@ -1155,8 +1250,9 @@ def clinicalnote_generate(request: Request, data: ClinicalNoteRequest, current_u
         print(f"clinicalnote error: {e}")
         raise HTTPException(status_code=502, detail="AI note generation failed. Please retry.")
     log_usage(current_user, "clinicalnote", COST_PER_SCAN, db)
-    save_case(current_user.id, "clinicalnote", f"{data.note_type} · {(data.bullets or '')[:50]}", {"note_type": data.note_type, "style": data.style, "bullets": data.bullets}, result, db)
-    return result
+    if current_user and mode != "trial":
+        save_case(current_user.id, "clinicalnote", f"{data.note_type} · {(data.bullets or '')[:50]}", {"note_type": data.note_type, "style": data.style, "bullets": data.bullets}, result, db)
+    return {**result, "_trial_mode": mode == "trial"}
 
 
 # ───── ClinicalNote AI · Personal Style Learning ───────────────────────────
@@ -1242,8 +1338,8 @@ def clinicalnote_style_delete(current_user: User = Depends(get_current_user), db
 
 @app.post("/tools/xrayread/analyze")
 @limiter.limit("5/minute")
-async def xrayread_analyze(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "xrayread", db, COST_PER_SCAN)
+async def xrayread_analyze(request: Request, file: UploadFile = File(...), current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    mode = gate_tool_with_trial(current_user, "xrayread", request, db)
     ct = (file.content_type or "").lower()
     if ct not in ("image/jpeg", "image/jpg", "image/png", "application/pdf"):
         raise HTTPException(status_code=400, detail="JPEG, PNG, or PDF only.")
@@ -1256,13 +1352,14 @@ async def xrayread_analyze(request: Request, file: UploadFile = File(...), curre
         print(f"xrayread error: {e}")
         raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
     log_usage(current_user, "xrayread", COST_PER_SCAN, db)
-    save_case(current_user.id, "xrayread", f"X-ray · {(file.filename or 'study')[:50]}", {"filename": file.filename}, result, db)
-    return result
+    if current_user and mode != "trial":
+        save_case(current_user.id, "xrayread", f"X-ray · {(file.filename or 'study')[:50]}", {"filename": file.filename}, result, db)
+    return {**result, "_trial_mode": mode == "trial"}
 
 @app.post("/tools/cerebralai/analyze")
 @limiter.limit("3/minute")
-async def cerebralai_analyze(request: Request, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "cerebralai", db, COST_PER_SCAN)
+async def cerebralai_analyze(request: Request, file: UploadFile = File(...), current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    mode = gate_tool_with_trial(current_user, "cerebralai", request, db)
     ct = (file.content_type or "").lower()
     name = (file.filename or "").lower()
     is_video = ct.startswith("video/") or name.endswith((".mp4", ".mov", ".m4v", ".webm"))
@@ -1313,8 +1410,9 @@ async def cerebralai_analyze(request: Request, file: UploadFile = File(...), cur
     total_cost = COST_PER_SCAN * len(frames)
     if len(frames) == 1:
         log_usage(current_user, "cerebralai", total_cost, db)
-        save_case(current_user.id, "cerebralai", f"CerebralAI · {(file.filename or 'study')[:45]}", {"filename": file.filename, "type": ct, "frames": 1}, per_frame_results[0], db)
-        return per_frame_results[0]
+        if current_user and mode != "trial":
+            save_case(current_user.id, "cerebralai", f"CerebralAI · {(file.filename or 'study')[:45]}", {"filename": file.filename, "type": ct, "frames": 1}, per_frame_results[0], db)
+        return {**per_frame_results[0], "_trial_mode": mode == "trial"}
 
     try:
         consolidated = call_claude_json_text(
@@ -1329,15 +1427,16 @@ async def cerebralai_analyze(request: Request, file: UploadFile = File(...), cur
 
     consolidated.setdefault("frame_count", len(frames))
     log_usage(current_user, "cerebralai", total_cost, db)
-    save_case(current_user.id, "cerebralai", f"CerebralAI · {(file.filename or 'study')[:40]} ({len(frames)}f)", {"filename": file.filename, "type": ct, "frames": len(frames)}, consolidated, db)
-    return consolidated
+    if current_user and mode != "trial":
+        save_case(current_user.id, "cerebralai", f"CerebralAI · {(file.filename or 'study')[:40]} ({len(frames)}f)", {"filename": file.filename, "type": ct, "frames": len(frames)}, consolidated, db)
+    return {**consolidated, "_trial_mode": mode == "trial"}
 
 PALLIATIVE_CONVERSATION_TYPES = {"goals_of_care", "prognosis", "code_status", "hospice", "family_meeting", "withdrawing_treatment", "pediatric"}
 
 @app.post("/tools/palliativemd/analyze")
 @limiter.limit("10/minute")
-def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    gate_tool(current_user, "palliativemd", db, COST_PER_SCAN)
+def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    mode = gate_tool_with_trial(current_user, "palliativemd", request, db)
     ct = (data.conversation_type or "").lower().replace("-", "_").replace(" ", "_")
     if ct not in PALLIATIVE_CONVERSATION_TYPES:
         raise HTTPException(status_code=400, detail=f"Unknown conversation_type. Valid: {sorted(PALLIATIVE_CONVERSATION_TYPES)}")
@@ -1359,8 +1458,9 @@ def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user
         print(f"palliativemd error: {e}")
         raise HTTPException(status_code=502, detail="AI guidance failed. Please retry.")
     log_usage(current_user, f"palliativemd:{ct}", COST_PER_SCAN, db)
-    save_case(current_user.id, "palliativemd", f"{ct.replace('_',' ')} · {(data.text or '')[:50]}", data.dict(exclude_none=True), result, db)
-    return result
+    if current_user and mode != "trial":
+        save_case(current_user.id, "palliativemd", f"{ct.replace('_',' ')} · {(data.text or '')[:50]}", data.dict(exclude_none=True), result, db)
+    return {**result, "_trial_mode": mode == "trial"}
 
 # ─── LabRead ──────────────────────────────────────────────────────────────────
 

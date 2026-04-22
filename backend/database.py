@@ -253,6 +253,14 @@ class ConciergeLabRecord(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow, index=True)
     reviewed_at = Column(DateTime, nullable=True)
 
+class ToolTrialUse(Base):
+    __tablename__ = "tool_trial_uses"
+    id = Column(Integer, primary_key=True, index=True)
+    client_fp = Column(String, index=True, nullable=False)  # sha256 of IP + UA
+    tool_slug = Column(String, index=True, nullable=False)
+    user_id = Column(Integer, nullable=True, index=True)    # set if an auth'd non-subscriber consumed the trial
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 class PushSubscription(Base):
     __tablename__ = "push_subscriptions"
     id = Column(Integer, primary_key=True, index=True)

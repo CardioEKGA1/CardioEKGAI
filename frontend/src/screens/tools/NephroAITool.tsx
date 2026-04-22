@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { ToolShell, ToolResult, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL, WORDMARK } from './shared';
 import DictationButton from '../../DictationButton';
 import SmartUnitInput, { Unit } from '../../SmartUnitInput';
+import { notifyTrialUsed } from '../../trialHelpers';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -181,6 +182,7 @@ const NephroAITool: React.FC<Props> = ({ API, token, onBack }) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Analysis failed');
       setResult(data);
+      if (data._trial_mode) notifyTrialUsed('nephroai');
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   };

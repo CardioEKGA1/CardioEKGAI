@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ToolShell, CARD, LABEL, INPUT, BTN_PRIMARY, FIELD_LABEL, WORDMARK } from './shared';
 import DictationButton from '../../DictationButton';
+import { notifyTrialUsed } from '../../trialHelpers';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -164,6 +165,7 @@ const ClinicalNoteTool: React.FC<Props> = ({ API, token, onBack }) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Generation failed');
       setResult(data);
+      if (data._trial_mode) notifyTrialUsed('clinicalnote');
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   };

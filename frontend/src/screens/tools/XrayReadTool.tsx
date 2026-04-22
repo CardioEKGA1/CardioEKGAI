@@ -1,6 +1,7 @@
 // © 2026 SoulMD, LLC. All rights reserved.
 import React, { useState, useRef } from 'react';
 import { ToolShell, ToolResult, CARD, LABEL, BTN_PRIMARY } from './shared';
+import { notifyTrialUsed } from '../../trialHelpers';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -39,6 +40,7 @@ const XrayReadTool: React.FC<Props> = ({ API, token, onBack }) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Analysis failed');
       setResult(data);
+      if (data._trial_mode) notifyTrialUsed('xrayread');
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   };

@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { ToolShell, ToolResult, CARD, LABEL, INPUT, BTN_PRIMARY } from './shared';
 import DictationButton from '../../DictationButton';
 import DrugSearchInput, { Medication, formatMedication } from '../../DrugSearchInput';
+import { notifyTrialUsed } from '../../trialHelpers';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -33,6 +34,7 @@ const RxCheckTool: React.FC<Props> = ({ API, token, onBack }) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Analysis failed');
       setResult(data);
+      if (data._trial_mode) notifyTrialUsed('rxcheck');
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   };

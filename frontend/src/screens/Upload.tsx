@@ -2,6 +2,7 @@
 import React, { useState, useRef } from 'react';
 import { EkgResult, User } from '../App';
 import ComplianceDisclaimer from '../ComplianceDisclaimer';
+import { notifyTrialUsed } from '../trialHelpers';
 
 interface Props { API: string; token: string; user: User | null; onResult: (r: EkgResult, url: string) => void; onPaywall: () => void; onLogout: () => void; onSignUp: () => void; }
 
@@ -12,21 +13,26 @@ const Upload: React.FC<Props> = ({ API, token, user, onResult, onPaywall, onLogo
   const inputRef = useRef<HTMLInputElement>(null);
 
   const analyze = async (file: File) => {
-    if (!user) { onSignUp(); return; }
+    // Anonymous users are allowed through — they get one free trial via the
+    // server-side gate. 402 responses route differently based on auth state.
     setLoading(true); setError('');
     const url = URL.createObjectURL(file);
     const form = new FormData();
     form.append('file', file);
     try {
-      const res = await fetch(`${API}/analyze`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form
-      });
-      if (res.status === 402) { onPaywall(); return; }
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(`${API}/analyze`, { method: 'POST', headers, body: form });
+      if (res.status === 402) {
+        // "Trial used" for anon OR "subscription required" for signed-in
+        // non-subscriber. First group → sign up; second → paywall.
+        if (!user) onSignUp(); else onPaywall();
+        return;
+      }
       if (res.status === 401) { onSignUp(); return; }
       if (!res.ok) throw new Error('Analysis failed');
       const data = await res.json();
+      if (data._trial_mode) notifyTrialUsed('ekgscan');
       onResult(data, url);
     } catch { setError('Analysis failed. Please try again.'); }
     finally { setLoading(false); }

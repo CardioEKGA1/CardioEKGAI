@@ -34,6 +34,27 @@ const TOOLS: Tool[] = [
 
 const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','xrayread','cerebralai','palliativemd','labread','cliniscore']);
 
+// The 8 tools with the 1-use-free-trial model. labread + cliniscore are
+// already 5/day free for everyone so they stay out of the trial system.
+const TRIAL_TOOLS = new Set(['ekgscan','nephroai','xrayread','rxcheck','antibioticai','clinicalnote','cerebralai','palliativemd']);
+
+const TRIAL_LS_KEY = 'soulmd_trials_v1';
+
+const readTrialsLocal = (): Record<string, boolean> => {
+  try {
+    const raw = localStorage.getItem(TRIAL_LS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed ? parsed : {};
+  } catch { return {}; }
+};
+const writeTrialsLocal = (next: Record<string, boolean>) => {
+  try { localStorage.setItem(TRIAL_LS_KEY, JSON.stringify(next)); } catch {}
+};
+export const markTrialUsed = (slug: string) => {
+  writeTrialsLocal({ ...readTrialsLocal(), [slug]: true });
+};
+
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'20px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)'};
 const BTN: React.CSSProperties = {border:'1px solid rgba(122,176,240,0.3)',borderRadius:'10px',padding:'6px 10px',fontSize:'11px',fontWeight:'700',cursor:'pointer',background:'rgba(255,255,255,0.85)',color:'#4a7ad0',flex:1};
@@ -63,6 +84,12 @@ interface AccessResp {
   overage_per_call: number;
   note_style_preference: string;
 }
+interface TrialStatus {
+  superuser: boolean;
+  subscriber_of: string[];
+  used: string[];
+  eligible: string[];
+}
 interface UsageStats {
   per_tool_count: Record<string, number>;
   recent_tools: { tool_slug: string; last_used: string | null }[];
@@ -84,6 +111,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const [access, setAccess] = useState<AccessResp | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [cases, setCases] = useState<CasesResp | null>(null);
+  const [trial, setTrial] = useState<TrialStatus | null>(null);
   const [caseFilter, setCaseFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
@@ -102,7 +130,25 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       fetch(`${API}/tools/access`, { headers: h }).then(r => r.ok ? r.json() : null),
       fetch(`${API}/tools/usage-stats`, { headers: h }).then(r => r.ok ? r.json() : null),
       fetch(`${API}/cases`, { headers: h }).then(r => r.ok ? r.json() : null),
-    ]).then(([a, u, c]) => { if (a) setAccess(a); if (u) setUsage(u); if (c) setCases(c); }).catch(()=>{}).finally(()=>setLoading(false));
+      // Trial status endpoint is unauth'd-safe but we still send the bearer so
+      // authenticated non-subscribers get their per-user trial usage folded in.
+      fetch(`${API}/trial/status`, { headers: h }).then(r => r.ok ? r.json() : null),
+    ]).then(([a, u, c, tr]) => {
+      if (a) setAccess(a);
+      if (u) setUsage(u);
+      if (c) setCases(c);
+      if (tr) {
+        setTrial(tr);
+        // Sync server state into localStorage so the post-use lock persists
+        // if the patient returns before the next server fetch.
+        const local = readTrialsLocal();
+        let changed = false;
+        for (const slug of tr.used || []) {
+          if (!local[slug]) { local[slug] = true; changed = true; }
+        }
+        if (changed) writeTrialsLocal(local);
+      }
+    }).catch(()=>{}).finally(()=>setLoading(false));
   }, [API, token]);
 
   const deleteCase = async (id: number) => {
@@ -221,10 +267,34 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const suiteMonthly = access?.tiers?.suite === 'monthly';
   const lockedCount = TOOLS.filter(t => !hasAccess(t.slug)).length;
 
+  // Trial state resolution: server is source of truth; localStorage is a
+  // fast fallback used during the post-use round trip.
+  const localTrialUsed = readTrialsLocal();
+  const serverTrialUsed = new Set(trial?.used || []);
+  const serverSubscriberOf = new Set(trial?.subscriber_of || []);
+  const trialActive = (slug: string): 'untried'|'used'|'na' => {
+    if (!TRIAL_TOOLS.has(slug)) return 'na';
+    if (isSuper || serverSubscriberOf.has(slug) || hasAccess(slug)) return 'na';
+    if (serverTrialUsed.has(slug) || localTrialUsed[slug]) return 'used';
+    return 'untried';
+  };
+
   const q = search.trim().toLowerCase();
-  const visibleTools = q
+  const filtered = q
     ? TOOLS.filter(t => (t.name + ' ' + t.desc + ' ' + t.keywords).toLowerCase().includes(q))
     : TOOLS;
+  // Reorder: untried-trial tools first (free invitation), then
+  // subscribed/accessible tools, then used-trial tools (locked), then
+  // the rest. labread + cliniscore (always free) slot into the
+  // "accessible" bucket.
+  const rank = (t: Tool): number => {
+    const s = trialActive(t.slug);
+    if (s === 'untried') return 0;
+    if (hasAccess(t.slug) || t.free) return 1;
+    if (s === 'used') return 2;
+    return 3;
+  };
+  const visibleTools = [...filtered].sort((a, b) => rank(a) - rank(b));
 
   return (
     <div style={{minHeight:'100vh', background:'linear-gradient(135deg, #dce8fb 0%, #ede8fb 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif'}}>
@@ -378,11 +448,19 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
             const yLoading = checkoutLoading === `${t.slug}_yearly`;
             const usedCount = usage?.per_tool_count?.[t.slug] ?? 0;
             const fb = feedbackSent[t.slug];
+            const trialState = trialActive(t.slug);
+            const warmBorder = trialState === 'untried'
+              ? '1px solid rgba(112,184,112,0.45)'
+              : '1px solid rgba(255,255,255,0.9)';
             return (
-              <div key={t.slug} style={{...CARD, display:'flex', flexDirection:'column', gap:'8px', opacity: active ? 1 : 0.92, position:'relative'}}>
+              <div key={t.slug} style={{...CARD, display:'flex', flexDirection:'column', gap:'8px', opacity: active ? 1 : 0.92, position:'relative', border: warmBorder}}>
                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
                   <div style={{fontSize:'32px', filter: active ? 'none' : 'grayscale(0.5)'}}>{t.icon}</div>
-                  {!active && <span style={{fontSize:'16px', opacity:0.7}} aria-label="locked">🔒</span>}
+                  {trialState === 'untried' ? (
+                    <span style={{fontSize:'10px', fontWeight:800, letterSpacing:'0.5px', textTransform:'uppercase', background:'linear-gradient(135deg,#70b870,#4a9a4a)', color:'white', borderRadius:'999px', padding:'3px 10px', boxShadow:'0 4px 10px rgba(74,154,74,0.25)'}}>Try Free</span>
+                  ) : trialState === 'used' ? (
+                    <span style={{fontSize:'10px', fontWeight:700, letterSpacing:'0.4px', textTransform:'uppercase', background:'rgba(160,160,160,0.18)', color:'#6a6a6a', borderRadius:'999px', padding:'3px 10px', display:'inline-flex', alignItems:'center', gap:'4px'}}>🔒 Trial used</span>
+                  ) : (!active && <span style={{fontSize:'16px', opacity:0.7}} aria-label="locked">🔒</span>)}
                 </div>
                 <div style={{fontSize:'16px', fontWeight:'800', color:'#1a2a4a'}}>{t.name}</div>
                 <div style={{fontSize:'13px', color:'#6a8ab0', lineHeight:'1.55', flex:1}}>{t.desc}</div>
@@ -408,6 +486,23 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
                   ) : (
                     <button disabled style={{background:'rgba(240,246,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'12px', padding:'10px', fontSize:'12px', fontWeight:'700', color:'#8aa0c0', cursor:'default'}}>UI launching soon</button>
                   )
+                ) : trialState === 'untried' ? (
+                  <div style={{display:'flex', flexDirection:'column', gap:'6px', marginTop:'auto'}}>
+                    <div style={{fontSize:'11px', color:'#4a9a4a', fontWeight:700, letterSpacing:'0.3px'}}>1 free try — no signup needed</div>
+                    <button
+                      onClick={() => t.slug === 'ekgscan' ? onOpenEkgscan() : onOpenTool(t.slug)}
+                      style={{background:'linear-gradient(135deg,#70b870,#4a9a4a)', border:'none', borderRadius:'12px', padding:'10px', fontSize:'13px', fontWeight:800, color:'white', cursor:'pointer', boxShadow:'0 6px 14px rgba(74,154,74,0.25)'}}>
+                      Try {t.name} free →
+                    </button>
+                  </div>
+                ) : trialState === 'used' ? (
+                  <div style={{display:'flex', flexDirection:'column', gap:'6px', marginTop:'auto'}}>
+                    <div style={{fontSize:'11px', color:'#8a7040', fontWeight:600}}>You've used your free {t.name} trial.</div>
+                    <div style={{display:'flex', gap:'6px'}}>
+                      <button onClick={()=>subscribe(t.slug,'monthly')} disabled={mLoading} style={{...BTN, opacity: mLoading ? 0.6 : 1, flex:1}}>{mLoading ? '...' : `${money(t.monthly)}/mo`}</button>
+                      <button onClick={()=>subscribe(t.slug,'yearly')} disabled={yLoading} style={{...BTN, background:WORDMARK, border:'none', color:'white', opacity: yLoading ? 0.6 : 1, flex:1}}>{yLoading ? '...' : `${money(t.yearly)}/yr`}</button>
+                    </div>
+                  </div>
                 ) : t.free ? (
                   <div style={{display:'flex', flexDirection:'column', gap:'6px', marginTop:'auto'}}>
                     <div style={{fontSize:'12px', color:'#a06810', fontWeight:600}}>Daily free limit reached</div>
