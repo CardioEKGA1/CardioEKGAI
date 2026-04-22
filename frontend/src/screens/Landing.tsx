@@ -141,11 +141,11 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
           <div style={{background:'rgba(255,255,255,0.9)', borderRadius:'22px', padding:'28px 24px', border:'1px solid rgba(122,176,240,0.35)', boxShadow:'0 6px 22px rgba(100,130,200,0.1)', display:'flex', flexDirection:'column'}}>
             <div style={{fontSize:'12px', fontWeight:700, color:'#4a7ad0', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>Starter Bundle</div>
             <div style={{fontSize:'36px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$58.88<span style={{fontSize:'15px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
-            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>Mix & match — build your kit</div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>or $499/year — mix & match</div>
             <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.85}}>
               <li>✓ All 4 basic tools included</li>
               <li>✓ Pick 1 premium tool</li>
-              <li>✓ Priority queue on busy hours</li>
+              <li>✓ $15/mo AI budget</li>
               <li>✓ Cancel or swap anytime</li>
             </ul>
             <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>
@@ -156,11 +156,11 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
           <div style={{background:'rgba(255,255,255,0.9)', borderRadius:'22px', padding:'28px 24px', border:'1px solid rgba(155,143,232,0.4)', boxShadow:'0 6px 22px rgba(100,130,200,0.1)', display:'flex', flexDirection:'column'}}>
             <div style={{fontSize:'12px', fontWeight:700, color:'#7862d4', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>Clinical Bundle</div>
             <div style={{fontSize:'36px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$55.55<span style={{fontSize:'15px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
-            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>Specialist-weighted pick</div>
+            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>or $444/year — specialist-weighted</div>
             <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.85}}>
               <li>✓ Pick 2 premium tools</li>
               <li>✓ Pick 2 basic tools</li>
-              <li>✓ Priority queue on busy hours</li>
+              <li>✓ $20/mo AI budget</li>
               <li>✓ Cancel or swap anytime</li>
             </ul>
             <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>
