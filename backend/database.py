@@ -201,11 +201,19 @@ class ConciergeMeditation(Base):
     __tablename__ = "concierge_meditations"
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String)
-    category = Column(String)  # breathwork | body_scan | visualization | energy_healing | sleep | stress
+    category = Column(String)  # one of MEDITATION_CATEGORIES or a library slug (e.g. divine_light_healing)
     description = Column(String, default="")
     duration_min = Column(Integer, default=10)
     script = Column(String, default="")  # text
     audio_url = Column(String, nullable=True)
+    # Library fields — populated by the Claude-generated 2,000-meditation
+    # seed (backend/meditations.json). Stay null for physician-custom
+    # meditations entered via the Meditations section UI.
+    difficulty = Column(String, nullable=True)      # Beginner | Intermediate | Advanced
+    affirmations = Column(JSON, nullable=True)      # list of strings
+    tags = Column(JSON, nullable=True)              # list of lowercase tags for physician search
+    physician_notes = Column(String, nullable=True) # "when to prescribe this"
+    source = Column(String, default="manual")       # "manual" | "library"
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class ConciergeMeditationAssignment(Base):
@@ -330,6 +338,13 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS selected_tools JSON"))
         conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS related_id INTEGER"))
         conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS related_kind VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS difficulty VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS affirmations JSON"))
+        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS tags JSON"))
+        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS physician_notes VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual'"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditations_source   ON concierge_meditations(source)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditations_category ON concierge_meditations(category)"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 
