@@ -8,6 +8,7 @@
 // glow and space for the patient to sit.
 import React, { useCallback, useEffect, useState } from 'react';
 import ChoKuRei from './ChoKuRei';
+import { shareOracleCard } from './shareOracleCard';
 
 interface OracleCardData {
   id: number; category: string;
@@ -152,7 +153,6 @@ const OracleCard: React.FC<Props> = ({ API, token, userName, initialStep, onClos
           card={data}
           onSaved={(updated) => setData(updated)}
           onBookMeditation={onBookMeditation}
-          onShare={() => {/* Phase 1c#4 */}}
         />
       )}
     </div>
@@ -334,11 +334,27 @@ const REFLECTION_PROMPTS = [
   'What is one small action this card is calling you toward?',
 ];
 
-const ReflectionStep: React.FC<{API:string; token:string; card: OracleCardData; onSaved: (updated: OracleCardData) => void; onBookMeditation?: () => void; onShare: () => void}> = ({ API, token, card, onSaved, onBookMeditation, onShare }) => {
+const ReflectionStep: React.FC<{API:string; token:string; card: OracleCardData; onSaved: (updated: OracleCardData) => void; onBookMeditation?: () => void}> = ({ API, token, card, onSaved, onBookMeditation }) => {
   const [reflection, setReflection] = useState(card.reflection || '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved]   = useState(!!card.reflection);
   const [promptIdx]         = useState(() => Math.floor(Math.random() * REFLECTION_PROMPTS.length));
+  const [sharing, setSharing] = useState(false);
+  const [shareMsg, setShareMsg] = useState('');
+
+  const share = async () => {
+    setShareMsg(''); setSharing(true);
+    const res = await shareOracleCard({
+      title: card.title,
+      body: card.body,
+      category_label: card.category_label,
+      date: new Date().toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' }),
+    });
+    setSharing(false);
+    if (res.error === 'canceled') return;
+    if (!res.ok) setShareMsg('Could not prepare the image. Try again in a moment.');
+    else if (res.mode === 'download') setShareMsg('Saved to your downloads — share from there.');
+  };
 
   const save = async () => {
     if (!reflection.trim()) return;
@@ -427,10 +443,11 @@ const ReflectionStep: React.FC<{API:string; token:string; card: OracleCardData; 
             Book a meditation session
           </button>
         )}
-        <button onClick={onShare}
-          style={{background:'transparent', border:'none', color: INK_SOFT, fontSize:'12px', fontFamily: SERIF, fontStyle:'italic', cursor:'pointer', marginTop:'4px', textDecoration:'underline', textUnderlineOffset:'3px'}}>
-          Share this message
+        <button onClick={share} disabled={sharing}
+          style={{background:'transparent', border:'none', color: INK_SOFT, fontSize:'12px', fontFamily: SERIF, fontStyle:'italic', cursor: sharing ? 'wait' : 'pointer', marginTop:'4px', textDecoration:'underline', textUnderlineOffset:'3px', opacity: sharing ? 0.6 : 1}}>
+          {sharing ? 'Preparing image…' : 'Share this message'}
         </button>
+        {shareMsg && <div style={{fontSize:'11px', color: INK_SOFT, opacity:0.8, textAlign:'center', marginTop:'6px'}}>{shareMsg}</div>}
       </div>
 
       <div style={{fontFamily: SERIF, fontStyle:'italic', fontSize:'12px', color: INK_SOFT, opacity:0.7, marginTop:'clamp(20px,5vw,28px)', textAlign:'center', maxWidth:'380px', lineHeight:1.6}}>
