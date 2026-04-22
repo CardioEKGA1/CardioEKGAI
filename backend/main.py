@@ -160,6 +160,9 @@ app.add_middleware(
 # In-memory (per-process) — resets on restart, which the admin endpoint reports honestly.
 _last_stripe_webhook_at: datetime | None = None
 _last_stripe_webhook_type: str | None = None
+_stripe_webhook_count: int = 0
+_stripe_webhook_sig_fail_count: int = 0
+_process_started_at: datetime = datetime.utcnow()
 
 # Global magic-link send cap: defense against distributed email-bombing that
 # slips past per-email / per-IP caps (e.g. botnet rotating IPs). Silent-drop
@@ -1067,16 +1070,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception:
+        global _stripe_webhook_sig_fail_count
+        _stripe_webhook_sig_fail_count += 1
         raise HTTPException(status_code=400, detail="Invalid webhook")
 
     event_type = event["type"]
     obj = event["data"]["object"]
 
     # Mark this process as having received a signature-verified webhook.
-    # /admin/stripe-health surfaces this for external monitoring.
-    global _last_stripe_webhook_at, _last_stripe_webhook_type
+    # /admin/stripe-health + /webhook/stripe/health surface this for monitoring.
+    global _last_stripe_webhook_at, _last_stripe_webhook_type, _stripe_webhook_count
     _last_stripe_webhook_at = datetime.utcnow()
     _last_stripe_webhook_type = event_type
+    _stripe_webhook_count += 1
 
     def _resolve_user(customer_id, email, user_id_meta):
         u = None
@@ -2066,7 +2072,37 @@ def admin_stripe_health(_: bool = Depends(verify_admin)):
         "last_webhook_type": _last_stripe_webhook_type,
         "age_hours": round(age_hours, 2) if age_hours is not None else None,
         "stale": stale,
+        "events_received": _stripe_webhook_count,
+        "signature_failures": _stripe_webhook_sig_fail_count,
+        "process_uptime_seconds": int((now - _process_started_at).total_seconds()),
         "note": "last_webhook_at is per-process and resets on restart; only flag 'stale' alongside known recent Stripe activity.",
+    }
+
+
+@app.get("/webhook/stripe/health")
+def stripe_webhook_health():
+    # Unauthenticated liveness probe for external monitors (Railway healthcheck,
+    # UptimeRobot, etc.). Returns 200 whenever the route + secret are configured,
+    # even when no webhooks have arrived yet — "no events" isn't a failure on a
+    # fresh deploy. Callers that want to alert on a *missing* stream should check
+    # the `stale` flag alongside known Stripe activity. Deliberately excludes the
+    # last event type to avoid leaking subscription lifecycle details to probers.
+    now = datetime.utcnow()
+    last = _last_stripe_webhook_at
+    age_seconds = int((now - last).total_seconds()) if last else None
+    uptime = int((now - _process_started_at).total_seconds())
+    configured = bool(STRIPE_WEBHOOK_SECRET)
+    # Only call the stream "stale" if the process has been up long enough that
+    # silence is meaningful (24h), and no events arrived in that window.
+    stale = configured and uptime > 24 * 3600 and (age_seconds is None or age_seconds > 24 * 3600)
+    return {
+        "ok": configured,
+        "webhook_secret_configured": configured,
+        "events_received": _stripe_webhook_count,
+        "signature_failures": _stripe_webhook_sig_fail_count,
+        "last_event_age_seconds": age_seconds,
+        "process_uptime_seconds": uptime,
+        "stale": stale,
     }
 
 @app.get("/admin/feedback")
