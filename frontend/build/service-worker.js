@@ -11,7 +11,7 @@
  * placeholder push handler here so future backend work can deliver messages
  * without shipping a new SW.
  */
-const VERSION = 'soulmd-v3';
+const VERSION = 'soulmd-v4';
 const STATIC_CACHE = `${VERSION}-static`;
 const SHELL = [
   '/',
@@ -59,7 +59,28 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for everything else (static shell + hashed JS/CSS).
+  // Network-first for HTML navigation requests (the shell). HTML points at
+  // hashed JS/CSS bundles that change on every deploy — serving stale HTML
+  // leads to 404s on dead bundle hashes and a white screen. When offline,
+  // fall back to the last-known shell.
+  const isHtmlNav =
+    request.mode === 'navigate' ||
+    (request.headers.get('accept') || '').includes('text/html');
+  if (isHtmlNav) {
+    event.respondWith(
+      fetch(request).then(resp => {
+        if (resp && resp.ok) {
+          const copy = resp.clone();
+          caches.open(STATIC_CACHE).then(c => c.put(request, copy));
+        }
+        return resp;
+      }).catch(() => caches.match(request).then(hit => hit || caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // Cache-first for hashed JS/CSS + static assets (fonts/icons). Safe
+  // because CRA's hashed filenames change when content changes.
   event.respondWith(
     caches.match(request).then(hit => hit || fetch(request).then(resp => {
       if (resp && resp.ok && resp.type === 'basic') {
