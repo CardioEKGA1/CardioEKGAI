@@ -65,7 +65,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
         Specialist-grade AI<br/>
         <span style={GRAD_TEXT}>for every decision</span>
       </h1>
-      <p style={{fontSize:'16px', color:'#6a8ab0', lineHeight:'1.7', maxWidth:'560px', marginBottom:'28px'}}>Eight clinical tools, one login. Structured outputs, built for clinicians — powered by Claude.</p>
+      <p style={{fontSize:'16px', color:'#6a8ab0', lineHeight:'1.7', maxWidth:'560px', marginBottom:'28px'}}>Ten clinical tools, one login. Structured outputs, built for clinicians — powered by Claude.</p>
       <div style={{display:'flex', gap:'12px', flexWrap:'wrap', justifyContent:'center', marginBottom:'10px'}}>
         <button onClick={onSignUp} style={{background:WORDMARK, border:'none', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'700', color:'white', cursor:'pointer'}}>Sign Up Free</button>
         <button onClick={onSignIn} style={{background:'rgba(255,255,255,0.8)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'14px', padding:'14px 32px', fontSize:'15px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign In</button>
@@ -74,7 +74,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
 
     <section style={{padding:'40px 20px', maxWidth:'1100px', margin:'0 auto', width:'100%', boxSizing:'border-box'}}>
       <div style={{textAlign:'center', marginBottom:'28px'}}>
-        <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px'}}>Eight clinical tools</div>
+        <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px'}}>Ten clinical tools</div>
         <div style={{fontSize:'28px', fontWeight:'900', color:'#1a2a4a'}}>Specialist-grade AI for every decision</div>
       </div>
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'14px'}}>
