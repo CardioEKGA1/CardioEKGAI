@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "description": "Phase 1a seed messages for SoulMD Concierge Daily Oracle Card. Hand-curated; pool will be expanded to 2000 via Claude-API generation keyed off this tone and category balance.",
+  "categories": {
+    "self_healing":        { "label": "Self-Healing",        "color": "#E890B0" },
+    "energy_balance":      { "label": "Energy Balance",      "color": "#9E7BD4" },
+    "gratitude":           { "label": "Gratitude",           "color": "#F5C26B" },
+    "inner_peace":         { "label": "Inner Peace",         "color": "#C5E8F4" },
+    "wellness":            { "label": "Wellness",            "color": "#2ABFBF" },
+    "integrative_health":  { "label": "Integrative Health",  "color": "#6FB8A0" },
+    "self_love":           { "label": "Self-Love",           "color": "#F6BFD3" },
+    "release":             { "label": "Release & Let Go",    "color": "#8A6DB0" },
+    "growth":              { "label": "Growth",              "color": "#D4A659" },
+    "divine_guidance":     { "label": "Divine Guidance",     "color": "#B08AE0" }
+  },
+  "messages": [
+    { "id": 1,  "category": "self_healing",       "title": "The Body Remembers",         "body": "Your body has been holding this longer than you realize. Today, give it permission to set the burden down. Healing begins the moment you stop pushing against yourself." },
+    { "id": 2,  "category": "self_healing",       "title": "Cellular Wisdom",            "body": "Every cell in your body knows how to heal. Your only work today is to get out of its way — with rest, with breath, with the smallest possible kindness." },
+    { "id": 3,  "category": "self_healing",       "title": "Gentle Return",              "body": "You don't have to be whole to be worthy of care. Tend to the part of you that hurts the most — not to fix it, but to be with it." },
+    { "id": 4,  "category": "self_healing",       "title": "Slowness as Medicine",       "body": "The speed you've been moving at is not sustainable — and your body has been trying to tell you. Slow down today. That is the treatment." },
+    { "id": 5,  "category": "self_healing",       "title": "Integration",                "body": "You don't need another protocol, another supplement, another cleanse. You need to integrate what you already know. Your body is waiting for consistency, not novelty." },
+
+    { "id": 6,  "category": "energy_balance",     "title": "Root First",                 "body": "When everything feels scattered, return to the root. Feet on the ground. Breath in the belly. Everything else can wait five minutes." },
+    { "id": 7,  "category": "energy_balance",     "title": "The Heart Chakra Speaks",    "body": "You've been giving from an empty vessel. Close your eyes. Place a hand on your heart. Receive, just for today, without needing to reciprocate." },
+    { "id": 8,  "category": "energy_balance",     "title": "Current Reversal",           "body": "The energy is asking to flow the opposite direction today. If you've been pushing, allow. If you've been holding, release. Trust the reversal — it's a correction, not a loss." },
+    { "id": 9,  "category": "energy_balance",     "title": "Third Eye Clear",            "body": "Your intuition is louder than your logic this week. Stop negotiating with it. The answer you keep hearing is the answer." },
+    { "id": 10, "category": "energy_balance",     "title": "Prana",                      "body": "Before the first message, the first email, the first commitment — three deep breaths. That's not a luxury. That's the baseline your nervous system requires." },
+
+    { "id": 11, "category": "gratitude",          "title": "Small Miracles",             "body": "Before the day runs away from you, name three things your body did for you this morning without being asked. Gratitude begins at the cellular level." },
+    { "id": 12, "category": "gratitude",          "title": "The Overlooked",             "body": "The people and comforts you take for granted are the exact things you'd grieve if they were gone. Notice one of them today. Tell them — or thank the silence." },
+    { "id": 13, "category": "gratitude",          "title": "This Breath",                "body": "This breath arrived without effort. The next one will too. In a universe of uncertainty, that is not a small thing." },
+    { "id": 14, "category": "gratitude",          "title": "Received",                   "body": "Someone is thinking of you with tenderness right now, and you don't know it. The world is quietly full of care for you. Let that in." },
+    { "id": 15, "category": "gratitude",          "title": "Still Here",                 "body": "Despite every difficult thing you've moved through, you are still here. That is not luck. That is strength you are not yet done using." },
+
+    { "id": 16, "category": "inner_peace",        "title": "Nothing to Fix",             "body": "There is nothing broken about you. The stillness you're chasing lives under the noise — which means it is already yours. Stop trying to earn it." },
+    { "id": 17, "category": "inner_peace",        "title": "Let the Day Arrive",         "body": "You don't have to brace against today. Receive it the way the shore receives the tide — without deciding in advance what will come." },
+    { "id": 18, "category": "inner_peace",        "title": "Silence is Answer",          "body": "When you can't tell what to do, the answer is often to do nothing. Sit with the question. Clarity always arrives — on its schedule, not yours." },
+    { "id": 19, "category": "inner_peace",        "title": "Beneath the Weather",        "body": "Your moods are weather. You are the sky. Today, remember which one of you is vast and which one is passing." },
+    { "id": 20, "category": "inner_peace",        "title": "Non-doing",                  "body": "Peace is not produced. It emerges the moment you stop producing. Today, do one less thing than you planned, and notice what fills the space." },
+
+    { "id": 21, "category": "wellness",           "title": "Water, Light, Movement",     "body": "The three oldest medicines are water, light, and movement. Pick the one you've skipped the longest — and give it to yourself today." },
+    { "id": 22, "category": "wellness",           "title": "Sleep is a Treatment",       "body": "You cannot willpower your way out of exhaustion. Your body is asking for the oldest, most powerful intervention — one night of real sleep. Honor it." },
+    { "id": 23, "category": "wellness",           "title": "The Small Plate",            "body": "You already know the next right thing for your body. You don't need more information — you need the courage to act on a little of what you know." },
+    { "id": 24, "category": "wellness",           "title": "Nature Contact",             "body": "Ten minutes outside today — with your hands or feet actually touching something living. The earth is not a metaphor. It is a regulator." },
+    { "id": 25, "category": "wellness",           "title": "Boundary = Medicine",        "body": "Some of the pain you're carrying is not yours to carry. The 'no' you've been avoiding may be the most healing thing you can do this week." },
+
+    { "id": 26, "category": "integrative_health", "title": "Both/And",                   "body": "You don't have to choose between science and spirit, protocol and intuition, physician and healer. The integrative path is the honest path — both are true." },
+    { "id": 27, "category": "integrative_health", "title": "Labs Tell a Story",          "body": "Numbers on a page are the beginning of a question, not the end of one. Ask what the labs are pointing toward — the answer usually lives in the daily details." },
+    { "id": 28, "category": "integrative_health", "title": "Mind-Body",                  "body": "The thing you think is physical often has emotional weather behind it. The thing you think is emotional often has a physical ground. Both are true. Treat both." },
+    { "id": 29, "category": "integrative_health", "title": "Listen First",               "body": "Before you research, before you supplement, before you intervene — listen to the body for one full week. It will tell you what it needs. It always does." },
+    { "id": 30, "category": "integrative_health", "title": "The Whole Person",           "body": "Healing is not a checklist of symptoms reduced. It is a whole life coming back into alignment. Trust the longer arc, even when the short one feels stuck." },
+
+    { "id": 31, "category": "self_love",          "title": "The Mirror is Not Honest",   "body": "What you see in the mirror is filtered through every unkind thing anyone ever said to you. Today, look again — through the eyes of someone who loves you." },
+    { "id": 32, "category": "self_love",          "title": "The Younger Self",           "body": "Speak to yourself today the way you would speak to the child version of you. That child is still listening. The tone you choose becomes the nervous system you carry." },
+    { "id": 33, "category": "self_love",          "title": "You Are Not Behind",         "body": "The timeline you are comparing yourself to is a fiction. You are exactly where you need to be — including the parts you wish were further along." },
+    { "id": 34, "category": "self_love",          "title": "Receive",                    "body": "The compliment, the care, the quiet offer of help — let it in without deflecting. Your nervous system learns love by receiving it, not by earning it." },
+    { "id": 35, "category": "self_love",          "title": "Worth Without Output",       "body": "You are not the sum of your productivity. On your rest days, your sick days, your stuck days — your worth is identical. This is not a reward system." },
+
+    { "id": 36, "category": "release",            "title": "What You Are Outgrowing",    "body": "Something in your life is ending — not as a failure, but as a shedding. Let it go before you know what comes next. The space is the point." },
+    { "id": 37, "category": "release",            "title": "Unclench",                   "body": "Your shoulders, your jaw, your hands — right now, as you read this. Soften them. The tension was an old strategy you no longer need." },
+    { "id": 38, "category": "release",            "title": "The Story Can End",          "body": "You don't have to keep telling the story that hurt you to remain loyal to what you learned from it. You can graduate. The lesson stays. The pain does not have to." },
+    { "id": 39, "category": "release",            "title": "Forgive Yourself First",     "body": "The person you most need to forgive is you — for what you didn't know, for what you couldn't do, for the parts of you that were trying their best. Begin there." },
+    { "id": 40, "category": "release",            "title": "Exhale Longer",              "body": "Today, make the exhale longer than the inhale. The body reads a slow exhale as safety. You don't have to feel safe to signal safety — just breathe out, slowly, all the way." },
+
+    { "id": 41, "category": "growth",             "title": "The Stretch is the Point",   "body": "Growth feels like discomfort with nowhere to put it. You are not doing it wrong. You are doing the thing that is trying to happen." },
+    { "id": 42, "category": "growth",             "title": "Smaller Than You Think",     "body": "The next step is smaller than you think, and closer than you think. Take the smallest version of it today. Momentum begins at the scale of a minute." },
+    { "id": 43, "category": "growth",             "title": "Evidence of Change",         "body": "Look at who you were six months ago. Without noticing, you have become someone they would not have predicted. Growth is invisible from the inside. Trust the data." },
+    { "id": 44, "category": "growth",             "title": "The Plateau is Progress",    "body": "The period where nothing seems to change is where the roots grow. Don't mistake a plateau for a failure. You are integrating. That counts." },
+    { "id": 45, "category": "growth",             "title": "Brave + Tired",              "body": "You can be brave and exhausted at the same time. You can be growing and barely getting through the day. Both can be true. Let them." },
+
+    { "id": 46, "category": "divine_guidance",    "title": "You Are Being Led",          "body": "The instinct you keep getting is not random. It is a signal. You do not have to justify it to follow it — you only have to stop explaining it away." },
+    { "id": 47, "category": "divine_guidance",    "title": "Signs",                      "body": "You asked a question recently — silently, maybe even wordlessly. Today, the answer will appear in a form you did not expect. Stay attentive." },
+    { "id": 48, "category": "divine_guidance",    "title": "Held",                       "body": "You are held by something older and vaster than the problem you're inside of. This is not metaphor. It is the quietest true thing you will feel today if you let yourself." },
+    { "id": 49, "category": "divine_guidance",    "title": "The Path is Forming",        "body": "You cannot see the road from where you are standing because you are the one building it with each step. Take the next step. The view will come." },
+    { "id": 50, "category": "divine_guidance",    "title": "Trust the Detour",           "body": "The path you didn't choose is not the path you missed. Every detour has been curriculum. Trust where you actually are — it has more to teach you than where you thought you'd be." }
+  ]
+}

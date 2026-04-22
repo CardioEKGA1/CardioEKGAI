@@ -16,6 +16,7 @@ from database import (
     ConciergePatient, ConciergeMessage, ConciergeAppointment, ConciergeMembership, ConciergeInvoice,
     ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
     ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
+    ConciergeOraclePull, ConciergeLabRecord,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
@@ -470,11 +471,50 @@ def verify_admin(x_admin_token: str = Header(None)):
 # under any circumstances. Gate every /concierge endpoint with this dep.
 CONCIERGE_OWNER_EMAIL = os.getenv("CONCIERGE_OWNER_EMAIL", "anderson@soulmd.us").strip().lower()
 
+def _is_concierge_owner(u: User | None) -> bool:
+    if not u:
+        return False
+    if (u.email or "").strip().lower() == CONCIERGE_OWNER_EMAIL:
+        return True
+    return bool(getattr(u, "is_superuser", False))
+
 def verify_concierge_owner(current_user: User = Depends(get_current_user)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    if (current_user.email or "").strip().lower() != CONCIERGE_OWNER_EMAIL:
+    if not _is_concierge_owner(current_user):
         # 404 not 403 — we never want to hint that this section exists.
+        raise HTTPException(status_code=404, detail="Not found")
+    return current_user
+
+def _lookup_concierge_patient_for_user(user: User, db: Session) -> "ConciergePatient | None":
+    """Find the ConciergePatient row linked to a given logged-in user.
+    Preference order: explicit user_id link, then email match (case-insensitive)
+    so pre-link patients can still authenticate post-signup."""
+    if not user:
+        return None
+    p = db.query(ConciergePatient).filter(ConciergePatient.user_id == user.id).first()
+    if p:
+        return p
+    email = (user.email or "").strip().lower()
+    if not email:
+        return None
+    p = db.query(ConciergePatient).filter(ConciergePatient.email.ilike(email)).first()
+    if p and not p.user_id:
+        p.user_id = user.id
+        db.commit()
+    return p
+
+def verify_concierge_member(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Allow access if the user is the practice owner OR has a ConciergePatient
+    row linked to their account. Used by the patient-app endpoints. Returns
+    a tuple-like object on the request state — the caller should use
+    concierge_role_for() to branch."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if _is_concierge_owner(current_user):
+        return current_user
+    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p:
         raise HTTPException(status_code=404, detail="Not found")
     return current_user
 
@@ -3050,7 +3090,185 @@ def concierge_habit_checkin(
     return _habit_summary(h, checkins)
 
 
-# ─── Uptime monitoring ─────────────────────────────────────────────────────
+# ─── Concierge role resolution + Oracle Card + Lab Vault ──────────────────
+
+# Mountain Time offset — the practice operates in MST. Using a fixed offset
+# (UTC-7) for now; DST handling is a Phase 2 concern (fine for a beta pool
+# since the card cadence is "one per day" and DST shifts at 2am).
+import zoneinfo
+try:
+    _MST = zoneinfo.ZoneInfo("America/Denver")
+except Exception:
+    _MST = None
+
+def _today_mst() -> str:
+    now = datetime.utcnow().replace(tzinfo=zoneinfo.ZoneInfo("UTC")) if _MST else datetime.utcnow()
+    if _MST:
+        return now.astimezone(_MST).strftime("%Y-%m-%d")
+    return (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
+
+_ORACLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "oracle_messages.json")
+_ORACLE_CACHE: dict | None = None
+
+def _load_oracle() -> dict:
+    global _ORACLE_CACHE
+    if _ORACLE_CACHE is None:
+        with open(_ORACLE_PATH, "r") as f:
+            _ORACLE_CACHE = json.load(f)
+    return _ORACLE_CACHE
+
+
+@app.get("/concierge/me")
+def concierge_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Role resolution for the PWA router. Returns:
+      role='physician'  → show physician dashboard
+      role='patient'    → show patient app
+      role='none'       → show concierge landing/signup (or just kick out)
+    Always 200 so the frontend can render the right screen without leaking
+    existence to non-authenticated users (they never see this endpoint)."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if _is_concierge_owner(current_user):
+        return {"role": "physician", "email": current_user.email, "owner_email": CONCIERGE_OWNER_EMAIL}
+    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p:
+        return {"role": "none", "email": current_user.email}
+    tier_entry = CONCIERGE_TIER_PRICE.get(p.membership_tier or "awaken", {})
+    tier_label = tier_entry.get("label", p.membership_tier or "awaken")
+    # Allowance per tier. Source of truth for visit counters.
+    allowances = {
+        "awaken": {"visits": 2, "meditations": 1},
+        "align":  {"visits": 3, "meditations": 2},
+        "ascend": {"visits": 5, "meditations": 4},
+    }
+    allow = allowances.get(p.membership_tier or "awaken", allowances["awaken"])
+    return {
+        "role": "patient",
+        "email": current_user.email,
+        "patient": {
+            "id": p.id,
+            "name": p.name,
+            "tier": p.membership_tier,
+            "tier_label": tier_label,
+            "subscription_status": p.subscription_status or "none",
+            "current_period_end": p.current_period_end.isoformat() if p.current_period_end else None,
+            "visits_used": p.visits_used or 0,
+            "visits_allowed": allow["visits"],
+            "meditations_used": p.meditations_used or 0,
+            "meditations_allowed": allow["meditations"],
+        },
+    }
+
+
+# ───── Daily Oracle Card ─────
+
+@app.get("/concierge/oracle/today")
+def concierge_oracle_today(
+    current_user: User = Depends(verify_concierge_member),
+    db: Session = Depends(get_db),
+):
+    """Return today's card for the current user. Deterministic per (user, date):
+    reloading returns the same card. Avoids messages pulled in the last 30
+    days for this user. If the user has exhausted the pool within 30 days
+    (not possible at 50 msgs × 30 days for realistic behavior), all messages
+    are re-eligible."""
+    oracle = _load_oracle()
+    msgs = oracle["messages"]
+    today = _today_mst()
+
+    # Already pulled today? Return that exact card.
+    existing = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.pull_date == today,
+    ).first()
+    if existing:
+        msg = next((m for m in msgs if m["id"] == existing.message_id), msgs[0])
+        cat = oracle["categories"].get(msg["category"], {})
+        return {
+            "already_pulled": True,
+            "date": today,
+            "card": {**msg, "category_label": cat.get("label"), "category_color": cat.get("color")},
+            "saved": bool(existing.saved),
+        }
+
+    # Build exclusion set: IDs pulled in the last 30 days.
+    cutoff_date = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
+    recent = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.pull_date >= cutoff_date,
+    ).all()
+    excluded = {r.message_id for r in recent}
+    eligible = [m for m in msgs if m["id"] not in excluded]
+    if not eligible:
+        eligible = msgs  # fallback if user has burned through the pool
+
+    # Deterministic pick: SHA-256 of (user_id, date) → pick index into eligible.
+    h = hashlib.sha256(f"{current_user.id}|{today}".encode()).hexdigest()
+    idx = int(h[:8], 16) % len(eligible)
+    chosen = eligible[idx]
+
+    pull = ConciergeOraclePull(
+        user_id=current_user.id,
+        pull_date=today,
+        message_id=chosen["id"],
+        category=chosen["category"],
+        saved=False,
+    )
+    db.add(pull)
+    db.commit()
+    cat = oracle["categories"].get(chosen["category"], {})
+    return {
+        "already_pulled": False,
+        "date": today,
+        "card": {**chosen, "category_label": cat.get("label"), "category_color": cat.get("color")},
+        "saved": False,
+    }
+
+
+@app.post("/concierge/oracle/today/save")
+def concierge_oracle_save(
+    current_user: User = Depends(verify_concierge_member),
+    db: Session = Depends(get_db),
+):
+    today = _today_mst()
+    pull = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.pull_date == today,
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="No card pulled today yet.")
+    pull.saved = True
+    db.commit()
+    return {"saved": True}
+
+
+@app.get("/concierge/oracle/history")
+def concierge_oracle_history(
+    saved_only: bool = False,
+    current_user: User = Depends(verify_concierge_member),
+    db: Session = Depends(get_db),
+):
+    q = db.query(ConciergeOraclePull).filter(ConciergeOraclePull.user_id == current_user.id)
+    if saved_only:
+        q = q.filter(ConciergeOraclePull.saved == True)  # noqa: E712
+    rows = q.order_by(ConciergeOraclePull.pull_date.desc()).limit(120).all()
+    oracle = _load_oracle()
+    msgs = {m["id"]: m for m in oracle["messages"]}
+    out = []
+    for r in rows:
+        m = msgs.get(r.message_id)
+        if not m:
+            continue
+        cat = oracle["categories"].get(m["category"], {})
+        out.append({
+            "date": r.pull_date,
+            "saved": bool(r.saved),
+            "card": {**m, "category_label": cat.get("label"), "category_color": cat.get("color")},
+        })
+    return {"pulls": out}
+
+
+# ───── Uptime monitoring ─────────────────────────────────────────────────────
 # Lightweight endpoint designed for external uptime monitors (UptimeRobot,
 # BetterStack, etc.). No DB call, no auth, <1ms response. Use this instead
 # of /health for external probes so we don't burn DB connections on every

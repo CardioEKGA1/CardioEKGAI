@@ -116,6 +116,13 @@ class ConciergePatient(Base):
     subscription_status = Column(String, nullable=True)  # active | paused | canceled | past_due | incomplete
     current_period_end = Column(DateTime, nullable=True)
     total_paid_cents = Column(Integer, default=0)  # rolling lifetime total of successful concierge invoices
+    # Visit + meditation counters — reset monthly by the UI display logic
+    # against current_period_end. Source of truth for "2 of 3 visits used
+    # this month" in the patient app.
+    user_id = Column(Integer, nullable=True, index=True)  # link to users.id for patient-app role lookup
+    visits_used = Column(Integer, default=0)
+    meditations_used = Column(Integer, default=0)
+    period_counter_reset_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -215,6 +222,32 @@ class ConciergeHabitCheckin(Base):
     notes = Column(String, default="")
     checked_in_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+class ConciergeOraclePull(Base):
+    __tablename__ = "concierge_oracle_pulls"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    pull_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD in practice timezone (MST)
+    message_id = Column(Integer, nullable=False)
+    category = Column(String, nullable=True)
+    saved = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ConciergeLabRecord(Base):
+    __tablename__ = "concierge_lab_records"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True)
+    filename = Column(String, nullable=False)
+    mime_type = Column(String, nullable=True)
+    size_bytes = Column(Integer, default=0)
+    status = Column(String, default="pending")  # pending | reviewed | flagged
+    flagged = Column(Boolean, default=False)
+    physician_note = Column(String, default="")
+    # File bytes are stored inline for now (small labs, LOB in Postgres).
+    # Swap to S3/R2 when patient volume grows past a few hundred docs.
+    file_data = Column(String, nullable=True)  # base64-encoded payload
+    uploaded_at = Column(DateTime, default=datetime.utcnow, index=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
 class UserStyleProfile(Base):
     __tablename__ = "user_style_profiles"
     id = Column(Integer, primary_key=True, index=True)
@@ -248,8 +281,13 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS subscription_status VARCHAR"))
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMP"))
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS total_paid_cents INTEGER DEFAULT 0"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS user_id INTEGER"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS visits_used INTEGER DEFAULT 0"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS meditations_used INTEGER DEFAULT 0"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS period_counter_reset_at TIMESTAMP"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_customer_id ON concierge_patients(stripe_customer_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_subscription_id ON concierge_patients(stripe_subscription_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_user_id ON concierge_patients(user_id)"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 
