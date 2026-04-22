@@ -8,14 +8,14 @@ interface Message { id: number; direction: 'outbound' | 'inbound' | 'note'; subj
 
 const CARD: React.CSSProperties = {
   background: 'rgba(255,255,255,0.85)', borderRadius:'16px',
-  border: '1px solid rgba(184,152,112,0.25)',
-  boxShadow: '0 2px 10px rgba(90,70,50,0.06)',
+  border: '1px solid rgba(122,176,240,0.2)',
+  boxShadow: '0 2px 10px rgba(100,130,200,0.1)',
 };
 
 const INPUT: React.CSSProperties = {
   width:'100%', padding:'10px 12px', borderRadius:'10px',
-  border:'1px solid rgba(184,152,112,0.35)',
-  fontSize:'13px', color:'#3a2a1a', background:'rgba(255,253,248,0.8)',
+  border:'1px solid rgba(122,176,240,0.3)',
+  fontSize:'13px', color:'#1a2a4a', background:'rgba(240,246,255,0.5)',
   outline:'none', boxSizing:'border-box', fontFamily:'inherit',
 };
 
@@ -52,11 +52,11 @@ const MessagesSection: React.FC<Props> = ({ API, token, accent }) => {
     <div style={{display:'grid', gridTemplateColumns: selected ? 'minmax(240px, 320px) 1fr' : '1fr', gap:'14px', minHeight:'500px'}}>
       {/* Patient list sidebar */}
       <div style={{...CARD, padding:'14px', display: selected ? 'block' : 'block', maxHeight:'calc(100vh - 220px)', overflowY:'auto'}}>
-        <div style={{fontSize:'12px', fontWeight:800, color:'#3a2a1a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px'}}>Patients</div>
+        <div style={{fontSize:'12px', fontWeight:800, color:'#1a2a4a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px'}}>Patients</div>
         {loadingList ? (
-          <div style={{fontSize:'12px', color:'#8a6e50', padding:'20px', textAlign:'center'}}>Loading…</div>
+          <div style={{fontSize:'12px', color:'#4a7ad0', padding:'20px', textAlign:'center'}}>Loading…</div>
         ) : patients.length === 0 ? (
-          <div style={{fontSize:'12px', color:'#8a6e50', padding:'20px', textAlign:'center'}}>No patients yet. Add one in Patients first.</div>
+          <div style={{fontSize:'12px', color:'#4a7ad0', padding:'20px', textAlign:'center'}}>No patients yet. Add one in Patients first.</div>
         ) : (
           <div style={{display:'flex', flexDirection:'column', gap:'4px'}}>
             {patients.map(p => (
@@ -65,15 +65,15 @@ const MessagesSection: React.FC<Props> = ({ API, token, accent }) => {
                 onClick={() => openThread(p)}
                 style={{
                   textAlign:'left', cursor:'pointer', padding:'10px 12px', borderRadius:'10px',
-                  border: selected?.id === p.id ? '1px solid rgba(184,152,112,0.5)' : '1px solid transparent',
-                  background: selected?.id === p.id ? 'rgba(184,152,112,0.12)' : 'transparent',
+                  border: selected?.id === p.id ? '1px solid rgba(122,176,240,0.5)' : '1px solid transparent',
+                  background: selected?.id === p.id ? 'rgba(122,176,240,0.12)' : 'transparent',
                   fontFamily:'inherit',
                 }}
               >
-                <div style={{fontSize:'13px', fontWeight:700, color:'#3a2a1a'}}>{p.name}</div>
-                <div style={{fontSize:'11px', color:'#8a6e50', marginTop:'2px'}}>{p.email}</div>
+                <div style={{fontSize:'13px', fontWeight:700, color:'#1a2a4a'}}>{p.name}</div>
+                <div style={{fontSize:'11px', color:'#4a7ad0', marginTop:'2px'}}>{p.email}</div>
                 {p.last_contact_at && (
-                  <div style={{fontSize:'10px', color:'#a0947e', marginTop:'3px'}}>Last contact {new Date(p.last_contact_at).toLocaleDateString()}</div>
+                  <div style={{fontSize:'10px', color:'#a0b0c8', marginTop:'3px'}}>Last contact {new Date(p.last_contact_at).toLocaleDateString()}</div>
                 )}
               </button>
             ))}
@@ -85,9 +85,9 @@ const MessagesSection: React.FC<Props> = ({ API, token, accent }) => {
       {selected ? (
         <MessageThread API={API} token={token} accent={accent} patient={selected} messages={messages} loading={loadingThread} onSent={() => openThread(selected)}/>
       ) : (
-        <div style={{...CARD, padding:'60px 20px', textAlign:'center', color:'#8a6e50'}}>
+        <div style={{...CARD, padding:'60px 20px', textAlign:'center', color:'#4a7ad0'}}>
           <div style={{fontSize:'36px', marginBottom:'10px', opacity:0.5}}>💬</div>
-          <div style={{fontSize:'14px', fontWeight:700, color:'#3a2a1a', marginBottom:'4px'}}>Select a patient</div>
+          <div style={{fontSize:'14px', fontWeight:700, color:'#1a2a4a', marginBottom:'4px'}}>Select a patient</div>
           <div style={{fontSize:'12px'}}>Choose a patient from the sidebar to view their message thread or send a new message.</div>
         </div>
       )}
@@ -140,10 +140,10 @@ const MessageThread: React.FC<{API:string; token:string; accent:string; patient:
       <div style={{...CARD, padding:'14px'}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:'16px', fontWeight:800, color:'#3a2a1a'}}>{patient.name}</div>
-            <div style={{fontSize:'12px', color:'#8a6e50', wordBreak:'break-all'}}>{patient.email}</div>
+            <div style={{fontSize:'16px', fontWeight:800, color:'#1a2a4a'}}>{patient.name}</div>
+            <div style={{fontSize:'12px', color:'#4a7ad0', wordBreak:'break-all'}}>{patient.email}</div>
           </div>
-          <div style={{fontSize:'10px', color:'#8a6e50', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700}}>
+          <div style={{fontSize:'10px', color:'#4a7ad0', letterSpacing:'0.5px', textTransform:'uppercase', fontWeight:700}}>
             {messages.length} message{messages.length === 1 ? '' : 's'}
           </div>
         </div>
@@ -152,11 +152,11 @@ const MessageThread: React.FC<{API:string; token:string; accent:string; patient:
       {/* Thread */}
       <div style={{...CARD, padding:'16px', flex:1, overflowY:'auto', maxHeight:'calc(100vh - 480px)', minHeight:'220px'}}>
         {loading ? (
-          <div style={{textAlign:'center', color:'#8a6e50', fontSize:'12px', padding:'20px'}}>Loading messages…</div>
+          <div style={{textAlign:'center', color:'#4a7ad0', fontSize:'12px', padding:'20px'}}>Loading messages…</div>
         ) : messages.length === 0 ? (
-          <div style={{textAlign:'center', color:'#8a6e50', padding:'30px 20px'}}>
+          <div style={{textAlign:'center', color:'#4a7ad0', padding:'30px 20px'}}>
             <div style={{fontSize:'32px', marginBottom:'8px', opacity:0.4}}>📬</div>
-            <div style={{fontSize:'13px', fontWeight:700, color:'#3a2a1a', marginBottom:'4px'}}>No messages yet</div>
+            <div style={{fontSize:'13px', fontWeight:700, color:'#1a2a4a', marginBottom:'4px'}}>No messages yet</div>
             <div style={{fontSize:'11px'}}>Send the first message below.</div>
           </div>
         ) : (
@@ -167,8 +167,8 @@ const MessageThread: React.FC<{API:string; token:string; accent:string; patient:
                 <div key={m.id} style={{display:'flex', justifyContent: outbound ? 'flex-end' : 'flex-start'}}>
                   <div style={{
                     maxWidth:'76%', padding:'10px 14px', borderRadius:'14px',
-                    background: outbound ? accent : 'rgba(240,235,225,0.9)',
-                    color: outbound ? 'white' : '#3a2a1a',
+                    background: outbound ? accent : 'rgba(255,255,255,0.85)',
+                    color: outbound ? 'white' : '#1a2a4a',
                     borderBottomRightRadius: outbound ? '4px' : '14px',
                     borderBottomLeftRadius: outbound ? '14px' : '4px',
                   }}>
@@ -189,7 +189,7 @@ const MessageThread: React.FC<{API:string; token:string; accent:string; patient:
 
       {/* Compose */}
       <div style={{...CARD, padding:'14px'}}>
-        <div style={{fontSize:'11px', fontWeight:800, color:'#3a2a1a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px'}}>Compose</div>
+        <div style={{fontSize:'11px', fontWeight:800, color:'#1a2a4a', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'10px'}}>Compose</div>
         <input
           value={subject}
           onChange={e => setSubject(e.target.value)}
@@ -203,7 +203,7 @@ const MessageThread: React.FC<{API:string; token:string; accent:string; patient:
           style={{...INPUT, minHeight:'110px', resize:'vertical'}}
         />
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', marginTop:'10px', flexWrap:'wrap'}}>
-          <label style={{display:'flex', alignItems:'center', gap:'6px', fontSize:'12px', color:'#6a5a40', cursor:'pointer'}}>
+          <label style={{display:'flex', alignItems:'center', gap:'6px', fontSize:'12px', color:'#4a5e6a', cursor:'pointer'}}>
             <input type="checkbox" checked={deliver} onChange={e => setDeliver(e.target.checked)}/>
             Deliver via email (replies go to your inbox)
           </label>

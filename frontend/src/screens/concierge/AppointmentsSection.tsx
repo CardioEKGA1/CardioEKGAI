@@ -20,7 +20,7 @@ interface PatientMini { id: number; name: string; email: string; }
 
 const APPT_TYPES: {id: string; label: string; icon: string; color: string}[] = [
   { id: 'medical_visit', label: 'Medical Visit',       icon: '🩺', color: '#3a7ad0' },
-  { id: 'life_coaching', label: 'Life Coaching',       icon: '🧭', color: '#8a6e50' },
+  { id: 'life_coaching', label: 'Life Coaching',       icon: '🧭', color: '#4a7ad0' },
   { id: 'reiki',         label: 'Reiki & Energy',      icon: '✨', color: '#a070c0' },
   { id: 'telehealth',    label: 'Telehealth',          icon: '💻', color: '#4a9a7a' },
   { id: 'follow_up',     label: 'Follow-up',           icon: '🔁', color: '#6a6a6a' },
@@ -35,18 +35,18 @@ const STATUS_STYLES: Record<string, {bg: string; color: string; label: string}> 
 
 const CARD: React.CSSProperties = {
   background: 'rgba(255,255,255,0.85)', borderRadius:'16px',
-  border: '1px solid rgba(184,152,112,0.25)',
-  boxShadow: '0 2px 10px rgba(90,70,50,0.06)', padding:'16px',
+  border: '1px solid rgba(122,176,240,0.2)',
+  boxShadow: '0 2px 10px rgba(100,130,200,0.1)', padding:'16px',
 };
 
 const INPUT: React.CSSProperties = {
   width:'100%', padding:'10px 12px', borderRadius:'10px',
-  border:'1px solid rgba(184,152,112,0.35)',
-  fontSize:'13px', color:'#3a2a1a', background:'rgba(255,253,248,0.8)',
+  border:'1px solid rgba(122,176,240,0.3)',
+  fontSize:'13px', color:'#1a2a4a', background:'rgba(240,246,255,0.5)',
   outline:'none', boxSizing:'border-box', fontFamily:'inherit',
 };
 
-const FIELD_LABEL: React.CSSProperties = { fontSize:'11px', color:'#8a6e50', fontWeight:600, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.5px' };
+const FIELD_LABEL: React.CSSProperties = { fontSize:'11px', color:'#4a7ad0', fontWeight:600, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.5px' };
 
 // Simple week/month view toggle. Not a full calendar library — just a
 // chronological list grouped by day for now. The doctor needs to see
@@ -117,13 +117,13 @@ const AppointmentsSection: React.FC<Props> = ({ API, token, accent }) => {
     <div>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap', marginBottom:'14px'}}>
         <div>
-          <div style={{fontSize:'20px', fontWeight:800, color:'#3a2a1a'}}>Appointments</div>
-          <div style={{fontSize:'12px', color:'#8a6e50'}}>{appointments.length} total · {appointments.filter(a => a.status === 'scheduled').length} scheduled</div>
+          <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a'}}>Appointments</div>
+          <div style={{fontSize:'12px', color:'#4a7ad0'}}>{appointments.length} total · {appointments.filter(a => a.status === 'scheduled').length} scheduled</div>
         </div>
         <div style={{display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap'}}>
-          <div style={{display:'flex', background:'rgba(255,255,255,0.7)', borderRadius:'999px', padding:'3px', border:'1px solid rgba(184,152,112,0.3)'}}>
-            <button onClick={()=>setView('upcoming')} style={{padding:'6px 14px', fontSize:'12px', fontWeight:700, borderRadius:'999px', border:'none', background: view==='upcoming' ? accent : 'transparent', color: view==='upcoming' ? 'white' : '#8a6e50', cursor:'pointer'}}>Upcoming</button>
-            <button onClick={()=>setView('all')} style={{padding:'6px 14px', fontSize:'12px', fontWeight:700, borderRadius:'999px', border:'none', background: view==='all' ? accent : 'transparent', color: view==='all' ? 'white' : '#8a6e50', cursor:'pointer'}}>All</button>
+          <div style={{display:'flex', background:'rgba(255,255,255,0.7)', borderRadius:'999px', padding:'3px', border:'1px solid rgba(122,176,240,0.3)'}}>
+            <button onClick={()=>setView('upcoming')} style={{padding:'6px 14px', fontSize:'12px', fontWeight:700, borderRadius:'999px', border:'none', background: view==='upcoming' ? accent : 'transparent', color: view==='upcoming' ? 'white' : '#4a7ad0', cursor:'pointer'}}>Upcoming</button>
+            <button onClick={()=>setView('all')} style={{padding:'6px 14px', fontSize:'12px', fontWeight:700, borderRadius:'999px', border:'none', background: view==='all' ? accent : 'transparent', color: view==='all' ? 'white' : '#4a7ad0', cursor:'pointer'}}>All</button>
           </div>
           <button onClick={()=>setShowCreate(true)} disabled={patients.length === 0} style={{background:accent, border:'none', borderRadius:'12px', padding:'10px 16px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer', whiteSpace:'nowrap', opacity: patients.length === 0 ? 0.5 : 1}}>+ Schedule</button>
         </div>
@@ -132,11 +132,11 @@ const AppointmentsSection: React.FC<Props> = ({ API, token, accent }) => {
       {error && <div style={{background:'rgba(224,80,80,0.1)', border:'1px solid rgba(224,80,80,0.3)', borderRadius:'10px', padding:'10px 12px', color:'#a02020', fontSize:'12px', marginBottom:'12px'}}>{error}</div>}
 
       {loading ? (
-        <div style={{padding:'40px', textAlign:'center', color:'#8a6e50', fontSize:'13px'}}>Loading…</div>
+        <div style={{padding:'40px', textAlign:'center', color:'#4a7ad0', fontSize:'13px'}}>Loading…</div>
       ) : grouped.length === 0 ? (
-        <div style={{...CARD, textAlign:'center', padding:'40px 20px', color:'#8a6e50'}}>
+        <div style={{...CARD, textAlign:'center', padding:'40px 20px', color:'#4a7ad0'}}>
           <div style={{fontSize:'36px', marginBottom:'10px', opacity:0.4}}>📅</div>
-          <div style={{fontSize:'14px', fontWeight:700, color:'#3a2a1a', marginBottom:'4px'}}>{view === 'upcoming' ? 'No upcoming appointments' : 'No appointments yet'}</div>
+          <div style={{fontSize:'14px', fontWeight:700, color:'#1a2a4a', marginBottom:'4px'}}>{view === 'upcoming' ? 'No upcoming appointments' : 'No appointments yet'}</div>
           <div style={{fontSize:'12px'}}>{patients.length === 0 ? 'Add a patient first, then schedule.' : 'Click Schedule to create one.'}</div>
         </div>
       ) : (
@@ -147,7 +147,7 @@ const AppointmentsSection: React.FC<Props> = ({ API, token, accent }) => {
             const dayLabel = d.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
             return (
               <div key={dateKey}>
-                <div style={{fontSize:'12px', fontWeight:800, color: isToday ? '#3a2a1a' : '#8a6e50', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px', padding:'0 4px'}}>
+                <div style={{fontSize:'12px', fontWeight:800, color: isToday ? '#1a2a4a' : '#4a7ad0', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'8px', padding:'0 4px'}}>
                   {isToday && <span style={{background: accent, color:'white', padding:'2px 8px', borderRadius:'6px', marginRight:'8px', letterSpacing:0, textTransform:'none', fontSize:'10px'}}>Today</span>}
                   {dayLabel}
                 </div>
@@ -161,14 +161,14 @@ const AppointmentsSection: React.FC<Props> = ({ API, token, accent }) => {
                       <div key={a.id} style={{...CARD, padding:'12px 14px', display:'grid', gridTemplateColumns:'auto 1fr auto', gap:'12px', alignItems:'center'}}>
                         <div style={{fontSize:'26px', width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', background: `${t.color}18`, borderRadius:'12px'}}>{t.icon}</div>
                         <div style={{minWidth:0}}>
-                          <div style={{fontSize:'13px', fontWeight:700, color:'#3a2a1a', marginBottom:'2px'}}>
+                          <div style={{fontSize:'13px', fontWeight:700, color:'#1a2a4a', marginBottom:'2px'}}>
                             {a.patient_name || `Patient #${a.patient_id}`}
                             <span style={{fontSize:'11px', fontWeight:500, color: t.color, marginLeft:'8px'}}>· {t.label}</span>
                           </div>
-                          <div style={{fontSize:'12px', color:'#6a5a40'}}>
+                          <div style={{fontSize:'12px', color:'#4a5e6a'}}>
                             {start.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})} – {end.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})} ({a.duration_min} min)
                           </div>
-                          {a.notes && <div style={{fontSize:'11px', color:'#8a6e50', marginTop:'3px', fontStyle:'italic', whiteSpace:'pre-wrap'}}>{a.notes}</div>}
+                          {a.notes && <div style={{fontSize:'11px', color:'#4a7ad0', marginTop:'3px', fontStyle:'italic', whiteSpace:'pre-wrap'}}>{a.notes}</div>}
                         </div>
                         <div style={{display:'flex', flexDirection:'column', gap:'4px', alignItems:'flex-end'}}>
                           <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background: ss.bg, color: ss.color, fontWeight:700, letterSpacing:'0.4px', textTransform:'uppercase', whiteSpace:'nowrap'}}>{ss.label}</span>
@@ -192,7 +192,7 @@ const AppointmentsSection: React.FC<Props> = ({ API, token, accent }) => {
 
       {showCreate && <CreateAppointmentModal API={API} token={token} accent={accent} patients={patients} onClose={()=>setShowCreate(false)} onCreated={()=>{setShowCreate(false); load();}}/>}
 
-      <div style={{...CARD, marginTop:'16px', fontSize:'11px', color:'#8a6e50', textAlign:'center', padding:'10px'}}>
+      <div style={{...CARD, marginTop:'16px', fontSize:'11px', color:'#4a7ad0', textAlign:'center', padding:'10px'}}>
         Calendar integration (Google Calendar / Calendly) coming soon — for now, create appointments manually here.
       </div>
     </div>
@@ -235,11 +235,11 @@ const CreateAppointmentModal: React.FC<{API:string; token:string; accent:string;
   };
 
   return (
-    <div style={{position:'fixed', inset:0, background:'rgba(58,42,26,0.45)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'20px', overflowY:'auto', zIndex:1500}}>
-      <div style={{background:'white', borderRadius:'20px', padding:'24px', maxWidth:'520px', width:'100%', boxShadow:'0 20px 60px rgba(58,42,26,0.3)', margin:'20px 0'}}>
+    <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'20px', overflowY:'auto', zIndex:1500}}>
+      <div style={{background:'white', borderRadius:'20px', padding:'24px', maxWidth:'520px', width:'100%', boxShadow:'0 20px 60px rgba(26,42,74,0.3)', margin:'20px 0'}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px'}}>
-          <div style={{fontSize:'18px', fontWeight:800, color:'#3a2a1a'}}>Schedule appointment</div>
-          <button onClick={onClose} style={{background:'transparent', border:'none', fontSize:'20px', color:'#8a6e50', cursor:'pointer'}}>×</button>
+          <div style={{fontSize:'18px', fontWeight:800, color:'#1a2a4a'}}>Schedule appointment</div>
+          <button onClick={onClose} style={{background:'transparent', border:'none', fontSize:'20px', color:'#4a7ad0', cursor:'pointer'}}>×</button>
         </div>
 
         <div style={{marginBottom:'10px'}}>
@@ -280,9 +280,9 @@ const CreateAppointmentModal: React.FC<{API:string; token:string; accent:string;
                 onClick={()=>setType(t.id)}
                 style={{
                   padding:'8px', borderRadius:'10px', fontSize:'11px', fontWeight:700, cursor:'pointer',
-                  border: type === t.id ? `1px solid ${t.color}` : '1px solid rgba(184,152,112,0.3)',
-                  background: type === t.id ? `${t.color}18` : 'rgba(255,253,248,0.7)',
-                  color: type === t.id ? t.color : '#6a5a40',
+                  border: type === t.id ? `1px solid ${t.color}` : '1px solid rgba(122,176,240,0.3)',
+                  background: type === t.id ? `${t.color}18` : 'rgba(240,246,255,0.4)',
+                  color: type === t.id ? t.color : '#4a5e6a',
                   display:'flex', alignItems:'center', gap:'6px', justifyContent:'center',
                 }}
               >
@@ -301,7 +301,7 @@ const CreateAppointmentModal: React.FC<{API:string; token:string; accent:string;
         {error && <div style={{background:'rgba(224,80,80,0.1)', border:'1px solid rgba(224,80,80,0.3)', borderRadius:'10px', padding:'10px 12px', color:'#a02020', fontSize:'12px', marginBottom:'10px'}}>{error}</div>}
 
         <div style={{display:'flex', gap:'10px', justifyContent:'flex-end'}}>
-          <button onClick={onClose} disabled={saving} style={{background:'rgba(240,235,225,0.9)', border:'1px solid rgba(184,152,112,0.3)', borderRadius:'12px', padding:'10px 18px', fontSize:'13px', fontWeight:600, color:'#8a6e50', cursor:'pointer'}}>Cancel</button>
+          <button onClick={onClose} disabled={saving} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'12px', padding:'10px 18px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
           <button onClick={save} disabled={saving || !date || !time} style={{background:accent, border:'none', borderRadius:'12px', padding:'10px 20px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer', opacity:(saving||!date||!time)?0.6:1}}>
             {saving ? 'Saving…' : 'Schedule'}
           </button>

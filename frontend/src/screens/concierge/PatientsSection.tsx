@@ -29,26 +29,26 @@ interface IntakeData {
 }
 
 const TIERS: {id: string; label: string; price: string; color: string}[] = [
-  { id: 'awaken', label: 'Awaken', price: '$150/mo', color: '#b89870' },
-  { id: 'align',  label: 'Align',  price: '$300/mo', color: '#8a6e50' },
-  { id: 'ascend', label: 'Ascend', price: '$500/mo', color: '#5a4a32' },
+  { id: 'awaken', label: 'Awaken', price: '$150/mo', color: '#7ab0f0' },
+  { id: 'align',  label: 'Align',  price: '$300/mo', color: '#4a7ad0' },
+  { id: 'ascend', label: 'Ascend', price: '$500/mo', color: '#1a2a4a' },
 ];
 
 const CARD: React.CSSProperties = {
   background: 'rgba(255,255,255,0.85)', borderRadius:'16px',
-  border: '1px solid rgba(184,152,112,0.25)',
-  boxShadow: '0 2px 10px rgba(90,70,50,0.06)',
+  border: '1px solid rgba(122,176,240,0.2)',
+  boxShadow: '0 2px 10px rgba(100,130,200,0.1)',
   padding:'16px',
 };
 
 const INPUT: React.CSSProperties = {
   width:'100%', padding:'10px 12px', borderRadius:'10px',
-  border:'1px solid rgba(184,152,112,0.35)',
-  fontSize:'13px', color:'#3a2a1a', background:'rgba(255,253,248,0.8)',
+  border:'1px solid rgba(122,176,240,0.3)',
+  fontSize:'13px', color:'#1a2a4a', background:'rgba(240,246,255,0.5)',
   outline:'none', boxSizing:'border-box',
 };
 
-const FIELD_LABEL: React.CSSProperties = { fontSize:'11px', color:'#8a6e50', fontWeight:600, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.5px' };
+const FIELD_LABEL: React.CSSProperties = { fontSize:'11px', color:'#4a7ad0', fontWeight:600, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.5px' };
 
 const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -87,8 +87,8 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
     <div>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap', marginBottom:'14px'}}>
         <div>
-          <div style={{fontSize:'20px', fontWeight:800, color:'#3a2a1a'}}>Patients</div>
-          <div style={{fontSize:'12px', color:'#8a6e50'}}>{patients.length} total · {patients.filter(p=>p.membership_tier==='ascend').length} Ascend · {patients.filter(p=>p.membership_tier==='align').length} Align · {patients.filter(p=>p.membership_tier==='awaken').length} Awaken</div>
+          <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a'}}>Patients</div>
+          <div style={{fontSize:'12px', color:'#4a7ad0'}}>{patients.length} total · {patients.filter(p=>p.membership_tier==='ascend').length} Ascend · {patients.filter(p=>p.membership_tier==='align').length} Align · {patients.filter(p=>p.membership_tier==='awaken').length} Awaken</div>
         </div>
         <button onClick={()=>setShowAdd(true)} style={{background:accent, border:'none', borderRadius:'12px', padding:'10px 18px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer', whiteSpace:'nowrap'}}>+ Add patient</button>
       </div>
@@ -104,11 +104,11 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
       {error && <div style={{background:'rgba(224,80,80,0.1)', border:'1px solid rgba(224,80,80,0.3)', borderRadius:'10px', padding:'10px 12px', color:'#a02020', fontSize:'12px', marginBottom:'12px'}}>{error}</div>}
 
       {loading ? (
-        <div style={{padding:'40px', textAlign:'center', color:'#8a6e50', fontSize:'13px'}}>Loading patients…</div>
+        <div style={{padding:'40px', textAlign:'center', color:'#4a7ad0', fontSize:'13px'}}>Loading patients…</div>
       ) : filtered.length === 0 ? (
-        <div style={{...CARD, textAlign:'center', padding:'40px 20px', color:'#8a6e50'}}>
+        <div style={{...CARD, textAlign:'center', padding:'40px 20px', color:'#4a7ad0'}}>
           <div style={{fontSize:'36px', marginBottom:'10px', opacity:0.4}}>👥</div>
-          <div style={{fontSize:'14px', fontWeight:700, color:'#3a2a1a', marginBottom:'4px'}}>{patients.length === 0 ? 'No patients yet' : 'No matches'}</div>
+          <div style={{fontSize:'14px', fontWeight:700, color:'#1a2a4a', marginBottom:'4px'}}>{patients.length === 0 ? 'No patients yet' : 'No matches'}</div>
           <div style={{fontSize:'12px'}}>{patients.length === 0 ? 'Add your first concierge patient to begin.' : 'Try a different search.'}</div>
         </div>
       ) : (
@@ -124,11 +124,11 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
                 style={{...CARD, textAlign:'left', cursor:'pointer', fontFamily:'inherit'}}
               >
                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px'}}>
-                  <div style={{fontSize:'15px', fontWeight:800, color:'#3a2a1a'}}>{p.name}</div>
+                  <div style={{fontSize:'15px', fontWeight:800, color:'#1a2a4a'}}>{p.name}</div>
                   <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:`${tier.color}1a`, color:tier.color, fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap'}}>{tier.label}</span>
                 </div>
-                <div style={{fontSize:'12px', color:'#6a5a40', marginBottom:'8px', wordBreak:'break-all'}}>{p.email}</div>
-                <div style={{display:'flex', gap:'10px', flexWrap:'wrap', fontSize:'11px', color:'#8a6e50'}}>
+                <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'8px', wordBreak:'break-all'}}>{p.email}</div>
+                <div style={{display:'flex', gap:'10px', flexWrap:'wrap', fontSize:'11px', color:'#4a7ad0'}}>
                   <span>Joined {joined.toLocaleDateString()}</span>
                   {last && <span>· Last contact {last.toLocaleDateString()}</span>}
                 </div>
@@ -175,14 +175,14 @@ const AddPatientModal: React.FC<{API:string; token:string; accent:string; onClos
   };
 
   return (
-    <div style={{position:'fixed', inset:0, background:'rgba(58,42,26,0.45)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'20px', overflowY:'auto', zIndex:1500}}>
-      <div style={{background:'white', borderRadius:'20px', padding:'24px', maxWidth:'640px', width:'100%', boxShadow:'0 20px 60px rgba(58,42,26,0.3)', margin:'20px 0'}}>
+    <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'20px', overflowY:'auto', zIndex:1500}}>
+      <div style={{background:'white', borderRadius:'20px', padding:'24px', maxWidth:'640px', width:'100%', boxShadow:'0 20px 60px rgba(26,42,74,0.3)', margin:'20px 0'}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'16px'}}>
           <div>
-            <div style={{fontSize:'18px', fontWeight:800, color:'#3a2a1a'}}>Add patient</div>
-            <div style={{fontSize:'12px', color:'#8a6e50'}}>Core info + optional intake form. You can fill intake later.</div>
+            <div style={{fontSize:'18px', fontWeight:800, color:'#1a2a4a'}}>Add patient</div>
+            <div style={{fontSize:'12px', color:'#4a7ad0'}}>Core info + optional intake form. You can fill intake later.</div>
           </div>
-          <button onClick={onClose} style={{background:'transparent', border:'none', fontSize:'20px', color:'#8a6e50', cursor:'pointer'}}>×</button>
+          <button onClick={onClose} style={{background:'transparent', border:'none', fontSize:'20px', color:'#4a7ad0', cursor:'pointer'}}>×</button>
         </div>
 
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'12px', marginBottom:'14px'}}>
@@ -210,8 +210,8 @@ const AddPatientModal: React.FC<{API:string; token:string; accent:string; onClos
           </div>
         </div>
 
-        <div style={{borderTop:'1px solid rgba(184,152,112,0.2)', paddingTop:'16px', marginTop:'6px'}}>
-          <div style={{fontSize:'12px', fontWeight:700, color:'#3a2a1a', marginBottom:'10px', letterSpacing:'0.5px', textTransform:'uppercase'}}>Intake form (optional)</div>
+        <div style={{borderTop:'1px solid rgba(122,176,240,0.2)', paddingTop:'16px', marginTop:'6px'}}>
+          <div style={{fontSize:'12px', fontWeight:700, color:'#1a2a4a', marginBottom:'10px', letterSpacing:'0.5px', textTransform:'uppercase'}}>Intake form (optional)</div>
           <div style={{display:'grid', gridTemplateColumns:'1fr', gap:'10px'}}>
             <TextArea label="Chief complaint / reason for joining" value={intake.chief_complaint||''} onChange={v=>update('chief_complaint', v)}/>
             <TextArea label="Medical history (conditions, surgeries)" value={intake.medical_history||''} onChange={v=>update('medical_history', v)}/>
@@ -239,7 +239,7 @@ const AddPatientModal: React.FC<{API:string; token:string; accent:string; onClos
         {error && <div style={{background:'rgba(224,80,80,0.1)', border:'1px solid rgba(224,80,80,0.3)', borderRadius:'10px', padding:'10px 12px', color:'#a02020', fontSize:'12px', marginTop:'12px'}}>{error}</div>}
 
         <div style={{display:'flex', gap:'10px', justifyContent:'flex-end', marginTop:'16px'}}>
-          <button onClick={onClose} disabled={saving} style={{background:'rgba(240,235,225,0.9)', border:'1px solid rgba(184,152,112,0.3)', borderRadius:'12px', padding:'10px 18px', fontSize:'13px', fontWeight:600, color:'#8a6e50', cursor:'pointer'}}>Cancel</button>
+          <button onClick={onClose} disabled={saving} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'12px', padding:'10px 18px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
           <button onClick={save} disabled={saving || !name.trim() || !email.trim()} style={{background:accent, border:'none', borderRadius:'12px', padding:'10px 20px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer', opacity:(saving||!name.trim()||!email.trim())?0.6:1}}>
             {saving ? 'Saving…' : 'Save patient'}
           </button>
@@ -299,9 +299,9 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
   return (
     <div>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap', marginBottom:'16px'}}>
-        <button onClick={onClose} style={{background:'transparent', border:'1px solid rgba(184,152,112,0.35)', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:600, color:'#8a6e50', cursor:'pointer'}}>← All patients</button>
+        <button onClick={onClose} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>← All patients</button>
         <div style={{display:'flex', gap:'8px'}}>
-          {!editMode && <button onClick={()=>setEditMode(true)} style={{background:'rgba(255,255,255,0.9)', border:'1px solid rgba(184,152,112,0.4)', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:700, color:'#8a6e50', cursor:'pointer'}}>Edit intake</button>}
+          {!editMode && <button onClick={()=>setEditMode(true)} style={{background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Edit intake</button>}
           {editMode && <button onClick={save} disabled={saving} style={{background:accent, border:'none', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:700, color:'white', cursor:'pointer', opacity:saving?0.6:1}}>{saving ? 'Saving…' : savedTick ? '✓ Saved' : 'Save changes'}</button>}
           <button onClick={()=>setDeleteConfirm(true)} style={{background:'transparent', border:'1px solid rgba(192,64,64,0.35)', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', fontWeight:600, color:'#c04040', cursor:'pointer'}}>Delete</button>
         </div>
@@ -311,9 +311,9 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
       <div style={{...CARD, marginBottom:'14px'}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'12px', flexWrap:'wrap'}}>
           <div style={{minWidth:0, flex:1}}>
-            <div style={{fontSize:'22px', fontWeight:800, color:'#3a2a1a', marginBottom:'4px'}}>{p.name}</div>
-            <div style={{fontSize:'13px', color:'#6a5a40', wordBreak:'break-all'}}>{p.email}</div>
-            <div style={{display:'flex', gap:'12px', marginTop:'8px', flexWrap:'wrap', fontSize:'12px', color:'#8a6e50'}}>
+            <div style={{fontSize:'22px', fontWeight:800, color:'#1a2a4a', marginBottom:'4px'}}>{p.name}</div>
+            <div style={{fontSize:'13px', color:'#4a5e6a', wordBreak:'break-all'}}>{p.email}</div>
+            <div style={{display:'flex', gap:'12px', marginTop:'8px', flexWrap:'wrap', fontSize:'12px', color:'#4a7ad0'}}>
               {age !== null && <span>Age {age}</span>}
               {p.dob && <span>· DOB {p.dob}</span>}
               {p.phone && <span>· {p.phone}</span>}
@@ -328,7 +328,7 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
 
         {/* Intake form */}
         <div style={{...CARD}}>
-          <div style={{fontSize:'13px', fontWeight:800, color:'#3a2a1a', marginBottom:'12px', letterSpacing:'0.5px', textTransform:'uppercase'}}>Intake</div>
+          <div style={{fontSize:'13px', fontWeight:800, color:'#1a2a4a', marginBottom:'12px', letterSpacing:'0.5px', textTransform:'uppercase'}}>Intake</div>
           {[
             ['chief_complaint', 'Chief complaint / reason for joining'],
             ['medical_history', 'Medical history'],
@@ -344,8 +344,8 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
               {editMode ? (
                 <textarea value={(intake as any)[k] || ''} onChange={e => update(k as keyof IntakeData, e.target.value)} style={{...INPUT, minHeight:'60px', resize:'vertical', fontFamily:'inherit'}}/>
               ) : (
-                <div style={{fontSize:'13px', color:'#3a2a1a', lineHeight:1.6, whiteSpace:'pre-wrap', minHeight:'20px'}}>
-                  {(intake as any)[k] || <span style={{color:'#b89870', fontStyle:'italic'}}>(not filled)</span>}
+                <div style={{fontSize:'13px', color:'#1a2a4a', lineHeight:1.6, whiteSpace:'pre-wrap', minHeight:'20px'}}>
+                  {(intake as any)[k] || <span style={{color:'#7ab0f0', fontStyle:'italic'}}>(not filled)</span>}
                 </div>
               )}
             </div>
@@ -354,16 +354,16 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
 
         {/* Doctor notes + metadata */}
         <div style={{display:'flex', flexDirection:'column', gap:'14px'}}>
-          <div style={{...CARD, background:'rgba(255,248,230,0.6)', border:'1px solid rgba(184,152,112,0.4)'}}>
+          <div style={{...CARD, background:'rgba(240,246,255,0.6)', border:'1px solid rgba(122,176,240,0.4)'}}>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px'}}>
-              <div style={{fontSize:'13px', fontWeight:800, color:'#3a2a1a', letterSpacing:'0.5px', textTransform:'uppercase'}}>Doctor notes</div>
-              <div style={{fontSize:'10px', color:'#8a6e50', fontStyle:'italic'}}>Private — only visible here</div>
+              <div style={{fontSize:'13px', fontWeight:800, color:'#1a2a4a', letterSpacing:'0.5px', textTransform:'uppercase'}}>Doctor notes</div>
+              <div style={{fontSize:'10px', color:'#4a7ad0', fontStyle:'italic'}}>Private — only visible here</div>
             </div>
             <textarea
               value={doctorNotes}
               onChange={e => setDoctorNotes(e.target.value)}
               placeholder="Your private notes on this patient. Medical observations, coaching progress, anything to remember."
-              style={{...INPUT, minHeight:'240px', resize:'vertical', fontFamily:'inherit', lineHeight:1.6, background:'rgba(255,253,248,0.9)'}}
+              style={{...INPUT, minHeight:'240px', resize:'vertical', fontFamily:'inherit', lineHeight:1.6, background:'rgba(240,246,255,0.6)'}}
             />
             <button onClick={save} disabled={saving} style={{marginTop:'10px', background:accent, border:'none', borderRadius:'10px', padding:'8px 16px', fontSize:'12px', fontWeight:700, color:'white', cursor:'pointer', opacity:saving?0.6:1}}>
               {saving ? 'Saving…' : savedTick ? '✓ Saved' : 'Save notes'}
@@ -371,8 +371,8 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
           </div>
 
           <div style={{...CARD}}>
-            <div style={{fontSize:'13px', fontWeight:800, color:'#3a2a1a', marginBottom:'10px', letterSpacing:'0.5px', textTransform:'uppercase'}}>Record</div>
-            <div style={{fontSize:'12px', color:'#6a5a40', lineHeight:1.8}}>
+            <div style={{fontSize:'13px', fontWeight:800, color:'#1a2a4a', marginBottom:'10px', letterSpacing:'0.5px', textTransform:'uppercase'}}>Record</div>
+            <div style={{fontSize:'12px', color:'#4a5e6a', lineHeight:1.8}}>
               <div><b>Patient ID:</b> #{p.id}</div>
               <div><b>Joined:</b> {new Date(p.created_at).toLocaleString()}</div>
               <div><b>Last updated:</b> {new Date(p.updated_at).toLocaleString()}</div>
@@ -383,14 +383,14 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
       </div>
 
       {deleteConfirm && (
-        <div style={{position:'fixed', inset:0, background:'rgba(58,42,26,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>
-          <div style={{background:'white', borderRadius:'18px', padding:'24px', maxWidth:'420px', width:'100%', boxShadow:'0 16px 50px rgba(58,42,26,0.3)'}}>
-            <div style={{fontSize:'16px', fontWeight:800, color:'#3a2a1a', marginBottom:'8px'}}>Delete patient?</div>
-            <div style={{fontSize:'13px', color:'#6a5a40', marginBottom:'18px', lineHeight:1.6}}>
+        <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>
+          <div style={{background:'white', borderRadius:'18px', padding:'24px', maxWidth:'420px', width:'100%', boxShadow:'0 16px 50px rgba(26,42,74,0.3)'}}>
+            <div style={{fontSize:'16px', fontWeight:800, color:'#1a2a4a', marginBottom:'8px'}}>Delete patient?</div>
+            <div style={{fontSize:'13px', color:'#4a5e6a', marginBottom:'18px', lineHeight:1.6}}>
               This will permanently delete <b>{p.name}</b>'s record and ALL associated messages, appointments, invoices, habits, and assignments. This cannot be undone.
             </div>
             <div style={{display:'flex', gap:'10px', justifyContent:'flex-end'}}>
-              <button onClick={()=>setDeleteConfirm(false)} style={{background:'rgba(240,235,225,0.9)', border:'1px solid rgba(184,152,112,0.3)', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:600, color:'#8a6e50', cursor:'pointer'}}>Cancel</button>
+              <button onClick={()=>setDeleteConfirm(false)} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
               <button onClick={doDelete} style={{background:'#c04040', border:'none', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer'}}>Delete permanently</button>
             </div>
           </div>
