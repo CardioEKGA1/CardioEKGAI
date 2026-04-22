@@ -232,6 +232,9 @@ class ConciergeOraclePull(Base):
     message_id = Column(Integer, nullable=False)
     category = Column(String, nullable=True)
     saved = Column(Boolean, default=False)
+    intention = Column(String, nullable=True)       # Ritual step 2: what the patient asked for guidance on
+    reflection = Column(String, nullable=True)      # Ritual step 5: their journal entry after sitting with the message
+    reflected_at = Column(DateTime, nullable=True)  # Set when reflection is first saved
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class ConciergeLabRecord(Base):
@@ -303,6 +306,9 @@ with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_user_id ON concierge_patients(user_id)"))
         conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS category VARCHAR DEFAULT 'general'"))
         conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS intention VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflection VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflected_at TIMESTAMP"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 

@@ -56,11 +56,23 @@ const CARD_SHADOW = '0 8px 28px rgba(107,78,124,0.12)';
 const ORACLE_SEEN_KEY = (patientId: number, date: string) => `concierge_oracle_seen_${patientId}_${date}`;
 const todayKey = () => new Date().toISOString().slice(0,10);
 
+interface OracleTodaySlim { pulled: boolean; card: { id:number; title:string; category_label?:string; reflection?:string; saved?:boolean } | null; }
+
 const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
   const [tab, setTab] = useState<Tab>('home');
   const [patient, setPatient] = useState<PatientPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [showOracle, setShowOracle] = useState(false);
+  const [oracleEntry, setOracleEntry] = useState<'intention'|'card'|'reflection'>('intention');
+  const [todaysCard, setTodaysCard] = useState<OracleTodaySlim | null>(null);
+
+  const loadToday = useCallback(() => {
+    fetch(`${API}/concierge/oracle/today`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setTodaysCard({ pulled: !!d.pulled, card: d.card || null }); })
+      .catch(() => {});
+  }, [API, token]);
+  useEffect(() => { loadToday(); }, [loadToday]);
 
   // Inject oracle animation keyframes upfront so the Home-tab CTA glow
   // works even before the oracle overlay is opened.
@@ -75,17 +87,30 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
       .finally(() => setLoading(false));
   }, [API, token]);
 
-  // Auto-open oracle card once per day.
+  // Auto-open oracle card once per day — only if they haven't pulled yet.
+  // If they've already pulled today, respect that: the card lives on the
+  // home screen now as a small thumbnail, no overlay pop.
   useEffect(() => {
-    if (!patient) return;
+    if (!patient || !todaysCard) return;
+    if (todaysCard.pulled) return;  // card already drawn today
     try {
       const key = ORACLE_SEEN_KEY(patient.id, todayKey());
       if (!localStorage.getItem(key)) {
+        setOracleEntry('intention');
         setShowOracle(true);
         localStorage.setItem(key, '1');
       }
     } catch {}
-  }, [patient]);
+  }, [patient, todaysCard]);
+
+  const openOracle = useCallback((entry: 'intention'|'card'|'reflection' = 'intention') => {
+    setOracleEntry(entry);
+    setShowOracle(true);
+  }, []);
+  const closeOracle = useCallback(() => {
+    setShowOracle(false);
+    loadToday();
+  }, [loadToday]);
 
   const bookMeditation = useCallback(() => {
     setShowOracle(false);
@@ -108,7 +133,7 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
 
         {/* Tab body */}
         <div style={{marginTop:'14px'}}>
-          {tab === 'home'     && <HomeTab patient={patient} onOracle={() => setShowOracle(true)} onGo={setTab}/>}
+          {tab === 'home'     && <HomeTab patient={patient} todaysCard={todaysCard} onOracle={openOracle} onGo={setTab}/>}
           {tab === 'book'     && <BookTab API={API} token={token} patient={patient}/>}
           {tab === 'messages' && <MessagesTab API={API} token={token}/>}
           {tab === 'labs'     && <LabsTab API={API} token={token}/>}
@@ -154,7 +179,14 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
 
       {/* Oracle card overlay */}
       {showOracle && patient && (
-        <OracleCard API={API} token={token} userName={firstName(patient.name)} onClose={() => setShowOracle(false)} onBookMeditation={bookMeditation}/>
+        <OracleCard
+          API={API}
+          token={token}
+          userName={firstName(patient.name)}
+          initialStep={oracleEntry}
+          onClose={closeOracle}
+          onBookMeditation={bookMeditation}
+        />
       )}
     </div>
   );
@@ -207,33 +239,66 @@ const BetaDisclaimer: React.FC = () => {
 
 // ───── HOME TAB ─────────────────────────────────────────────────────────────
 
-const HomeTab: React.FC<{patient: PatientPayload | null; onOracle: () => void; onGo: (t: Tab) => void}> = ({ patient, onOracle, onGo }) => {
+const HomeTab: React.FC<{patient: PatientPayload | null; todaysCard: OracleTodaySlim | null; onOracle: (entry?: 'intention'|'card'|'reflection') => void; onGo: (t: Tab) => void}> = ({ patient, todaysCard, onOracle, onGo }) => {
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const pulled = todaysCard?.pulled && todaysCard.card;
   return (
     <div>
       <div style={{padding:'24px 4px 8px 4px'}}>
         <div style={{fontSize:'26px', fontWeight:800, color:DEEPP, letterSpacing:'-0.3px', lineHeight:1.2}}>
           {greet}, {firstName(patient?.name || '')} <span style={{fontWeight:400}}>✨</span>
         </div>
-        <div style={{fontSize:'13px', color:DEEPP, opacity:0.7, marginTop:'6px', lineHeight:1.6}}>
-          Your care is personal, integrative, and always one tap away.
+        <div style={{fontSize:'13px', color:DEEPP, opacity:0.7, marginTop:'6px', lineHeight:1.6, fontStyle:'italic', fontFamily:'"Cormorant Garamond",Georgia,serif'}}>
+          {pulled
+            ? 'Your message is waiting for you to sit with it.'
+            : 'Your message from the Universe is waiting.'}
         </div>
       </div>
 
-      {/* Daily Oracle teaser */}
-      <button onClick={onOracle} style={{
-        width:'100%', background:'linear-gradient(135deg, #1a0d35 0%, #4a2d6b 60%, #9e7bd4 100%)',
-        border:'none', borderRadius:'20px', padding:'20px', color:'white', cursor:'pointer',
-        textAlign:'left', boxShadow:'0 12px 30px rgba(107,78,124,0.28)', marginBottom:'14px',
-        fontFamily:'inherit', position:'relative', overflow:'hidden',
-      }}>
-        <div style={{position:'absolute', top:'-6px', right:'-6px', opacity:0.25}}><ChoKuRei size={120} color="white" opacity={1}/></div>
-        <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', opacity:0.75, fontWeight:700}}>Daily Oracle Card</div>
-        <div style={{fontSize:'18px', fontWeight:800, marginTop:'6px', lineHeight:1.3}}>Your card for today is ready</div>
-        <div style={{fontSize:'12px', opacity:0.85, marginTop:'4px', fontStyle:'italic'}}>The Universe has a message for you ✨</div>
-        <div style={{display:'inline-flex', alignItems:'center', gap:'6px', background:'linear-gradient(135deg, rgba(255,223,150,0.18), rgba(255,255,255,0.18))', border:'1px solid rgba(245,194,107,0.7)', padding:'8px 16px', borderRadius:'999px', fontSize:'12px', fontWeight:700, marginTop:'14px', color:'#fff1d3', boxShadow:'0 0 0 1px rgba(245,194,107,0.45), 0 0 18px rgba(245,194,107,0.35)', animation:'oracleCtaGlow 3.6s ease-in-out infinite'}}>Pull today's card →</div>
-      </button>
+      {/* Daily Oracle teaser — two states:
+          (a) not yet pulled today → warm invitation to the ritual
+          (b) pulled → small thumbnail "carrying it with you" that reopens
+              the reflection screen */}
+      {!pulled ? (
+        <button onClick={() => onOracle('intention')} style={{
+          width:'100%',
+          background:'linear-gradient(135deg, #fbeedd 0%, #f6d8c4 45%, #e9c4a4 100%)',
+          border:'1px solid rgba(212,168,107,0.4)',
+          borderRadius:'20px', padding:'22px 20px',
+          color:'#4a3a2e', cursor:'pointer',
+          textAlign:'left', boxShadow:'0 12px 28px rgba(212,168,107,0.22)', marginBottom:'14px',
+          fontFamily:'inherit', position:'relative', overflow:'hidden',
+        }}>
+          <div style={{position:'absolute', top:'-10px', right:'-10px', opacity:0.22}}><ChoKuRei size={140} color="#d4a86b" opacity={1}/></div>
+          <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', opacity:0.65, fontWeight:700}}>Daily Oracle</div>
+          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'22px', fontWeight:600, marginTop:'6px', lineHeight:1.25, color:'#4a3a2e'}}>Your daily message from the Universe</div>
+          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'13px', opacity:0.8, marginTop:'6px', lineHeight:1.5}}>Take a breath. Set your intention.</div>
+          <div style={{display:'inline-flex', alignItems:'center', gap:'6px', background:'linear-gradient(135deg, #f5c26b, #d4a86b)', border:'1px solid rgba(212,168,107,0.6)', padding:'9px 18px', borderRadius:'999px', fontSize:'11px', fontWeight:800, marginTop:'16px', color:'white', letterSpacing:'1px', textTransform:'uppercase', boxShadow:'0 6px 14px rgba(212,168,107,0.4)'}}>Open today's message</div>
+        </button>
+      ) : (
+        <button onClick={() => onOracle('reflection')} style={{
+          width:'100%',
+          background:'linear-gradient(135deg, #fff8ec 0%, #f5e6cf 100%)',
+          border:'1px solid rgba(212,168,107,0.4)',
+          borderRadius:'20px', padding:'14px 16px',
+          color:'#4a3a2e', cursor:'pointer',
+          textAlign:'left', boxShadow:'0 8px 20px rgba(212,168,107,0.2)', marginBottom:'14px',
+          fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px',
+        }}>
+          <div style={{flexShrink:0, width:'54px', height:'72px', background:'linear-gradient(180deg, #fff8ec, #f5e6cf)', border:'1px solid rgba(212,168,107,0.4)', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 10px rgba(107,78,41,0.15)'}}>
+            <ChoKuRei size={26} color="#d4a86b" opacity={0.6}/>
+          </div>
+          <div style={{flex:1, minWidth:0}}>
+            <div style={{fontSize:'9px', letterSpacing:'1.8px', textTransform:'uppercase', color:'#6b5646', opacity:0.7, fontWeight:700}}>Today's message</div>
+            <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'17px', fontWeight:600, color:'#4a3a2e', lineHeight:1.25, marginTop:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{todaysCard!.card!.title}</div>
+            <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'12px', color:'#6b5646', opacity:0.85, marginTop:'2px'}}>
+              {todaysCard!.card!.reflection ? 'Return to your reflection' : 'Sit with the message when you can'}
+            </div>
+          </div>
+          <span style={{color:'#6b5646', fontSize:'16px', opacity:0.5}}>→</span>
+        </button>
+      )}
 
       {/* Next session — placeholder until appointments API wired */}
       <Card>

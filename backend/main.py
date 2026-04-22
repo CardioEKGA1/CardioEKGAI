@@ -3394,67 +3394,158 @@ def concierge_me(current_user: User = Depends(get_current_user), db: Session = D
 
 # ───── Daily Oracle Card ─────
 
-@app.get("/concierge/oracle/today")
-def concierge_oracle_today(
-    current_user: User = Depends(verify_concierge_member),
-    db: Session = Depends(get_db),
-):
-    """Return today's card for the current user. Deterministic per (user, date):
-    reloading returns the same card. Avoids messages pulled in the last 30
-    days for this user. If the user has exhausted the pool within 30 days
-    (not possible at 50 msgs × 30 days for realistic behavior), all messages
-    are re-eligible."""
+# Keyword → category weight. Keeps the intention bias lightweight and
+# transparent; a word in the patient's intention bumps matching categories
+# without ever fully constraining the pick, so the daily pull still feels
+# like the Universe choosing, not an algorithm matching.
+_INTENTION_KEYWORDS = {
+    "self_healing":       ["heal", "body", "pain", "chronic", "recover", "symptom", "sleep", "tired", "exhausted", "burnout"],
+    "energy_balance":     ["energy", "chakra", "prana", "stuck", "scattered", "ground", "center", "overwhelmed"],
+    "gratitude":          ["grateful", "gratitude", "thank", "appreciate", "blessing"],
+    "inner_peace":        ["peace", "calm", "quiet", "still", "anxiety", "anxious", "worry", "racing"],
+    "wellness":           ["health", "habit", "eat", "nutrition", "movement", "exercise", "water", "sleep"],
+    "integrative_health": ["lab", "result", "medication", "doctor", "diagnosis", "treatment", "plan", "protocol"],
+    "self_love":          ["love", "worth", "enough", "self", "deserve", "compassion", "kind"],
+    "release":            ["let go", "release", "forgive", "grief", "loss", "past", "holding on", "regret"],
+    "growth":             ["growth", "change", "stuck", "next step", "direction", "purpose", "career", "move"],
+    "divine_guidance":    ["guide", "sign", "path", "meaning", "universe", "spirit", "intuition", "decision"],
+}
+
+
+class OracleTodayRequest(BaseModel):
+    intention: str | None = None
+
+
+class OracleReflectRequest(BaseModel):
+    reflection: str
+
+
+def _oracle_card_payload(msg: dict, categories: dict, pull: ConciergeOraclePull | None) -> dict:
+    cat = categories.get(msg["category"], {})
+    return {
+        **msg,
+        "category_label": cat.get("label"),
+        "category_color": cat.get("color"),
+        "intention":   (pull.intention or "") if pull else "",
+        "reflection":  (pull.reflection or "") if pull else "",
+        "saved":       bool(pull.saved) if pull else False,
+    }
+
+
+def _pick_card_for(user_id: int, today: str, intention: str | None, db: Session) -> dict:
     oracle = _load_oracle()
     msgs = oracle["messages"]
-    today = _today_mst()
 
-    # Already pulled today? Return that exact card.
-    existing = db.query(ConciergeOraclePull).filter(
-        ConciergeOraclePull.user_id == current_user.id,
-        ConciergeOraclePull.pull_date == today,
-    ).first()
-    if existing:
-        msg = next((m for m in msgs if m["id"] == existing.message_id), msgs[0])
-        cat = oracle["categories"].get(msg["category"], {})
-        return {
-            "already_pulled": True,
-            "date": today,
-            "card": {**msg, "category_label": cat.get("label"), "category_color": cat.get("color")},
-            "saved": bool(existing.saved),
-        }
-
-    # Build exclusion set: IDs pulled in the last 30 days.
     cutoff_date = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
     recent = db.query(ConciergeOraclePull).filter(
-        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.user_id == user_id,
         ConciergeOraclePull.pull_date >= cutoff_date,
     ).all()
     excluded = {r.message_id for r in recent}
     eligible = [m for m in msgs if m["id"] not in excluded]
     if not eligible:
-        eligible = msgs  # fallback if user has burned through the pool
+        eligible = msgs
 
-    # Deterministic pick: SHA-256 of (user_id, date) → pick index into eligible.
-    h = hashlib.sha256(f"{current_user.id}|{today}".encode()).hexdigest()
-    idx = int(h[:8], 16) % len(eligible)
-    chosen = eligible[idx]
+    # Intention bias: messages in matching categories get their index space
+    # tripled in the weighted pool, so they're 3x more likely without ever
+    # forcing a match. Deterministic per (user, date, intention).
+    intention_l = (intention or "").lower().strip()
+    weighted: list[dict] = []
+    if intention_l:
+        matched_cats = set()
+        for cat_slug, kws in _INTENTION_KEYWORDS.items():
+            if any(kw in intention_l for kw in kws):
+                matched_cats.add(cat_slug)
+        for m in eligible:
+            weighted.extend([m] * (3 if m["category"] in matched_cats else 1))
+    else:
+        weighted = eligible
 
+    seed_material = f"{user_id}|{today}|{intention_l}"
+    h = hashlib.sha256(seed_material.encode()).hexdigest()
+    idx = int(h[:8], 16) % len(weighted)
+    return weighted[idx]
+
+
+@app.get("/concierge/oracle/today")
+def concierge_oracle_today(
+    current_user: User = Depends(verify_concierge_member),
+    db: Session = Depends(get_db),
+):
+    """Returns today's pull IF it exists. Does NOT create a pull — the PWA
+    creates the pull explicitly via POST once the patient has set intention
+    (or skipped). Leaving a GET that merely looks up matches the ritual
+    flow: the Universe has already chosen BY the time the patient arrives
+    at the card."""
+    oracle = _load_oracle()
+    today = _today_mst()
+    existing = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.pull_date == today,
+    ).first()
+    if not existing:
+        return {"date": today, "pulled": False, "card": None}
+    msg = next((m for m in oracle["messages"] if m["id"] == existing.message_id), oracle["messages"][0])
+    return {
+        "date": today,
+        "pulled": True,
+        "card": _oracle_card_payload(msg, oracle["categories"], existing),
+    }
+
+
+@app.post("/concierge/oracle/today")
+def concierge_oracle_today_create(
+    data: OracleTodayRequest,
+    current_user: User = Depends(verify_concierge_member),
+    db: Session = Depends(get_db),
+):
+    """Create today's pull. Idempotent: if one already exists, returns it
+    unchanged (intention can't be edited after the card is drawn)."""
+    oracle = _load_oracle()
+    today = _today_mst()
+    existing = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.pull_date == today,
+    ).first()
+    if existing:
+        msg = next((m for m in oracle["messages"] if m["id"] == existing.message_id), oracle["messages"][0])
+        return {"date": today, "pulled": True, "card": _oracle_card_payload(msg, oracle["categories"], existing)}
+
+    chosen = _pick_card_for(current_user.id, today, data.intention, db)
+    intention_clean = (data.intention or "").strip() or None
     pull = ConciergeOraclePull(
         user_id=current_user.id,
         pull_date=today,
         message_id=chosen["id"],
         category=chosen["category"],
         saved=False,
+        intention=intention_clean,
     )
-    db.add(pull)
+    db.add(pull); db.commit(); db.refresh(pull)
+    return {"date": today, "pulled": True, "card": _oracle_card_payload(chosen, oracle["categories"], pull)}
+
+
+@app.post("/concierge/oracle/today/reflect")
+def concierge_oracle_reflect(
+    data: OracleReflectRequest,
+    current_user: User = Depends(verify_concierge_member),
+    db: Session = Depends(get_db),
+):
+    """Save (or update) the patient's reflection journal entry for today's
+    card. Also flips saved=True so the card persists in Energy Log."""
+    today = _today_mst()
+    pull = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.pull_date == today,
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="No card pulled today yet.")
+    pull.reflection = (data.reflection or "").strip()
+    pull.saved = True
+    if pull.reflected_at is None:
+        pull.reflected_at = datetime.utcnow()
     db.commit()
-    cat = oracle["categories"].get(chosen["category"], {})
-    return {
-        "already_pulled": False,
-        "date": today,
-        "card": {**chosen, "category_label": cat.get("label"), "category_color": cat.get("color")},
-        "saved": False,
-    }
+    return {"ok": True, "reflected_at": pull.reflected_at.isoformat()}
 
 
 @app.post("/concierge/oracle/today/save")
@@ -3596,6 +3687,13 @@ def push_subscribe(
         p256dh=p256dh, auth=auth, user_agent=data.user_agent,
     )
     db.add(sub); db.commit(); db.refresh(sub)
+    # Welcome ping — fires once per brand-new subscription (not on re-subscribe
+    # from a known device). Wrapped in try/except so a delivery hiccup doesn't
+    # fail the subscribe request itself.
+    try:
+        send_push_to_user(current_user.id, "Welcome ✨", "You'll receive your daily message from the Universe here.", url="/concierge", db=db)
+    except Exception as e:
+        print(f"welcome push failed: {e}")
     return {"ok": True, "subscription_id": sub.id}
 
 
@@ -3778,6 +3876,147 @@ def physician_send_oracle(
     if p.user_id:
         send_push_to_user(p.user_id, "Dr. Anderson sent you something ✨", msg["title"], url="/concierge", db=db)
     return {"id": m.id, "created_at": m.created_at.isoformat(), "message_id": data.message_id}
+
+
+# Lab review (physician-side). Flips a pending lab to reviewed/flagged and
+# pings the patient with the outcome. Paired with the existing patient
+# upload endpoint so the full cycle is covered without a second iteration.
+class LabReviewRequest(BaseModel):
+    status: str                      # "reviewed" | "flagged"
+    physician_note: str | None = None
+
+@app.patch("/concierge/labs/{lab_id}")
+def concierge_lab_review(
+    lab_id: int,
+    data: LabReviewRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    lab = db.query(ConciergeLabRecord).filter(ConciergeLabRecord.id == lab_id).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab record not found")
+    if data.status not in ("reviewed", "flagged"):
+        raise HTTPException(status_code=400, detail="status must be reviewed | flagged")
+    lab.status = data.status
+    lab.flagged = (data.status == "flagged")
+    if data.physician_note is not None:
+        lab.physician_note = data.physician_note.strip()
+    lab.reviewed_at = datetime.utcnow()
+    db.commit()
+    # Ping the patient.
+    patient = db.query(ConciergePatient).filter(ConciergePatient.id == lab.patient_id).first()
+    if patient and patient.user_id:
+        title = "Lab results are in ✨" if data.status == "reviewed" else "Lab note from Dr. Anderson"
+        body = lab.physician_note[:120] if lab.physician_note else ("All within range." if data.status == "reviewed" else "Please review and message back.")
+        send_push_to_user(patient.user_id, title, body, url="/concierge", db=db)
+    return {"ok": True, "id": lab.id, "status": lab.status, "flagged": lab.flagged, "reviewed_at": lab.reviewed_at.isoformat()}
+
+
+# ───── Scheduled jobs (cron-driven) ───────────────────────────────────────
+# Railway Crons (or any external pinger) call these with X-Job-Secret. The
+# secret matches JOB_SECRET env var. Unauthed callers get 404 so the
+# endpoints' existence isn't advertised.
+
+def _require_job_secret(x_job_secret: str | None):
+    expected = _clean_env(os.getenv("JOB_SECRET", ""))
+    if not expected or x_job_secret != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.post("/internal/jobs/oracle-morning")
+def job_oracle_morning(
+    x_job_secret: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Morning ritual ping. Suggested Railway Cron: 0 7 * * * in MST.
+    Iterates all active concierge patients with a linked user_id and sends
+    the gentle morning notification."""
+    _require_job_secret(x_job_secret)
+    patients = db.query(ConciergePatient).filter(
+        ConciergePatient.user_id.isnot(None),
+        ConciergePatient.subscription_status == "active",
+    ).all()
+    pinged = 0
+    for p in patients:
+        n = send_push_to_user(
+            p.user_id,
+            "Good morning 🌸",
+            "Your message from the Universe is waiting.",
+            url="/concierge",
+            db=db,
+        )
+        if n > 0: pinged += 1
+    return {"ok": True, "candidates": len(patients), "delivered_to": pinged}
+
+
+@app.post("/internal/jobs/oracle-evening")
+def job_oracle_evening(
+    x_job_secret: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Evening reflection ping. Suggested Railway Cron: 0 18 * * * MST.
+    Only pings patients who HAVE pulled a card today but haven't saved a
+    reflection yet — respect silence for patients who didn't engage."""
+    _require_job_secret(x_job_secret)
+    today = _today_mst()
+    # Pulls from today with no reflection yet, for active patients.
+    pulls = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.pull_date == today,
+        ConciergeOraclePull.reflected_at.is_(None),
+    ).all()
+    pinged = 0
+    for pull in pulls:
+        n = send_push_to_user(
+            pull.user_id,
+            "Sit with it for a moment ✨",
+            "How did today's message show up for you?",
+            url="/concierge",
+            db=db,
+        )
+        if n > 0: pinged += 1
+    return {"ok": True, "candidates": len(pulls), "delivered_to": pinged}
+
+
+@app.post("/internal/jobs/appointment-reminders")
+def job_appointment_reminders(
+    x_job_secret: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Session reminder ping — fires ~60 min before a scheduled appointment.
+    Suggested Railway Cron: every 15 minutes (*/15 * * * *). Looks 45-75 min
+    ahead to catch the 60-min mark regardless of cron cadence. Tracks sent
+    reminders via a notes-field marker so duplicates don't go out if the
+    cron runs twice in the window."""
+    _require_job_secret(x_job_secret)
+    now = datetime.utcnow()
+    window_start = now + timedelta(minutes=45)
+    window_end   = now + timedelta(minutes=75)
+    appts = db.query(ConciergeAppointment).filter(
+        ConciergeAppointment.status == "scheduled",
+        ConciergeAppointment.starts_at >= window_start,
+        ConciergeAppointment.starts_at <= window_end,
+    ).all()
+    pinged = 0
+    for a in appts:
+        if "[reminded]" in (a.notes or ""):
+            continue
+        p = db.query(ConciergePatient).filter(ConciergePatient.id == a.patient_id).first()
+        if not (p and p.user_id):
+            continue
+        svc_label = {"medical_visit":"Medical visit", "guided_meditation":"Guided meditation", "urgent_same_day":"Urgent consult"}.get(a.appointment_type, a.appointment_type)
+        when = a.starts_at.strftime("%I:%M %p")
+        n = send_push_to_user(
+            p.user_id,
+            f"See you at {when}",
+            f"{svc_label} with Dr. Anderson in about an hour.",
+            url="/concierge",
+            db=db,
+        )
+        if n > 0:
+            a.notes = (a.notes or "") + " [reminded]"
+            pinged += 1
+    db.commit()
+    return {"ok": True, "candidates": len(appts), "delivered_to": pinged}
 
 
 @app.get("/concierge/oracle/library")
