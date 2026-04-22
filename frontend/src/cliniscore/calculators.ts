@@ -821,6 +821,263 @@ export const CALCULATORS: Calculator[] = [
       return cat(score, 'Hyperosmolar', 'orange', 'Calculated >295 — check glucose, Na, BUN.', extras);
     },
   },
+
+  // ── PHASE 2 additions ─────────────────────────────────────────────────────
+  {
+    id: 'wells_dvt',
+    name: 'Wells Score (DVT)',
+    specialty: 'Pulmonology',
+    shortDesc: 'Pre-test probability of DVT',
+    references: ['Wells 2003'],
+    variables: [
+      { id: 'active_cancer', label: 'Active cancer (treatment within 6 mo)', ...YN(1) },
+      { id: 'paralysis', label: 'Paralysis, paresis, or recent plaster immobilization', ...YN(1) },
+      { id: 'bedridden', label: 'Recently bedridden ≥3 d or major surgery within 12 wk', ...YN(1) },
+      { id: 'tenderness', label: 'Localized tenderness along deep venous system', ...YN(1) },
+      { id: 'entire_leg', label: 'Entire leg swollen', ...YN(1) },
+      { id: 'calf_swell', label: 'Calf swelling ≥3 cm vs asymptomatic side', ...YN(1) },
+      { id: 'pitting_edema', label: 'Pitting edema greater in symptomatic leg', ...YN(1) },
+      { id: 'collateral', label: 'Collateral superficial veins (non-varicose)', ...YN(1) },
+      { id: 'prev_dvt', label: 'Previously documented DVT', ...YN(1) },
+      { id: 'alt_dx', label: 'Alternative diagnosis as likely or more likely', type: 'select', options: [
+        { label: 'No (0)', value: 0 }, { label: 'Yes (−2)', value: -2 },
+      ]},
+    ],
+    compute: (v) => {
+      const score = Object.values(v).reduce((a,b)=>a+(b||0), 0);
+      if (score >= 2) return cat(score, 'DVT likely', 'red', 'DVT probability ~28%. Proceed to ultrasound (or D-dimer first if low clinical suspicion despite score).');
+      return cat(score, 'DVT unlikely', 'green', 'DVT probability ~6%. D-dimer; image only if positive.');
+    },
+  },
+  {
+    id: 'sirs',
+    name: 'SIRS Criteria',
+    specialty: 'Infectious Disease',
+    shortDesc: 'Systemic inflammatory response',
+    references: ['ACCP/SCCM 1992'],
+    variables: [
+      { id: 'temp', label: 'Temperature >38°C or <36°C', ...YN(1) },
+      { id: 'hr', label: 'HR >90', ...YN(1) },
+      { id: 'rr', label: 'RR >20 or PaCO₂ <32', ...YN(1) },
+      { id: 'wbc', label: 'WBC >12k, <4k, or >10% bands', ...YN(1) },
+    ],
+    compute: (v) => {
+      const score = Object.values(v).reduce((a,b)=>a+(b||0), 0);
+      if (score < 2) return cat(score, 'No SIRS', 'green', '<2 criteria met.');
+      if (score === 2) return cat(score, 'SIRS', 'yellow', '2 criteria met — consistent with SIRS. Evaluate for infection.');
+      return cat(score, 'SIRS (severe)', 'red', '≥3 criteria met. Strongly consider sepsis workup if infection suspected.');
+    },
+  },
+  {
+    id: 'sofa',
+    name: 'SOFA (simplified)',
+    specialty: 'Infectious Disease',
+    shortDesc: 'Organ-failure severity',
+    references: ['Vincent 1996'],
+    variables: [
+      { id: 'resp', label: 'Respiration (PaO₂/FiO₂)', type: 'select', options: [
+        { label: '≥400 (0)', value: 0 }, { label: '<400 (1)', value: 1 },
+        { label: '<300 (2)', value: 2 }, { label: '<200 w/ vent (3)', value: 3 }, { label: '<100 w/ vent (4)', value: 4 },
+      ]},
+      { id: 'coag', label: 'Coagulation (platelets ×10³/µL)', type: 'select', options: [
+        { label: '≥150 (0)', value: 0 }, { label: '<150 (1)', value: 1 },
+        { label: '<100 (2)', value: 2 }, { label: '<50 (3)', value: 3 }, { label: '<20 (4)', value: 4 },
+      ]},
+      { id: 'liver', label: 'Liver (bilirubin mg/dL)', type: 'select', options: [
+        { label: '<1.2 (0)', value: 0 }, { label: '1.2–1.9 (1)', value: 1 },
+        { label: '2.0–5.9 (2)', value: 2 }, { label: '6.0–11.9 (3)', value: 3 }, { label: '≥12 (4)', value: 4 },
+      ]},
+      { id: 'cv', label: 'Cardiovascular', type: 'select', options: [
+        { label: 'MAP ≥70 (0)', value: 0 }, { label: 'MAP <70 (1)', value: 1 },
+        { label: 'Low-dose pressor (2)', value: 2 }, { label: 'Mod-dose pressor (3)', value: 3 }, { label: 'High-dose pressor (4)', value: 4 },
+      ]},
+      { id: 'cns', label: 'CNS (GCS)', type: 'select', options: [
+        { label: '15 (0)', value: 0 }, { label: '13–14 (1)', value: 1 },
+        { label: '10–12 (2)', value: 2 }, { label: '6–9 (3)', value: 3 }, { label: '<6 (4)', value: 4 },
+      ]},
+      { id: 'renal', label: 'Renal (Cr mg/dL or urine output)', type: 'select', options: [
+        { label: '<1.2 (0)', value: 0 }, { label: '1.2–1.9 (1)', value: 1 },
+        { label: '2.0–3.4 (2)', value: 2 }, { label: '3.5–4.9 or <500 mL/d (3)', value: 3 }, { label: '≥5 or <200 mL/d (4)', value: 4 },
+      ]},
+    ],
+    compute: (v) => {
+      const score = Object.values(v).reduce((a,b)=>a+(b||0), 0);
+      if (score <= 6) return cat(score, 'Low', 'green', 'SOFA ≤6 — mortality <10%.');
+      if (score <= 9) return cat(score, 'Moderate', 'yellow', 'SOFA 7–9 — mortality ~15–20%.');
+      if (score <= 12) return cat(score, 'High', 'orange', 'SOFA 10–12 — mortality ~40–50%.');
+      return cat(score, 'Very high', 'red', 'SOFA >12 — mortality >50%.');
+    },
+  },
+  {
+    id: 'apgar',
+    name: 'APGAR Score',
+    specialty: 'Pediatrics',
+    shortDesc: 'Newborn assessment at 1 and 5 min',
+    references: ['Apgar 1953'],
+    variables: [
+      { id: 'appearance', label: 'Appearance (color)', type: 'select', options: [
+        { label: 'Blue/pale (0)', value: 0 }, { label: 'Acrocyanosis (1)', value: 1 }, { label: 'Completely pink (2)', value: 2 },
+      ]},
+      { id: 'pulse', label: 'Pulse (HR)', type: 'select', options: [
+        { label: 'Absent (0)', value: 0 }, { label: '<100 (1)', value: 1 }, { label: '≥100 (2)', value: 2 },
+      ]},
+      { id: 'grimace', label: 'Grimace (reflex)', type: 'select', options: [
+        { label: 'No response (0)', value: 0 }, { label: 'Grimace (1)', value: 1 }, { label: 'Cry or active withdrawal (2)', value: 2 },
+      ]},
+      { id: 'activity', label: 'Activity (muscle tone)', type: 'select', options: [
+        { label: 'Limp (0)', value: 0 }, { label: 'Some flexion (1)', value: 1 }, { label: 'Active motion (2)', value: 2 },
+      ]},
+      { id: 'respiration', label: 'Respiration', type: 'select', options: [
+        { label: 'Absent (0)', value: 0 }, { label: 'Slow/irregular (1)', value: 1 }, { label: 'Good cry (2)', value: 2 },
+      ]},
+    ],
+    compute: (v) => {
+      const score = Object.values(v).reduce((a,b)=>a+(b||0), 0);
+      if (score <= 3) return cat(score, 'Severely depressed', 'red', 'Immediate resuscitation required.');
+      if (score <= 6) return cat(score, 'Moderately depressed', 'orange', 'May require some resuscitative intervention.');
+      return cat(score, 'Normal', 'green', 'Well newborn.');
+    },
+  },
+  {
+    id: 'bishop',
+    name: 'Bishop Score',
+    specialty: 'Obstetrics',
+    shortDesc: 'Cervical readiness for induction',
+    references: ['Bishop 1964'],
+    variables: [
+      { id: 'dilation', label: 'Cervical dilation (cm)', type: 'select', options: [
+        { label: 'Closed (0)', value: 0 }, { label: '1–2 (1)', value: 1 }, { label: '3–4 (2)', value: 2 }, { label: '≥5 (3)', value: 3 },
+      ]},
+      { id: 'effacement', label: 'Effacement (%)', type: 'select', options: [
+        { label: '0–30 (0)', value: 0 }, { label: '40–50 (1)', value: 1 }, { label: '60–70 (2)', value: 2 }, { label: '≥80 (3)', value: 3 },
+      ]},
+      { id: 'station', label: 'Fetal station', type: 'select', options: [
+        { label: '−3 (0)', value: 0 }, { label: '−2 (1)', value: 1 }, { label: '−1 / 0 (2)', value: 2 }, { label: '+1 / +2 (3)', value: 3 },
+      ]},
+      { id: 'consistency', label: 'Cervical consistency', type: 'select', options: [
+        { label: 'Firm (0)', value: 0 }, { label: 'Medium (1)', value: 1 }, { label: 'Soft (2)', value: 2 },
+      ]},
+      { id: 'position', label: 'Cervical position', type: 'select', options: [
+        { label: 'Posterior (0)', value: 0 }, { label: 'Mid (1)', value: 1 }, { label: 'Anterior (2)', value: 2 },
+      ]},
+    ],
+    compute: (v) => {
+      const score = Object.values(v).reduce((a,b)=>a+(b||0), 0);
+      if (score <= 5) return cat(score, 'Unfavorable', 'red', 'Score ≤5 — cervical ripening likely needed before induction.');
+      if (score <= 7) return cat(score, 'Intermediate', 'yellow', 'Score 6–7 — induction may succeed; consider ripening.');
+      return cat(score, 'Favorable', 'green', 'Score ≥8 — induction likely to succeed (similar to spontaneous labor).');
+    },
+  },
+  {
+    id: 'karnofsky',
+    name: 'Karnofsky Performance',
+    specialty: 'Oncology',
+    shortDesc: 'Functional performance scale',
+    variables: [
+      { id: 'kps', label: 'Karnofsky level', type: 'select', options: [
+        { label: '100 — normal, no complaints', value: 100 },
+        { label: '90 — normal activity, minor signs', value: 90 },
+        { label: '80 — normal with effort', value: 80 },
+        { label: '70 — cares for self, cannot work', value: 70 },
+        { label: '60 — occasional assistance needed', value: 60 },
+        { label: '50 — considerable assistance, frequent care', value: 50 },
+        { label: '40 — disabled, special care', value: 40 },
+        { label: '30 — severely disabled, hospitalization indicated', value: 30 },
+        { label: '20 — very sick, active support needed', value: 20 },
+        { label: '10 — moribund', value: 10 },
+        { label: '0 — dead', value: 0 },
+      ]},
+    ],
+    compute: (v) => {
+      const k = v.kps ?? 0;
+      if (k >= 80) return cat(k, 'Able to carry on normal activity', 'green', 'KPS 80–100 — able to care for self independently.');
+      if (k >= 50) return cat(k, 'Unable to work, cares for self', 'yellow', 'KPS 50–70 — needs varying assistance.');
+      return cat(k, 'Unable to care for self', 'red', 'KPS ≤40 — requires institutional/hospital care.');
+    },
+  },
+  {
+    id: 'mdrd',
+    name: 'MDRD GFR (legacy)',
+    specialty: 'Nephrology',
+    shortDesc: 'eGFR — older 4-variable formula',
+    references: ['Levey 2006'],
+    variables: [
+      { id: 'cr', label: 'Serum creatinine', type: 'number', unit: 'mg/dL', min: 0.2, max: 15, step: 0.01 },
+      { id: 'age', label: 'Age', type: 'number', unit: 'years', min: 18, max: 120 },
+      { id: 'female', label: 'Female', ...YN(1) },
+      { id: 'aa', label: 'Black / African-American (legacy — see note)', ...YN(1) },
+    ],
+    compute: (v) => {
+      const cr = Math.max(0.1, v.cr || 1);
+      let gfr = 175 * Math.pow(cr, -1.154) * Math.pow(v.age || 40, -0.203);
+      if (v.female) gfr *= 0.742;
+      if (v.aa) gfr *= 1.212;
+      const score = Math.round(gfr);
+      const note = v.aa ? 'Race coefficient deprecated — prefer CKD-EPI 2021 (race-free).' : 'Consider CKD-EPI 2021 for more accurate current estimate.';
+      if (gfr >= 90) return cat(score, 'G1 / normal', 'green', `eGFR ≥90. ${note}`, {unit:'mL/min/1.73m²'});
+      if (gfr >= 60) return cat(score, 'G2 / mild', 'green', `eGFR 60–89. ${note}`, {unit:'mL/min/1.73m²'});
+      if (gfr >= 30) return cat(score, 'G3', 'yellow', `eGFR 30–59. ${note}`, {unit:'mL/min/1.73m²'});
+      if (gfr >= 15) return cat(score, 'G4 — severe', 'red', `eGFR 15–29. ${note}`, {unit:'mL/min/1.73m²'});
+      return cat(score, 'G5 — kidney failure', 'red', `eGFR <15. ${note}`, {unit:'mL/min/1.73m²'});
+    },
+  },
+  {
+    id: 'cage',
+    name: 'CAGE Questionnaire',
+    specialty: 'Psychiatry',
+    shortDesc: 'Alcohol use disorder screen',
+    references: ['Ewing 1984'],
+    variables: [
+      { id: 'c', label: 'Felt you should CUT DOWN on drinking', ...YN(1) },
+      { id: 'a', label: 'People ANNOYED you by criticizing your drinking', ...YN(1) },
+      { id: 'g', label: 'Felt GUILTY about drinking', ...YN(1) },
+      { id: 'e', label: 'EYE-OPENER — morning drink to steady nerves / cure hangover', ...YN(1) },
+    ],
+    compute: (v) => {
+      const score = Object.values(v).reduce((a,b)=>a+(b||0), 0);
+      if (score === 0) return cat(score, 'Negative', 'green', '0/4 — no immediate concern. Does not rule out at-risk drinking.');
+      if (score === 1) return cat(score, 'Borderline', 'yellow', '1/4 — consider further assessment with AUDIT.');
+      return cat(score, 'Positive', 'red', '≥2/4 — clinically significant for alcohol use disorder. Warrants further workup.');
+    },
+  },
+  {
+    id: 'adjusted_bw',
+    name: 'Adjusted Body Weight',
+    specialty: 'General',
+    shortDesc: 'Dosing weight for obese patients',
+    variables: [
+      { id: 'actual_kg', label: 'Actual weight', type: 'number', unit: 'kg', min: 30, max: 300, step: 0.1 },
+      { id: 'height_cm', label: 'Height', type: 'number', unit: 'cm', min: 120, max: 230 },
+      { id: 'female', label: 'Female', ...YN(1) },
+    ],
+    compute: (v) => {
+      const inches = (v.height_cm || 170) / 2.54;
+      const over60 = Math.max(0, inches - 60);
+      const ibw = v.female ? 45.5 + 2.3*over60 : 50 + 2.3*over60;
+      const actual = v.actual_kg || 0;
+      const abw = ibw + 0.4 * (actual - ibw);
+      const score = Math.round(abw * 10) / 10;
+      const summary = actual > ibw * 1.3
+        ? `Use AdjBW (${abw.toFixed(1)} kg) instead of actual for aminoglycosides, some anticoagulants, and select drugs where IBW under-doses and actual over-doses.`
+        : `Patient is near IBW (${ibw.toFixed(1)} kg) — AdjBW rarely needed. Use actual or IBW per drug.`;
+      return cat(score, actual > ibw * 1.3 ? 'Use AdjBW' : 'Near IBW', 'green', summary, {unit:'kg', ibw_kg: Math.round(ibw*10)/10});
+    },
+  },
+  {
+    id: 'bsa_mosteller',
+    name: 'BSA (Mosteller)',
+    specialty: 'General',
+    shortDesc: 'Body surface area for chemo dosing',
+    variables: [
+      { id: 'height_cm', label: 'Height', type: 'number', unit: 'cm', min: 50, max: 230 },
+      { id: 'weight_kg', label: 'Weight', type: 'number', unit: 'kg', min: 5, max: 300, step: 0.1 },
+    ],
+    compute: (v) => {
+      const bsa = Math.sqrt(((v.height_cm || 0) * (v.weight_kg || 0)) / 3600);
+      const score = Math.round(bsa * 100) / 100;
+      return cat(score, 'BSA', 'green', 'Mosteller formula — standard for chemotherapy dosing. Typical adult: 1.6–2.0 m².', {unit:'m²'});
+    },
+  },
 ];
 
 function rangePhq(): CalcOption[] {
@@ -835,7 +1092,7 @@ function rangePhq(): CalcOption[] {
 export const SPECIALTIES = [
   'All', 'Cardiology', 'Pulmonology', 'Nephrology', 'Hepatology',
   'Neurology', 'Infectious Disease', 'Hematology', 'Gastroenterology',
-  'Psychiatry', 'General',
+  'Psychiatry', 'Obstetrics', 'Pediatrics', 'Oncology', 'General',
 ];
 
 // Aspirational Phase-2 list — these are not yet implemented but tracked so we
@@ -846,12 +1103,10 @@ export const PHASE_2_CALCULATORS: {id: string; name: string; specialty: string}[
   { id: 'framingham', name: 'Framingham 10-year', specialty: 'Cardiology' },
   { id: 'ascvd', name: 'ASCVD Pooled Cohort', specialty: 'Cardiology' },
   { id: 'timi_stemi', name: 'TIMI STEMI', specialty: 'Cardiology' },
-  { id: 'wells_dvt', name: 'Wells DVT', specialty: 'Pulmonology' },
   { id: 'geneva', name: 'Revised Geneva', specialty: 'Pulmonology' },
   { id: 'psi_port', name: 'PSI / PORT', specialty: 'Pulmonology' },
   { id: 'ariscat', name: 'ARISCAT', specialty: 'Pulmonology' },
   { id: 'berlin_ards', name: 'Berlin ARDS', specialty: 'Pulmonology' },
-  { id: 'mdrd', name: 'MDRD GFR', specialty: 'Nephrology' },
   { id: 'fe_urea', name: 'FE Urea', specialty: 'Nephrology' },
   { id: 'uag', name: 'Urine Anion Gap', specialty: 'Nephrology' },
   { id: 'kdigo_aki', name: 'KDIGO AKI staging', specialty: 'Nephrology' },
@@ -864,8 +1119,6 @@ export const PHASE_2_CALCULATORS: {id: string; name: string; specialty: string}[
   { id: 'fisher', name: 'Fisher Grade', specialty: 'Neurology' },
   { id: 'ich_score', name: 'ICH Score', specialty: 'Neurology' },
   { id: 'mrs', name: 'Modified Rankin', specialty: 'Neurology' },
-  { id: 'sirs', name: 'SIRS', specialty: 'Infectious Disease' },
-  { id: 'sofa', name: 'SOFA', specialty: 'Infectious Disease' },
   { id: 'feverpain', name: 'FeverPAIN', specialty: 'Infectious Disease' },
   { id: 'rockall', name: 'Rockall', specialty: 'Gastroenterology' },
   { id: 'ranson', name: 'Ranson Criteria', specialty: 'Gastroenterology' },
@@ -874,22 +1127,16 @@ export const PHASE_2_CALCULATORS: {id: string; name: string; specialty: string}[
   { id: 'harvey_bradshaw', name: 'Harvey-Bradshaw', specialty: 'Gastroenterology' },
   { id: 'plasmic', name: 'PLASMIC Score', specialty: 'Hematology' },
   { id: 'ecog', name: 'ECOG Performance', specialty: 'Oncology' },
-  { id: 'karnofsky', name: 'Karnofsky', specialty: 'Oncology' },
-  { id: 'bishop', name: 'Bishop Score', specialty: 'Obstetrics' },
   { id: 'edinburgh', name: 'Edinburgh Postnatal Depression', specialty: 'Obstetrics' },
   { id: 'pecarn', name: 'PECARN', specialty: 'Pediatrics' },
   { id: 'peds_gcs', name: 'Pediatric GCS', specialty: 'Pediatrics' },
-  { id: 'apgar', name: 'Apgar', specialty: 'Pediatrics' },
   { id: 'columbia_ssrs', name: 'Columbia Suicide Severity', specialty: 'Psychiatry' },
   { id: 'audit', name: 'AUDIT', specialty: 'Psychiatry' },
-  { id: 'cage', name: 'CAGE', specialty: 'Psychiatry' },
   { id: 'ciwa', name: 'CIWA-Ar', specialty: 'Psychiatry' },
   { id: 'cows', name: 'COWS', specialty: 'Psychiatry' },
   { id: 'rcri', name: 'RCRI / Lee', specialty: 'Surgery' },
   { id: 'asa_ps', name: 'ASA Physical Status', specialty: 'Surgery' },
   { id: 'caprini', name: 'Caprini VTE', specialty: 'Surgery' },
-  { id: 'adjusted_bw', name: 'Adjusted body weight', specialty: 'General' },
-  { id: 'bsa_mosteller', name: 'BSA (Mosteller)', specialty: 'General' },
   { id: 'steroid_conv', name: 'Steroid conversion', specialty: 'General' },
   { id: 'mme', name: 'Opioid MME', specialty: 'General' },
   { id: 'holliday_segar', name: 'Maintenance fluids (Holliday-Segar)', specialty: 'General' },
