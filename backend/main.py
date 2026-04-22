@@ -2757,6 +2757,248 @@ def concierge_billing_portal(
         raise HTTPException(status_code=502, detail=f"Stripe portal failed: {type(e).__name__}: {str(e)[:200]}")
     return {"url": session.url}
 
+# ─── Concierge Habits ─────────────────────────────────────────────────────
+# Dr. Anderson assigns habits (e.g. "10k steps", "meditate 10 min") to each
+# concierge patient. Check-ins are status-based: done | partial | skipped.
+# The practitioner records check-ins on the patient's behalf during touch-ins
+# (concierge medicine model — high-touch, practitioner-driven).
+
+HABIT_FREQUENCIES = {"daily", "weekly"}
+HABIT_CHECKIN_STATUSES = {"done", "partial", "skipped"}
+
+class ConciergeHabitCreateRequest(BaseModel):
+    patient_id: int
+    title: str
+    description: str | None = None
+    frequency: str = "daily"
+    target: str | None = None
+
+class ConciergeHabitUpdateRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    frequency: str | None = None
+    target: str | None = None
+    active: bool | None = None
+
+class ConciergeHabitCheckinRequest(BaseModel):
+    status: str
+    notes: str | None = None
+    date: str | None = None  # ISO date (YYYY-MM-DD); defaults to today UTC
+
+
+def _habit_summary(habit: ConciergeHabit, checkins: list) -> dict:
+    """Compute 14-day strip, current streak, and 7-day compliance from the
+    habit's check-ins. `checkins` is the list of ConciergeHabitCheckin rows
+    for this habit (any order; we'll sort)."""
+    today = datetime.utcnow().date()
+    # Most recent status per day — later checkin wins.
+    by_day: dict = {}
+    for c in sorted(checkins, key=lambda c: c.checked_in_at):
+        by_day[c.checked_in_at.date()] = c.status
+
+    strip = []  # oldest → newest, 14 entries
+    for i in range(13, -1, -1):
+        d = today - timedelta(days=i)
+        strip.append({"date": d.isoformat(), "status": by_day.get(d)})
+
+    # Streak: consecutive days ending today with done | partial.
+    streak = 0
+    for i in range(0, 90):
+        d = today - timedelta(days=i)
+        s = by_day.get(d)
+        if s in {"done", "partial"}:
+            streak += 1
+        else:
+            break
+
+    # 7-day compliance score (done=1, partial=0.5, skipped=0, missing=0).
+    score_sum = 0.0
+    for i in range(0, 7):
+        d = today - timedelta(days=i)
+        s = by_day.get(d)
+        if s == "done":     score_sum += 1.0
+        elif s == "partial": score_sum += 0.5
+    compliance_pct = int(round((score_sum / 7.0) * 100))
+
+    last = max((c.checked_in_at for c in checkins), default=None)
+    return {
+        "id": habit.id,
+        "patient_id": habit.patient_id,
+        "title": habit.title,
+        "description": habit.description or "",
+        "frequency": habit.frequency or "daily",
+        "target": habit.target or "",
+        "active": bool(habit.active),
+        "created_at": habit.created_at.isoformat() if habit.created_at else None,
+        "strip_14d": strip,
+        "streak": streak,
+        "compliance_7d_pct": compliance_pct,
+        "last_checkin_at": last.isoformat() if last else None,
+        "total_checkins": len(checkins),
+    }
+
+
+@app.get("/concierge/habits")
+def concierge_habits_list(
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Practice-wide overview: one row per patient with habit counts + weekly
+    compliance averaged across their active habits."""
+    patients = db.query(ConciergePatient).order_by(ConciergePatient.name.asc()).all()
+    habits = db.query(ConciergeHabit).all()
+    habit_ids = [h.id for h in habits]
+    checkins = db.query(ConciergeHabitCheckin).filter(ConciergeHabitCheckin.habit_id.in_(habit_ids)).all() if habit_ids else []
+    by_habit: dict = {}
+    for c in checkins:
+        by_habit.setdefault(c.habit_id, []).append(c)
+
+    rows = []
+    for p in patients:
+        p_habits = [h for h in habits if h.patient_id == p.id]
+        active = [h for h in p_habits if h.active]
+        if not p_habits:
+            continue  # hide patients with no habits from this overview
+        compliances = []
+        for h in active:
+            summary = _habit_summary(h, by_habit.get(h.id, []))
+            compliances.append(summary["compliance_7d_pct"])
+        avg = int(round(sum(compliances) / len(compliances))) if compliances else 0
+        rows.append({
+            "patient_id": p.id,
+            "name": p.name,
+            "email": p.email,
+            "total_habits": len(p_habits),
+            "active_habits": len(active),
+            "avg_compliance_7d_pct": avg,
+        })
+    return {"patients": rows}
+
+
+@app.get("/concierge/patients/{patient_id}/habits")
+def concierge_patient_habits(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    habits = db.query(ConciergeHabit).filter(ConciergeHabit.patient_id == patient_id).order_by(ConciergeHabit.active.desc(), ConciergeHabit.created_at.desc()).all()
+    habit_ids = [h.id for h in habits]
+    checkins = db.query(ConciergeHabitCheckin).filter(ConciergeHabitCheckin.habit_id.in_(habit_ids)).all() if habit_ids else []
+    by_habit: dict = {}
+    for c in checkins:
+        by_habit.setdefault(c.habit_id, []).append(c)
+    return {
+        "patient": {"id": p.id, "name": p.name, "email": p.email},
+        "habits": [_habit_summary(h, by_habit.get(h.id, [])) for h in habits],
+    }
+
+
+@app.post("/concierge/habits")
+def concierge_habit_create(
+    data: ConciergeHabitCreateRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == data.patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    title = (data.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required.")
+    freq = (data.frequency or "daily").lower()
+    if freq not in HABIT_FREQUENCIES:
+        raise HTTPException(status_code=400, detail=f"frequency must be one of {sorted(HABIT_FREQUENCIES)}")
+    h = ConciergeHabit(
+        patient_id=p.id, title=title,
+        description=(data.description or "").strip(),
+        frequency=freq, target=(data.target or "").strip(),
+        active=True,
+    )
+    db.add(h); db.commit(); db.refresh(h)
+    return _habit_summary(h, [])
+
+
+@app.patch("/concierge/habits/{habit_id}")
+def concierge_habit_update(
+    habit_id: int,
+    data: ConciergeHabitUpdateRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    h = db.query(ConciergeHabit).filter(ConciergeHabit.id == habit_id).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="Habit not found")
+    if data.title is not None:       h.title = data.title.strip()
+    if data.description is not None: h.description = data.description.strip()
+    if data.frequency is not None:
+        if data.frequency not in HABIT_FREQUENCIES:
+            raise HTTPException(status_code=400, detail=f"frequency must be one of {sorted(HABIT_FREQUENCIES)}")
+        h.frequency = data.frequency
+    if data.target is not None:      h.target = data.target.strip()
+    if data.active is not None:      h.active = bool(data.active)
+    db.commit(); db.refresh(h)
+    checkins = db.query(ConciergeHabitCheckin).filter(ConciergeHabitCheckin.habit_id == h.id).all()
+    return _habit_summary(h, checkins)
+
+
+@app.delete("/concierge/habits/{habit_id}")
+def concierge_habit_delete(
+    habit_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    h = db.query(ConciergeHabit).filter(ConciergeHabit.id == habit_id).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="Habit not found")
+    db.query(ConciergeHabitCheckin).filter(ConciergeHabitCheckin.habit_id == h.id).delete()
+    db.delete(h); db.commit()
+    return {"ok": True}
+
+
+@app.post("/concierge/habits/{habit_id}/checkin")
+def concierge_habit_checkin(
+    habit_id: int,
+    data: ConciergeHabitCheckinRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    h = db.query(ConciergeHabit).filter(ConciergeHabit.id == habit_id).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="Habit not found")
+    status = (data.status or "").lower()
+    if status not in HABIT_CHECKIN_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(HABIT_CHECKIN_STATUSES)}")
+    # Resolve target date — defaults to today UTC.
+    ts = datetime.utcnow()
+    if data.date:
+        try:
+            d = datetime.strptime(data.date[:10], "%Y-%m-%d").date()
+            ts = datetime.combine(d, datetime.utcnow().time())
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid date — use YYYY-MM-DD.")
+    # Upsert: one check-in per (habit, date). If one exists for that day,
+    # overwrite its status + notes rather than creating a duplicate — mirrors
+    # how the UI displays a single cell per day in the 14-day strip.
+    existing = db.query(ConciergeHabitCheckin).filter(
+        ConciergeHabitCheckin.habit_id == h.id,
+    ).all()
+    same_day = [c for c in existing if c.checked_in_at.date() == ts.date()]
+    if same_day:
+        c = same_day[0]
+        c.status = status
+        c.notes = (data.notes or "").strip()
+        c.checked_in_at = ts
+    else:
+        c = ConciergeHabitCheckin(habit_id=h.id, status=status, notes=(data.notes or "").strip(), checked_in_at=ts)
+        db.add(c)
+    db.commit()
+    checkins = db.query(ConciergeHabitCheckin).filter(ConciergeHabitCheckin.habit_id == h.id).all()
+    return _habit_summary(h, checkins)
+
+
 # ─── Uptime monitoring ─────────────────────────────────────────────────────
 # Lightweight endpoint designed for external uptime monitors (UptimeRobot,
 # BetterStack, etc.). No DB call, no auth, <1ms response. Use this instead
