@@ -3186,7 +3186,7 @@ def patient_bookings_create(
 
 # ───── Messages ─────
 
-PATIENT_MESSAGE_CATEGORIES = {"general", "medical", "lab_review", "meditation", "billing"}
+PATIENT_MESSAGE_CATEGORIES = {"general", "medical", "lab_review", "meditation", "billing", "oracle"}
 
 class PatientMessageRequest(BaseModel):
     body: str
@@ -3489,6 +3489,168 @@ def concierge_oracle_history(
             "card": {**m, "category_label": cat.get("label"), "category_color": cat.get("color")},
         })
     return {"pulls": out}
+
+
+# ─── Physician Dashboard (owner-only aggregated view) ────────────────────
+
+@app.get("/concierge/physician/dashboard")
+def physician_dashboard(
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """One-shot payload for the physician Home tab: today's sessions, active
+    membership counts by tier, pending/flagged labs, revenue this month +
+    lifetime. Keep this a single endpoint so the dashboard paints in one
+    round-trip on first open."""
+    now = datetime.utcnow()
+    # Local-day window in MST — the practice's schedule is local, so
+    # "today's sessions" should reflect MST, not UTC.
+    today_str = _today_mst()
+    day_start = datetime.strptime(today_str, "%Y-%m-%d")
+    day_end = day_start + timedelta(days=1)
+
+    appts = db.query(ConciergeAppointment).filter(
+        ConciergeAppointment.starts_at >= day_start,
+        ConciergeAppointment.starts_at < day_end,
+    ).order_by(ConciergeAppointment.starts_at.asc()).all()
+    appt_patient_ids = list({a.patient_id for a in appts})
+    patients_by_id = {p.id: p for p in db.query(ConciergePatient).filter(ConciergePatient.id.in_(appt_patient_ids)).all()} if appt_patient_ids else {}
+    today_sessions = [{
+        "id": a.id,
+        "patient_id": a.patient_id,
+        "patient_name": patients_by_id.get(a.patient_id).name if patients_by_id.get(a.patient_id) else "—",
+        "service_type": a.appointment_type,
+        "starts_at": a.starts_at.isoformat(),
+        "duration_min": a.duration_min,
+        "status": a.status,
+    } for a in appts]
+
+    # Tier counts — only active subscriptions.
+    all_patients = db.query(ConciergePatient).all()
+    tier_counts = {"awaken": 0, "align": 0, "ascend": 0}
+    for p in all_patients:
+        if (p.subscription_status or "").lower() == "active":
+            t = (p.membership_tier or "").lower()
+            if t in tier_counts:
+                tier_counts[t] += 1
+
+    # Labs — pending + flagged counts.
+    pending_labs = db.query(ConciergeLabRecord).filter(ConciergeLabRecord.status == "pending").count()
+    flagged_labs = db.query(ConciergeLabRecord).filter(ConciergeLabRecord.flagged == True).count()  # noqa: E712
+
+    # Revenue — sum total_paid_cents for month-to-date via invoices. Rather
+    # than a second Stripe round-trip per patient, use what's already
+    # rolled up on concierge_patients.total_paid_cents for lifetime, and
+    # the sum of invoices created this month via Stripe list (capped).
+    revenue_lifetime_cents = sum(p.total_paid_cents or 0 for p in all_patients)
+    revenue_mtd_cents = 0
+    if stripe.api_key:
+        try:
+            month_start = datetime(now.year, now.month, 1)
+            res = stripe.Invoice.list(
+                limit=100,
+                status="paid",
+                created={"gte": int(month_start.timestamp())},
+            )
+            for inv in res.auto_paging_iter():
+                # Only count invoices tied to a concierge customer so
+                # the AI-tool suite revenue doesn't leak in.
+                cid = inv.customer
+                if any(p.stripe_customer_id == cid for p in all_patients):
+                    revenue_mtd_cents += inv.amount_paid or 0
+        except Exception as e:
+            print(f"physician dashboard MTD revenue failed: {e}")
+
+    # Compact patient roster for the dashboard's members section.
+    # Preserved order: active first (by tier weight), then the rest.
+    tier_weight = {"ascend": 3, "align": 2, "awaken": 1}
+    allowances = {"awaken": (2, 1), "align": (3, 2), "ascend": (5, 4)}
+    def _patient_row(p: ConciergePatient) -> dict:
+        allow = allowances.get((p.membership_tier or "awaken"), (2, 1))
+        return {
+            "id": p.id,
+            "name": p.name,
+            "email": p.email,
+            "tier": p.membership_tier,
+            "tier_label": CONCIERGE_TIER_PRICE.get(p.membership_tier or "awaken", {}).get("label", p.membership_tier),
+            "subscription_status": p.subscription_status or "none",
+            "visits_used": p.visits_used or 0,
+            "visits_allowed": allow[0],
+            "meditations_used": p.meditations_used or 0,
+            "meditations_allowed": allow[1],
+        }
+    patients_sorted = sorted(all_patients, key=lambda p: (
+        0 if (p.subscription_status or "").lower() == "active" else 1,
+        -tier_weight.get((p.membership_tier or ""), 0),
+        p.name.lower() if p.name else "",
+    ))
+    members = [_patient_row(p) for p in patients_sorted[:60]]
+
+    return {
+        "today_sessions": today_sessions,
+        "tier_counts": tier_counts,
+        "total_active_members": sum(tier_counts.values()),
+        "pending_labs": pending_labs,
+        "flagged_labs": flagged_labs,
+        "revenue_mtd_cents": revenue_mtd_cents,
+        "revenue_lifetime_cents": revenue_lifetime_cents,
+        "members": members,
+    }
+
+
+class OracleSendRequest(BaseModel):
+    message_id: int  # id from oracle_messages.json
+
+
+@app.post("/concierge/patients/{patient_id}/oracle/send")
+def physician_send_oracle(
+    patient_id: int,
+    data: OracleSendRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Physician hand-picks an oracle card and drops it into the patient's
+    secure inbox. Uses the existing ConciergeMessage rail with a new
+    'oracle' category — shows up in the patient's Messages tab with
+    visible card title + message."""
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    oracle = _load_oracle()
+    msg = next((m for m in oracle["messages"] if m["id"] == data.message_id), None)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    cat = oracle["categories"].get(msg["category"], {})
+    # Body frames the card as a gift — the patient sees it inside the
+    # thread, and the category chip ('Oracle') signals it's distinct
+    # from routine medical messages.
+    body = (
+        f"🌙 {msg['title']}\n\n"
+        f"{msg['body']}\n\n"
+        f"— sent with intention, Dr. Anderson"
+    )
+    m = ConciergeMessage(
+        patient_id=p.id,
+        direction="outbound",
+        subject=f"An oracle card for you · {cat.get('label') or msg['category']}",
+        body=body,
+        category="oracle",
+    )
+    db.add(m); db.commit(); db.refresh(m)
+    return {"id": m.id, "created_at": m.created_at.isoformat(), "message_id": data.message_id}
+
+
+@app.get("/concierge/oracle/library")
+def oracle_library(_: User = Depends(verify_concierge_owner)):
+    """Flat list of all oracle cards for the physician's "Send oracle"
+    picker. Patients use /concierge/oracle/today (deterministic daily)
+    instead."""
+    oracle = _load_oracle()
+    out = []
+    for m in oracle["messages"]:
+        cat = oracle["categories"].get(m["category"], {})
+        out.append({**m, "category_label": cat.get("label"), "category_color": cat.get("color")})
+    return {"cards": out}
 
 
 # ───── Uptime monitoring ─────────────────────────────────────────────────────

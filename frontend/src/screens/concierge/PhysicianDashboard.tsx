@@ -9,12 +9,14 @@ import MessagesSection from './MessagesSection';
 import AppointmentsSection from './AppointmentsSection';
 import BillingSection from './BillingSection';
 import HabitsSection from './HabitsSection';
+import PhysicianHome from './PhysicianHome';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
-type Section = 'patients' | 'messages' | 'appointments' | 'billing' | 'coaching' | 'meditations' | 'habits';
+type Section = 'home' | 'patients' | 'messages' | 'appointments' | 'billing' | 'coaching' | 'meditations' | 'habits';
 
 const SECTIONS: {id: Section; label: string; icon: string}[] = [
+  { id: 'home',         label: 'Home',         icon: '✨' },
   { id: 'patients',     label: 'Patients',     icon: '👥' },
   { id: 'messages',     label: 'Messages',     icon: '💬' },
   { id: 'appointments', label: 'Appointments', icon: '📅' },
@@ -28,7 +30,7 @@ const BG = 'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)';
 const ACCENT = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 
 const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
-  const [section, setSection] = useState<Section>('patients');
+  const [section, setSection] = useState<Section>('home');
 
   return (
     <div style={{minHeight:'100vh', background:BG, display:'flex', flexDirection:'column', fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
@@ -75,12 +77,13 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
       </div>
 
       <main style={{flex:1, padding:'clamp(16px,3vw,28px)', maxWidth:'1200px', width:'100%', margin:'0 auto', boxSizing:'border-box'}}>
+        {section === 'home' && <PhysicianHome API={API} token={token} accent={ACCENT}/>}
         {section === 'patients' && <PatientsSection API={API} token={token} accent={ACCENT}/>}
         {section === 'messages' && <MessagesSection API={API} token={token} accent={ACCENT}/>}
         {section === 'appointments' && <AppointmentsSection API={API} token={token} accent={ACCENT}/>}
         {section === 'billing' && <BillingSection API={API} token={token} accent={ACCENT}/>}
         {section === 'habits' && <HabitsSection API={API} token={token} accent={ACCENT}/>}
-        {!['patients','messages','appointments','billing','habits'].includes(section) && (
+        {!['home','patients','messages','appointments','billing','habits'].includes(section) && (
           <div style={{padding:'60px 20px', textAlign:'center', color:'#4a7ad0'}}>
             <div style={{fontSize:'48px', marginBottom:'16px', opacity:0.5}}>{SECTIONS.find(s => s.id === section)?.icon}</div>
             <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a', marginBottom:'6px'}}>{SECTIONS.find(s => s.id === section)?.label}</div>
