@@ -3869,24 +3869,65 @@ def concierge_oracle_history(
     current_user: User = Depends(verify_concierge_member),
     db: Session = Depends(get_db),
 ):
+    """Energy Log payload. Pulls newest-first with intention + reflection
+    inlined, plus a lightweight summary: consecutive-day streak ending
+    today, this calendar month's top category, count for the month."""
     q = db.query(ConciergeOraclePull).filter(ConciergeOraclePull.user_id == current_user.id)
     if saved_only:
         q = q.filter(ConciergeOraclePull.saved == True)  # noqa: E712
-    rows = q.order_by(ConciergeOraclePull.pull_date.desc()).limit(120).all()
+    rows = q.order_by(ConciergeOraclePull.pull_date.desc()).limit(200).all()
     oracle = _load_oracle()
     msgs = {m["id"]: m for m in oracle["messages"]}
+    cats = oracle["categories"]
+
+    # Streak: consecutive days ending today (MST). Computed against ALL
+    # pulls (not just saved), since streak reflects daily practice rather
+    # than the subset the patient journaled.
+    all_rows = rows if not saved_only else db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+    ).order_by(ConciergeOraclePull.pull_date.desc()).limit(200).all()
+    dates = {r.pull_date for r in all_rows}
+    today = _today_mst()
+    streak = 0
+    cursor = datetime.strptime(today, "%Y-%m-%d").date()
+    while cursor.isoformat() in dates:
+        streak += 1
+        cursor -= timedelta(days=1)
+
+    # This-month totals.
+    month_prefix = today[:7]  # "YYYY-MM"
+    this_month_rows = [r for r in all_rows if r.pull_date.startswith(month_prefix)]
+    from collections import Counter as _Counter
+    cat_counter = _Counter(r.category for r in this_month_rows if r.category)
+    top_pair = cat_counter.most_common(1)
+    top_cat_slug = top_pair[0][0] if top_pair else None
+
     out = []
     for r in rows:
         m = msgs.get(r.message_id)
         if not m:
             continue
-        cat = oracle["categories"].get(m["category"], {})
+        cat = cats.get(m["category"], {})
         out.append({
             "date": r.pull_date,
             "saved": bool(r.saved),
+            "intention": r.intention or "",
+            "reflection": r.reflection or "",
+            "reflected_at": r.reflected_at.isoformat() if r.reflected_at else None,
             "card": {**m, "category_label": cat.get("label"), "category_color": cat.get("color")},
         })
-    return {"pulls": out}
+
+    return {
+        "pulls": out,
+        "summary": {
+            "streak_days": streak,
+            "this_month_count": len(this_month_rows),
+            "this_month_top_category": top_cat_slug,
+            "this_month_top_category_label": cats.get(top_cat_slug, {}).get("label") if top_cat_slug else None,
+            "this_month_top_category_color": cats.get(top_cat_slug, {}).get("color") if top_cat_slug else None,
+            "month": month_prefix,
+        },
+    }
 
 
 # ─── Push notifications (Web Push via VAPID) ─────────────────────────────

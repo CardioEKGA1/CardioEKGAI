@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ChoKuRei from './ChoKuRei';
 import OracleCard, { ensureOracleKeyframes } from './OracleCard';
+import EnergyLog from './EnergyLog';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -65,6 +66,7 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
   const [showOracle, setShowOracle] = useState(false);
   const [oracleEntry, setOracleEntry] = useState<'intention'|'card'|'reflection'>('intention');
   const [todaysCard, setTodaysCard] = useState<OracleTodaySlim | null>(null);
+  const [showEnergyLog, setShowEnergyLog] = useState(false);
 
   const loadToday = useCallback(() => {
     fetch(`${API}/concierge/oracle/today`, { headers: { Authorization: `Bearer ${token}` } })
@@ -133,11 +135,11 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
 
         {/* Tab body */}
         <div style={{marginTop:'14px'}}>
-          {tab === 'home'     && <HomeTab patient={patient} todaysCard={todaysCard} onOracle={openOracle} onGo={setTab}/>}
+          {tab === 'home'     && <HomeTab patient={patient} todaysCard={todaysCard} onOracle={openOracle} onOpenEnergyLog={() => setShowEnergyLog(true)} onGo={setTab}/>}
           {tab === 'book'     && <BookTab API={API} token={token} patient={patient}/>}
           {tab === 'messages' && <MessagesTab API={API} token={token}/>}
           {tab === 'labs'     && <LabsTab API={API} token={token}/>}
-          {tab === 'account'  && <AccountTab API={API} token={token} patient={patient} onSignOut={onBack}/>}
+          {tab === 'account'  && <AccountTab API={API} token={token} patient={patient} onSignOut={onBack} onOpenEnergyLog={() => setShowEnergyLog(true)}/>}
         </div>
       </div>
 
@@ -187,6 +189,11 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
           onClose={closeOracle}
           onBookMeditation={bookMeditation}
         />
+      )}
+
+      {/* Energy Log overlay — timeline of saved pulls */}
+      {showEnergyLog && (
+        <EnergyLog API={API} token={token} onClose={() => setShowEnergyLog(false)}/>
       )}
     </div>
   );
@@ -239,7 +246,7 @@ const BetaDisclaimer: React.FC = () => {
 
 // ───── HOME TAB ─────────────────────────────────────────────────────────────
 
-const HomeTab: React.FC<{patient: PatientPayload | null; todaysCard: OracleTodaySlim | null; onOracle: (entry?: 'intention'|'card'|'reflection') => void; onGo: (t: Tab) => void}> = ({ patient, todaysCard, onOracle, onGo }) => {
+const HomeTab: React.FC<{patient: PatientPayload | null; todaysCard: OracleTodaySlim | null; onOracle: (entry?: 'intention'|'card'|'reflection') => void; onOpenEnergyLog: () => void; onGo: (t: Tab) => void}> = ({ patient, todaysCard, onOracle, onOpenEnergyLog, onGo }) => {
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const pulled = todaysCard?.pulled && todaysCard.card;
@@ -277,27 +284,37 @@ const HomeTab: React.FC<{patient: PatientPayload | null; todaysCard: OracleToday
           <div style={{display:'inline-flex', alignItems:'center', gap:'6px', background:'linear-gradient(135deg, #f5c26b, #d4a86b)', border:'1px solid rgba(212,168,107,0.6)', padding:'9px 18px', borderRadius:'999px', fontSize:'11px', fontWeight:800, marginTop:'16px', color:'white', letterSpacing:'1px', textTransform:'uppercase', boxShadow:'0 6px 14px rgba(212,168,107,0.4)'}}>Open today's message</div>
         </button>
       ) : (
-        <button onClick={() => onOracle('reflection')} style={{
-          width:'100%',
-          background:'linear-gradient(135deg, #fff8ec 0%, #f5e6cf 100%)',
-          border:'1px solid rgba(212,168,107,0.4)',
-          borderRadius:'20px', padding:'14px 16px',
-          color:'#4a3a2e', cursor:'pointer',
-          textAlign:'left', boxShadow:'0 8px 20px rgba(212,168,107,0.2)', marginBottom:'14px',
-          fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px',
-        }}>
-          <div style={{flexShrink:0, width:'54px', height:'72px', background:'linear-gradient(180deg, #fff8ec, #f5e6cf)', border:'1px solid rgba(212,168,107,0.4)', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 10px rgba(107,78,41,0.15)'}}>
-            <ChoKuRei size={26} color="#d4a86b" opacity={0.6}/>
-          </div>
-          <div style={{flex:1, minWidth:0}}>
-            <div style={{fontSize:'9px', letterSpacing:'1.8px', textTransform:'uppercase', color:'#6b5646', opacity:0.7, fontWeight:700}}>Today's message</div>
-            <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'17px', fontWeight:600, color:'#4a3a2e', lineHeight:1.25, marginTop:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{todaysCard!.card!.title}</div>
-            <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'12px', color:'#6b5646', opacity:0.85, marginTop:'2px'}}>
-              {todaysCard!.card!.reflection ? 'Return to your reflection' : 'Sit with the message when you can'}
+        <div style={{marginBottom:'14px'}}>
+          <button onClick={() => onOracle('reflection')} style={{
+            width:'100%',
+            background:'linear-gradient(135deg, #fff8ec 0%, #f5e6cf 100%)',
+            border:'1px solid rgba(212,168,107,0.4)',
+            borderRadius:'20px', padding:'14px 16px',
+            color:'#4a3a2e', cursor:'pointer',
+            textAlign:'left', boxShadow:'0 8px 20px rgba(212,168,107,0.2)',
+            fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px',
+          }}>
+            <div style={{flexShrink:0, width:'54px', height:'72px', background:'linear-gradient(180deg, #fff8ec, #f5e6cf)', border:'1px solid rgba(212,168,107,0.4)', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 10px rgba(107,78,41,0.15)'}}>
+              <ChoKuRei size={26} color="#d4a86b" opacity={0.6}/>
             </div>
-          </div>
-          <span style={{color:'#6b5646', fontSize:'16px', opacity:0.5}}>→</span>
-        </button>
+            <div style={{flex:1, minWidth:0}}>
+              <div style={{fontSize:'9px', letterSpacing:'1.8px', textTransform:'uppercase', color:'#6b5646', opacity:0.7, fontWeight:700}}>Today's message</div>
+              <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'17px', fontWeight:600, color:'#4a3a2e', lineHeight:1.25, marginTop:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{todaysCard!.card!.title}</div>
+              <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'12px', color:'#6b5646', opacity:0.85, marginTop:'2px'}}>
+                {todaysCard!.card!.reflection ? 'Return to your reflection' : 'Sit with the message when you can'}
+              </div>
+            </div>
+            <span style={{color:'#6b5646', fontSize:'16px', opacity:0.5}}>→</span>
+          </button>
+          <button onClick={onOpenEnergyLog} style={{
+            marginTop:'8px', background:'transparent', border:'none',
+            color:'#6b5646', fontSize:'12px', fontFamily:'"Cormorant Garamond",Georgia,serif',
+            fontStyle:'italic', cursor:'pointer', letterSpacing:'0.3px', paddingLeft:'4px',
+            display:'inline-flex', alignItems:'center', gap:'4px',
+          }}>
+            Open your Energy Log <span style={{opacity:0.6}}>→</span>
+          </button>
+        </div>
       )}
 
       {/* Next session — placeholder until appointments API wired */}
@@ -632,7 +649,7 @@ const urlBase64ToUint8Array = (base64String: string) => {
   return out;
 };
 
-const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|null; onSignOut:()=>void}> = ({ API, token, patient, onSignOut }) => {
+const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|null; onSignOut:()=>void; onOpenEnergyLog:()=>void}> = ({ API, token, patient, onSignOut, onOpenEnergyLog }) => {
   const [billing, setBilling] = useState<BillingSnapshot | null>(null);
   const [pushState, setPushState] = useState<'unknown'|'unsupported'|'prompt'|'denied'|'enabled'|'pending'>('unknown');
   const [pushMsg, setPushMsg] = useState('');
@@ -801,6 +818,18 @@ const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|nul
         <Label>HIPAA consent</Label>
         <div style={{fontSize:'12px', color:DEEPP, lineHeight:1.6, marginTop:'6px'}}>
           Full HIPAA compliance — including Business Associate Agreements — will be implemented before clinical launch. During beta, do not enter identifying information.
+        </div>
+      </Card>
+
+      <Card style={{marginBottom:'12px'}}>
+        <Label>Your journal</Label>
+        <button onClick={onOpenEnergyLog}
+          style={{...linkRow, textDecoration:'none', marginTop:'10px', cursor:'pointer', width:'100%', fontFamily:'inherit'}}>
+          <span>My Energy Log</span>
+          <span style={{opacity:0.5}}>→</span>
+        </button>
+        <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'8px', lineHeight:1.5}}>
+          Your oracle pulls, reflections, and monthly themes.
         </div>
       </Card>
 
