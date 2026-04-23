@@ -116,7 +116,7 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
           <div style={{fontSize:'11px', fontWeight:700, color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'12px'}}>Pricing</div>
           <h2 style={{fontSize:'clamp(24px,5vw,34px)', fontWeight:900, color:'#1a2a4a', margin:'0 0 10px 0', letterSpacing:'-0.5px'}}>Start free. Scale when you need to.</h2>
           <p style={{fontSize:'15px', color:'#6a8ab0', lineHeight:1.65, maxWidth:'620px', margin:'0 auto'}}>
-            Pick one tool, pick a bundle, or get the full Suite — every path starts with a free analysis. No card required.
+            Pick one tool or get the full Suite — every path starts with a free analysis. No card required.
           </p>
         </div>
 
@@ -137,46 +137,16 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
             <button onClick={onSignUp} style={{marginTop:'auto', background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'14px', padding:'12px', fontSize:'13px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Get Started Free →</button>
           </div>
 
-          {/* Starter Bundle */}
-          <div style={{background:'rgba(255,255,255,0.9)', borderRadius:'22px', padding:'28px 24px', border:'1px solid rgba(122,176,240,0.35)', boxShadow:'0 6px 22px rgba(100,130,200,0.1)', display:'flex', flexDirection:'column'}}>
-            <div style={{fontSize:'12px', fontWeight:700, color:'#4a7ad0', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>Starter Bundle</div>
-            <div style={{fontSize:'36px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$58.88<span style={{fontSize:'15px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
-            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>or $499/year — mix & match</div>
-            <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.85}}>
-              <li>✓ All 4 basic tools included</li>
-              <li>✓ Pick 1 premium tool</li>
-              <li>✓ $15/mo AI budget</li>
-              <li>✓ Cancel or swap anytime</li>
-            </ul>
-            <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>
-            <button onClick={openSoulMD} style={{marginTop:'auto', background:'rgba(255,255,255,0.95)', border:'1px solid rgba(122,176,240,0.45)', borderRadius:'14px', padding:'12px', fontSize:'13px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Build a Bundle →</button>
-          </div>
-
-          {/* Clinical Bundle */}
-          <div style={{background:'rgba(255,255,255,0.9)', borderRadius:'22px', padding:'28px 24px', border:'1px solid rgba(155,143,232,0.4)', boxShadow:'0 6px 22px rgba(100,130,200,0.1)', display:'flex', flexDirection:'column'}}>
-            <div style={{fontSize:'12px', fontWeight:700, color:'#7862d4', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>Clinical Bundle</div>
-            <div style={{fontSize:'36px', fontWeight:900, color:'#1a2a4a', lineHeight:1, marginBottom:'4px'}}>$55.55<span style={{fontSize:'15px', color:'#8aa0c0', fontWeight:600}}>/mo</span></div>
-            <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'18px'}}>or $444/year — specialist-weighted</div>
-            <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', color:'#4a5e6a', lineHeight:1.85}}>
-              <li>✓ Pick 2 premium tools</li>
-              <li>✓ Pick 2 basic tools</li>
-              <li>✓ $20/mo AI budget</li>
-              <li>✓ Cancel or swap anytime</li>
-            </ul>
-            <div style={{fontSize:'11px', color:'#6a8ab0', marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>
-            <button onClick={openSoulMD} style={{marginTop:'auto', background:'rgba(255,255,255,0.95)', border:'1px solid rgba(155,143,232,0.45)', borderRadius:'14px', padding:'12px', fontSize:'13px', fontWeight:700, color:'#7862d4', cursor:'pointer'}}>Build a Bundle →</button>
-          </div>
-
           {/* Suite featured card */}
           <div style={{background:WORDMARK, borderRadius:'22px', padding:'28px 24px', boxShadow:'0 12px 40px rgba(122,176,240,0.35)', color:'white', display:'flex', flexDirection:'column', position:'relative'}}>
             <div style={{position:'absolute', top:'14px', right:'14px', fontSize:'10px', fontWeight:700, background:'rgba(255,255,255,0.25)', padding:'4px 10px', borderRadius:'999px', letterSpacing:'0.5px'}}>BEST VALUE</div>
             <div style={{fontSize:'12px', fontWeight:700, color:'rgba(255,255,255,0.85)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>SoulMD Suite</div>
             <div style={{fontSize:'36px', fontWeight:900, lineHeight:1, marginBottom:'4px'}}>$111.11<span style={{fontSize:'15px', fontWeight:600, opacity:0.8}}>/mo</span></div>
-            <div style={{fontSize:'12px', opacity:0.85, marginBottom:'18px'}}>or $1,199/year — save ~$134/yr</div>
+            <div style={{fontSize:'12px', opacity:0.85, marginBottom:'18px'}}>or $1,199/year — all 8 paid tools à la carte = $1,079.92/yr</div>
             <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', lineHeight:1.85}}>
               <li>✓ All 10 clinical-AI tools</li>
-              <li>✓ Priority support</li>
-              <li>✓ Early access to new tools</li>
+              <li>✓ Unlimited LabRead &amp; CliniScore</li>
+              <li>✓ Priority support + early access</li>
               <li>✓ One subscription, one login</li>
             </ul>
             <div style={{fontSize:'11px', opacity:0.85, marginBottom:'12px', fontStyle:'italic'}}>Try free — 1 analysis per tool.</div>

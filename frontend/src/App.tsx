@@ -53,26 +53,55 @@ type Screen =
 
 const API = 'https://ekgscan.com';
 
-// URL ⇄ Screen mapping. Only public, deep-linkable content pages get stable URLs.
-// All other screens live at '/' (ephemeral in-app state).
+// URL ⇄ Screen mapping. Every screen now has a stable path so navigate()
+// pushes a unique history entry — browser back button walks the stack
+// naturally. Ephemeral sub-states (modal overlays, tabs inside a screen)
+// stay as component-local React state.
 const pathToScreen = (path: string): Screen | null => {
-  if (path === '/privacy') return 'privacy';
-  if (path === '/terms') return 'terms';
+  if (path === '/' || path === '')   return 'landing';
+  if (path === '/auth')              return 'auth';
+  if (path === '/dashboard')         return 'dashboard';
   if (path === '/scan' || path === '/app') return 'upload';
-  if (path === '/concierge') return 'concierge';
+  if (path === '/results')           return 'results';
+  if (path === '/chat')              return 'chat';
+  if (path === '/paywall')           return 'paywall';
+  if (path === '/privacy')           return 'privacy';
+  if (path === '/terms')             return 'terms';
+  if (path === '/concierge')         return 'concierge';
+  if (path.startsWith('/tool/')) {
+    const slug = path.slice('/tool/'.length).replace(/\/$/, '');
+    const candidate = `tool_${slug}` as Screen;
+    const valid: Screen[] = [
+      'tool_nephroai','tool_rxcheck','tool_antibioticai','tool_clinicalnote',
+      'tool_xrayread','tool_cerebralai','tool_palliativemd',
+      'tool_labread','tool_cliniscore',
+    ];
+    if (valid.includes(candidate)) return candidate;
+  }
   return null;
 };
 const screenToPath = (s: Screen): string => {
-  if (s === 'privacy') return '/privacy';
-  if (s === 'terms') return '/terms';
-  if (s === 'upload') return '/scan';
+  if (s === 'landing')   return '/';
+  if (s === 'auth')      return '/auth';
+  if (s === 'dashboard') return '/dashboard';
+  if (s === 'upload')    return '/scan';
+  if (s === 'results')   return '/results';
+  if (s === 'chat')      return '/chat';
+  if (s === 'paywall')   return '/paywall';
+  if (s === 'privacy')   return '/privacy';
+  if (s === 'terms')     return '/terms';
   if (s === 'concierge') return '/concierge';
+  if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
 };
 
-// Screens with deep-linkable URLs — these survive refresh and browser back.
-const DEEPLINK_SCREENS: Screen[] = ['privacy', 'terms', 'upload', 'concierge'];
-const isDeepLink = (s: Screen) => DEEPLINK_SCREENS.includes(s);
+// All screens are now URL-addressable. This narrower predicate is just the
+// "don't auto-navigate away from this" set: if the user visited
+// /privacy or /terms with a magic-link token in the URL, we respect that
+// landing. For any other page, a successful magic-link verify redirects
+// them to the domain's default destination (dashboard/upload).
+const STICKY_DEEPLINKS: Screen[] = ['privacy', 'terms'];
+const isStickyDeepLink = (s: Screen) => STICKY_DEEPLINKS.includes(s);
 
 const App: React.FC = () => {
   const [isAdminRoute] = useState(() => window.location.pathname.startsWith('/admin'));
@@ -126,14 +155,9 @@ const App: React.FC = () => {
         setScreen(fromUrl);
         return;
       }
-      // URL is '/' — default behavior depends on domain:
-      // - SoulMD: signed-in → dashboard, else landing
-      // - EKGScan: always landing (tool lives at /scan; '/' is the marketing page)
-      setScreen(prev => {
-        if (!isDeepLink(prev)) return prev;
-        if (isSoulMD) return user ? 'dashboard' : 'landing';
-        return 'landing';
-      });
+      // Fallback for unrecognized URLs (shouldn't happen — pathToScreen
+      // now recognizes every defined Screen).
+      setScreen(isSoulMD && user ? 'dashboard' : 'landing');
     };
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
@@ -149,9 +173,10 @@ const App: React.FC = () => {
   // Initial auth bootstrap — runs once, at mount.
   useEffect(() => {
     if (isAdminRoute) return;
-    // If we initialized onto a deep-link page (/privacy, /terms), DO NOT auto-navigate away
-    // when the auth check resolves. The user asked for that URL — respect it.
-    const landedOnDeepLink = isDeepLink(screen);
+    // If we initialized onto a sticky deep-link (/privacy, /terms), DO NOT
+    // auto-navigate away when the auth check resolves — the user asked for
+    // that URL. Every other page gets the usual post-auth redirect.
+    const landedOnDeepLink = isStickyDeepLink(screen);
     if (initialMagicToken) {
       fetch(`${API}/auth/verify-token`, {
         method: 'POST',

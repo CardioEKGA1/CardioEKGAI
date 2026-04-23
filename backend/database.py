@@ -46,9 +46,10 @@ class Subscription(Base):
     stripe_price_id = Column(String, nullable=True)
     stripe_customer_id = Column(String, index=True, nullable=True)
     current_period_end = Column(DateTime, nullable=True)
-    # For bundle subscriptions, the specific tool slugs the user chose at
-    # checkout. None for non-bundle subs. Example: ["clinicalnote","ekgscan",
-    # "nephroai","cerebralai"] for a Clinical Bundle.
+    # Legacy: populated by the removed bundle checkout flow with the tool
+    # slugs the user picked at checkout. Retained nullable so any still-
+    # active historical bundle subscriptions keep covering the right tools
+    # until they naturally lapse. New subs never write to this column.
     selected_tools = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)

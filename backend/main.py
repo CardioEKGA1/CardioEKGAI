@@ -239,25 +239,19 @@ class AdminUserUpdate(BaseModel):
 class CheckoutRequest(BaseModel):
     tool_slug: str
     tier: str
-    # Bundle subscribers send the specific tool slugs they're unlocking.
-    # Validated against BUNDLE_RULES + BASIC/PREMIUM classification server-
-    # side so a client can't buy a Starter Bundle and receive all 8.
+    # Previously used by bundle checkout flows (now removed); kept in the
+    # pydantic model so old clients don't 422 if they still send it. Always
+    # ignored server-side now.
     selected_tools: list[str] | None = None
 
 class AccountDeletion(BaseModel):
     confirm: bool = False
 
-TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "labread", "cliniscore", "suite", "bundle_starter", "bundle_clinical"}
+TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "labread", "cliniscore", "suite"}
 
-# Bundle composition — enforced on checkout. Basic + premium classification
-# mirrors pricing tiers: $9.99/mo tools are basic, $24.99/mo are premium.
+# Pricing tiers: $9.99/mo standard, $24.99/mo premium.
 BASIC_TOOLS   = ("ekgscan", "nephroai", "rxcheck", "antibioticai")
 PREMIUM_TOOLS = ("clinicalnote", "cerebralai", "xrayread", "palliativemd")
-BUNDLE_RULES = {
-    # slug            → (required_basic_picks, required_premium_picks, "auto-include all basic?")
-    "bundle_starter":  {"basic": 0, "premium": 1, "auto_all_basic": True},   # all 4 basic + 1 premium picked
-    "bundle_clinical": {"basic": 2, "premium": 2, "auto_all_basic": False},  # pick 2 basic + 2 premium
-}
 
 # Tools with a free-tier daily allowance (usage-metered, not gated by subscription).
 # Resets at UTC midnight. Paid subscribers + suite + superusers are unlimited.
@@ -280,31 +274,12 @@ def _has_active_sub(user_id: int, tool_slug: str, db: Session) -> bool:
         Subscription.status == "active",
     ).first() is not None
 
-def _bundle_covers(user_id: int, tool_slug: str, db: Session) -> bool:
-    """Returns True if the user has an active bundle subscription whose
-    selected_tools list includes this tool. Bundles without picks yet
-    (shouldn't happen post-checkout but guarded) don't cover anything."""
-    for bundle_slug in ("bundle_starter", "bundle_clinical"):
-        sub = db.query(Subscription).filter(
-            Subscription.user_id == user_id,
-            Subscription.tool_slug == bundle_slug,
-            Subscription.status == "active",
-        ).first()
-        if not sub:
-            continue
-        picks = sub.selected_tools or []
-        if isinstance(picks, list) and tool_slug in picks:
-            return True
-    return False
-
 def has_tool_access(user: User, tool_slug: str, db: Session) -> bool:
     if user.is_superuser:
         return True
     if _has_active_sub(user.id, "suite", db):
         return True
     if _has_active_sub(user.id, tool_slug, db):
-        return True
-    if _bundle_covers(user.id, tool_slug, db):
         return True
     if tool_slug == "ekgscan":
         if user.is_subscribed:
@@ -339,7 +314,7 @@ def free_tier_remaining(user: User, tool_slug: str, db: Session) -> int | None:
     cap = FREE_TIER_DAILY_LIMITS[tool_slug]
     return max(0, cap - _free_tier_uses_today(user.id, tool_slug, db))
 
-BUDGET_HIERARCHY = [("suite", 60.0), ("bundle_clinical", 20.0), ("bundle_starter", 15.0), ("clinicalnote", 15.0), ("nephroai", 12.0), ("palliativemd", 12.0)]
+BUDGET_HIERARCHY = [("suite", 60.0), ("clinicalnote", 15.0), ("nephroai", 12.0), ("palliativemd", 12.0)]
 _OTHER_TOOLS = ("ekgscan", "xrayread", "rxcheck", "antibioticai", "cerebralai")
 OVERAGE_PER_CALL = 0.10
 
@@ -357,11 +332,8 @@ PRICE_PER_MONTH = {
     ("cerebralai",   "monthly"): 24.99, ("cerebralai",   "yearly"): 179.99 / 12,
     ("xrayread",     "monthly"): 24.99, ("xrayread",     "yearly"): 179.99 / 12,
     ("palliativemd", "monthly"): 24.99, ("palliativemd", "yearly"): 179.99 / 12,
-    # Suite — $111.11/mo · $1,199/yr (updated)
+    # Suite — $111.11/mo · $1,199/yr
     ("suite",           "monthly"): 111.11, ("suite",           "yearly"): 1199.00 / 12,
-    # Bundles
-    ("bundle_starter",  "monthly"):  58.88, ("bundle_starter",  "yearly"):  499.00 / 12,
-    ("bundle_clinical", "monthly"):  55.55, ("bundle_clinical", "yearly"):  444.00 / 12,
 }
 
 def monthly_budget(user: User, db: Session) -> float:
@@ -907,7 +879,7 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
                     <h1 style="color:#1a2a4a;margin-bottom:16px">SoulMD</h1>
                     <h2 style="color:#1a2a4a">Welcome aboard</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
-                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) at $9.99/mo or $89.99/yr, premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) at $24.99/mo or $179.99/yr, pick a bundle (Starter $58.88/mo · $499/yr — 4 basic + 1 premium; Clinical $55.55/mo · $444/yr — 2 basic + 2 premium), or go all-in with the SoulMD Suite ($111.11/mo or $1,199/yr).</p>
+                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) at $9.99/mo or $89.99/yr, premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) at $24.99/mo or $179.99/yr, or go all-in with the SoulMD Suite ($111.11/mo or $1,199/yr — all 10 tools plus unlimited LabRead &amp; CliniScore).</p>
                     <a href="https://soulmd.us/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Open SoulMD Dashboard</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI output must be independently reviewed by a licensed clinician. In emergencies, call 911.</p>
                     <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
@@ -1052,38 +1024,6 @@ async def chat(request: Request, data: dict, current_user: User = Depends(get_cu
     )
     return {"message": response.content[0].text}
 
-def _validate_bundle_picks(bundle_slug: str, picks: list[str] | None) -> list[str]:
-    """Validates the user's tool selection for a bundle. Raises 400 on any
-    violation. Returns the canonical, deduplicated list to store on the
-    Subscription row."""
-    rules = BUNDLE_RULES.get(bundle_slug)
-    if not rules:
-        raise HTTPException(status_code=400, detail=f"{bundle_slug} is not a bundle.")
-    picks = [p for p in (picks or []) if p]
-    seen: list[str] = []
-    for p in picks:
-        if p not in seen: seen.append(p)
-    picks = seen
-    basic_set = set(BASIC_TOOLS); premium_set = set(PREMIUM_TOOLS)
-    invalid = [p for p in picks if p not in basic_set and p not in premium_set]
-    if invalid:
-        raise HTTPException(status_code=400, detail=f"Unknown tools: {invalid}")
-    chosen_basic   = [p for p in picks if p in basic_set]
-    chosen_premium = [p for p in picks if p in premium_set]
-
-    if rules.get("auto_all_basic"):
-        # Starter bundle: always include all 4 basic, user picks 1 premium.
-        if len(chosen_premium) != rules["premium"]:
-            raise HTTPException(status_code=400, detail=f"Starter Bundle requires exactly {rules['premium']} premium tool.")
-        return list(BASIC_TOOLS) + chosen_premium
-    else:
-        if len(chosen_basic) != rules["basic"]:
-            raise HTTPException(status_code=400, detail=f"This bundle requires exactly {rules['basic']} basic tools.")
-        if len(chosen_premium) != rules["premium"]:
-            raise HTTPException(status_code=400, detail=f"This bundle requires exactly {rules['premium']} premium tools.")
-        return chosen_basic + chosen_premium
-
-
 @app.post("/billing/checkout-session")
 def create_checkout(data: CheckoutRequest, current_user: User = Depends(get_current_user)):
     if not current_user:
@@ -1093,19 +1033,10 @@ def create_checkout(data: CheckoutRequest, current_user: User = Depends(get_curr
     if data.tier not in ("monthly", "yearly"):
         raise HTTPException(status_code=400, detail="Invalid tier")
 
-    is_bundle = data.tool_slug in BUNDLE_RULES
-    selected_tools: list[str] = []
-    if is_bundle:
-        selected_tools = _validate_bundle_picks(data.tool_slug, data.selected_tools)
-    elif data.selected_tools:
-        # Ignore selected_tools for non-bundle checkouts; don't error.
-        selected_tools = []
-
     price_id = get_price_id(data.tool_slug, data.tier)
-    # Stripe metadata values are strings; pack picks into a comma-joined list.
+    # Bundle checkout flows are gone. If a legacy client still sends
+    # selected_tools, ignore it rather than 400ing.
     meta: dict = {"user_id": str(current_user.id), "tool_slug": data.tool_slug, "tier": data.tier}
-    if selected_tools:
-        meta["selected_tools"] = ",".join(selected_tools)
     try:
         session = stripe.checkout.Session.create(
             mode="subscription",
@@ -2081,11 +2012,6 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         # Suite
         ("STRIPE_PRICE_SUITE_MONTHLY",        11111,  "Suite · monthly"),
         ("STRIPE_PRICE_SUITE_YEARLY",         119900, "Suite · yearly"),
-        # Bundles
-        ("STRIPE_PRICE_BUNDLE_STARTER_MONTHLY",  5888,   "Starter Bundle · monthly"),
-        ("STRIPE_PRICE_BUNDLE_STARTER_YEARLY",   49900,  "Starter Bundle · yearly"),
-        ("STRIPE_PRICE_BUNDLE_CLINICAL_MONTHLY", 5555,   "Clinical Bundle · monthly"),
-        ("STRIPE_PRICE_BUNDLE_CLINICAL_YEARLY",  44400,  "Clinical Bundle · yearly"),
         # Concierge
         ("STRIPE_PRICE_CONCIERGE_AWAKEN_MONTHLY",  44400,   "Concierge Awaken · monthly"),
         ("STRIPE_PRICE_CONCIERGE_AWAKEN_YEARLY",   500000,  "Concierge Awaken · yearly"),

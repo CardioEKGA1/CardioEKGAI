@@ -112,11 +112,13 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
         <PriceCard title="Standard tool"     subtitle="EKGScan · RxCheck · AntibioticAI · NephroAI"              monthly="$9.99"   yearly="$89.99"  cta="Start standard" onCta={onSignUp}/>
         <PriceCard title="Premium tool"      subtitle="ClinicalNote AI · CerebralAI · XrayRead · PalliativeMD"   monthly="$24.99"  yearly="$179.99" cta="Start premium"  onCta={onSignUp}/>
-        <PriceCard title="Starter Bundle"    subtitle="4 basic + 1 premium · $15/mo AI budget"                   monthly="$58.88"  yearly="$499"    cta="Pick Starter"    onCta={onSignUp}/>
-        <PriceCard title="Clinical Bundle"   subtitle="2 basic + 2 premium · $20/mo AI budget"                   monthly="$55.55"  yearly="$444"    cta="Pick Clinical"   onCta={onSignUp}/>
-        <PriceCard title="SoulMD Suite"      subtitle="All 10 tools · one login · $60/mo AI budget"              monthly="$111.11" yearly="$1,199"  cta="Start Suite"     onCta={onSignUp} highlighted/>
+        <PriceCard title="Free tools"        subtitle="LabRead · CliniScore · 5/day each, unlimited with Suite"  monthly="$0"      yearly="$0"      cta="Try free"       onCta={onSignUp}/>
+        <PriceCard title="SoulMD Suite"      subtitle="All 10 tools · unlimited LabRead &amp; CliniScore · one login"        monthly="$111.11" yearly="$1,199"  cta="Start Suite"    onCta={onSignUp} highlighted/>
       </div>
-      <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'18px'}}>Cancel anytime.</div>
+      <div style={{textAlign:'center', fontSize:'13px', color:'#4a7ad0', marginTop:'18px', fontWeight:600, lineHeight:1.6, maxWidth:'560px', marginLeft:'auto', marginRight:'auto'}}>
+        All 8 paid tools à la carte = <b>$1,079.92/yr</b>. Suite gives you all 10 for <b>$1,199/yr</b> plus unlimited LabRead &amp; CliniScore.
+      </div>
+      <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'10px'}}>Cancel anytime.</div>
     </section>
 
     <section style={{padding:'40px 20px 60px', maxWidth:'800px', margin:'0 auto', width:'100%', boxSizing:'border-box', textAlign:'center'}}>

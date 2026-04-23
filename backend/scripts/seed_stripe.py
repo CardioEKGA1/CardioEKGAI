@@ -37,16 +37,7 @@ CATALOG = [
     # Suite
     # Suite — full access to every tool. Monthly repriced to $111.11;
     # yearly is $1,199.
-    ("suite",            "SoulMD Suite",            "All clinical AI tools in one subscription",                                          11111, 119900),
-
-    # ─── Bundles ────────────────────────────────────────────────────────────
-    # Starter Bundle: all 4 basic tools + 1 premium of the user's choice
-    # (picker UI captures the chosen premium tool into subscription metadata).
-    # AI budget: $15/month.
-    ("bundle_starter",   "SoulMD Starter Bundle",   "4 basic tools + 1 premium tool of your choice · $15/mo AI budget",                   5888, 49900),
-    # Clinical Bundle: 2 premium + 2 basic of the user's choice.
-    # AI budget: $20/month.
-    ("bundle_clinical",  "SoulMD Clinical Bundle",  "2 premium + 2 basic tools of your choice · $20/mo AI budget",                         5555, 44400),
+    ("suite",            "SoulMD Suite",            "All 10 clinical AI tools — unlimited LabRead & CliniScore · one subscription",     11111, 119900),
     # LabRead and CliniScore are free (5/day) with unlimited access via Suite —
     # no standalone Stripe price at this time.
 
