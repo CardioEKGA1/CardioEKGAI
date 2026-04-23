@@ -10,7 +10,7 @@ interface Props { API: string; token: string; onBack: () => void; }
 
 type MePayload =
   | { role: 'physician'; email: string; owner_email?: string }
-  | { role: 'patient';   email: string; patient: any }
+  | { role: 'patient';   email: string; patient: any; is_superuser?: boolean }
   | { role: 'none';      email: string };
 
 const HIPAA_ACK_KEY = 'concierge_hipaa_ack_v2';
@@ -77,7 +77,7 @@ const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
   }
 
   if (me.role === 'physician') return <PhysicianDashboard API={API} token={token} onBack={onBack}/>;
-  if (me.role === 'patient')   return <PatientApp API={API} token={token} onBack={onBack}/>;
+  if (me.role === 'patient')   return <PatientApp API={API} token={token} onBack={onBack} isSuperuser={!!me.is_superuser}/>;
   return <NotEnrolled email={me.email} onBack={onBack}/>;
 };
 

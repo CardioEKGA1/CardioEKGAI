@@ -4,13 +4,13 @@
 // Daily Oracle Card pulls on first open of the day.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ChoKuRei from './ChoKuRei';
-import OracleCardReel from './OracleCardReel';
 import { ensureOracleKeyframes } from './OracleCard';
 import EnergyLog from './EnergyLog';
 import MeditationPlayer from './MeditationPlayer';
 import CoachingModuleReader from './CoachingModuleReader';
+import OracleDailyCard from './OracleDailyCard';
 
-interface Props { API: string; token: string; onBack: () => void; }
+interface Props { API: string; token: string; onBack: () => void; isSuperuser?: boolean; }
 
 interface PatientPayload {
   id: number;
@@ -64,12 +64,10 @@ interface OracleTodaySlim { pulled: boolean; card: { id:number; title:string; ca
 interface PatientMeditation { id:number; title:string; category:string; duration_min:number; description:string; assigned_at:string|null; }
 interface PatientCoachingModule { id:number; title:string; description:string; progress_pct:number; completed_at:string|null; exercise_count:number; assigned_at:string|null; }
 
-const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
+const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
   const [tab, setTab] = useState<Tab>('home');
   const [patient, setPatient] = useState<PatientPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showOracle, setShowOracle] = useState(false);
-  const [oracleEntry, setOracleEntry] = useState<'intention'|'card'|'reflection'>('intention');
   const [todaysCard, setTodaysCard] = useState<OracleTodaySlim | null>(null);
   const [showEnergyLog, setShowEnergyLog] = useState(false);
   const [myMeditations, setMyMeditations] = useState<PatientMeditation[]>([]);
@@ -110,35 +108,10 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
       .finally(() => setLoading(false));
   }, [API, token]);
 
-  // Auto-open oracle card once per day — only if they haven't pulled yet.
-  // If they've already pulled today, respect that: the card lives on the
-  // home screen now as a small thumbnail, no overlay pop.
-  useEffect(() => {
-    if (!patient || !todaysCard) return;
-    if (todaysCard.pulled) return;  // card already drawn today
-    try {
-      const key = ORACLE_SEEN_KEY(patient.id, todayKey());
-      if (!localStorage.getItem(key)) {
-        setOracleEntry('intention');
-        setShowOracle(true);
-        localStorage.setItem(key, '1');
-      }
-    } catch {}
-  }, [patient, todaysCard]);
-
-  const openOracle = useCallback((entry: 'intention'|'card'|'reflection' = 'intention') => {
-    setOracleEntry(entry);
-    setShowOracle(true);
-  }, []);
-  const closeOracle = useCallback(() => {
-    setShowOracle(false);
-    loadToday();
-  }, [loadToday]);
-
-  const bookMeditation = useCallback(() => {
-    setShowOracle(false);
-    setTab('book');
-  }, []);
+  // The oracle lives inline on the Home tab now (OracleDailyCard flips in
+  // place). No overlay auto-open, no overlay trigger anywhere. The overlay
+  // plumbing below is kept disabled so we can flip it back on for a future
+  // ritual-mode experience without another refactor.
 
   if (loading) return <LoadingShell/>;
 
@@ -156,7 +129,7 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
 
         {/* Tab body */}
         <div style={{marginTop:'14px'}}>
-          {tab === 'home'     && <HomeTab patient={patient} todaysCard={todaysCard} meditations={myMeditations} modules={myModules} onOracle={openOracle} onOpenEnergyLog={() => setShowEnergyLog(true)} onOpenMeditation={(id) => setOpenMeditationId(id)} onOpenModule={(id) => setOpenModuleId(id)} onGo={setTab}/>}
+          {tab === 'home'     && <HomeTab API={API} token={token} patient={patient} todaysCard={todaysCard} onTodaysCardChanged={loadToday} meditations={myMeditations} modules={myModules} isSuperuser={!!isSuperuser} onOpenEnergyLog={() => setShowEnergyLog(true)} onOpenMeditation={(id) => setOpenMeditationId(id)} onOpenModule={(id) => setOpenModuleId(id)} onGo={setTab}/>}
           {tab === 'book'     && <BookTab API={API} token={token} patient={patient}/>}
           {tab === 'messages' && <MessagesTab API={API} token={token} onOpenMeditation={(id) => setOpenMeditationId(id)}/>}
           {tab === 'labs'     && <LabsTab API={API} token={token}/>}
@@ -199,18 +172,6 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack }) => {
           })}
         </div>
       </nav>
-
-      {/* Oracle card overlay — 3D reel experience */}
-      {showOracle && patient && (
-        <OracleCardReel
-          API={API}
-          token={token}
-          userName={firstName(patient.name)}
-          initialStep={oracleEntry}
-          onClose={closeOracle}
-          onBookMeditation={bookMeditation}
-        />
-      )}
 
       {/* Energy Log overlay — timeline of saved pulls */}
       {showEnergyLog && (
@@ -276,16 +237,19 @@ const BetaDisclaimer: React.FC = () => {
 // ───── HOME TAB ─────────────────────────────────────────────────────────────
 
 const HomeTab: React.FC<{
+  API: string;
+  token: string;
   patient: PatientPayload | null;
   todaysCard: OracleTodaySlim | null;
+  onTodaysCardChanged: () => void;
   meditations: PatientMeditation[];
   modules: PatientCoachingModule[];
-  onOracle: (entry?: 'intention'|'card'|'reflection') => void;
+  isSuperuser: boolean;
   onOpenEnergyLog: () => void;
   onOpenMeditation: (id: number) => void;
   onOpenModule: (id: number) => void;
   onGo: (t: Tab) => void;
-}> = ({ patient, todaysCard, meditations, modules, onOracle, onOpenEnergyLog, onOpenMeditation, onOpenModule, onGo }) => {
+}> = ({ API, token, patient, todaysCard, onTodaysCardChanged, meditations, modules, isSuperuser, onOpenEnergyLog, onOpenMeditation, onOpenModule, onGo }) => {
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const pulled = todaysCard?.pulled && todaysCard.card;
@@ -302,59 +266,15 @@ const HomeTab: React.FC<{
         </div>
       </div>
 
-      {/* Daily Oracle teaser — two states:
-          (a) not yet pulled today → warm invitation to the ritual
-          (b) pulled → small thumbnail "carrying it with you" that reopens
-              the reflection screen */}
-      {!pulled ? (
-        <button onClick={() => onOracle('intention')} style={{
-          width:'100%',
-          background:'linear-gradient(135deg, #fbeedd 0%, #f6d8c4 45%, #e9c4a4 100%)',
-          border:'1px solid rgba(212,168,107,0.4)',
-          borderRadius:'20px', padding:'22px 20px',
-          color:'#4a3a2e', cursor:'pointer',
-          textAlign:'left', boxShadow:'0 12px 28px rgba(212,168,107,0.22)', marginBottom:'14px',
-          fontFamily:'inherit', position:'relative', overflow:'hidden',
-        }}>
-          <div style={{position:'absolute', top:'-10px', right:'-10px', opacity:0.22}}><ChoKuRei size={140} color="#d4a86b" opacity={1}/></div>
-          <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', opacity:0.65, fontWeight:700}}>Daily Oracle</div>
-          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'22px', fontWeight:600, marginTop:'6px', lineHeight:1.25, color:'#4a3a2e'}}>Your daily message from the Universe</div>
-          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'13px', opacity:0.8, marginTop:'6px', lineHeight:1.5}}>Take a breath. Set your intention.</div>
-          <div style={{display:'inline-flex', alignItems:'center', gap:'6px', background:'linear-gradient(135deg, #f5c26b, #d4a86b)', border:'1px solid rgba(212,168,107,0.6)', padding:'9px 18px', borderRadius:'999px', fontSize:'11px', fontWeight:800, marginTop:'16px', color:'white', letterSpacing:'1px', textTransform:'uppercase', boxShadow:'0 6px 14px rgba(212,168,107,0.4)'}}>Open today's message</div>
-        </button>
-      ) : (
-        <div style={{marginBottom:'14px'}}>
-          <button onClick={() => onOracle('reflection')} style={{
-            width:'100%',
-            background:'linear-gradient(135deg, #fff8ec 0%, #f5e6cf 100%)',
-            border:'1px solid rgba(212,168,107,0.4)',
-            borderRadius:'20px', padding:'14px 16px',
-            color:'#4a3a2e', cursor:'pointer',
-            textAlign:'left', boxShadow:'0 8px 20px rgba(212,168,107,0.2)',
-            fontFamily:'inherit', display:'flex', alignItems:'center', gap:'14px',
-          }}>
-            <div style={{flexShrink:0, width:'54px', height:'72px', background:'linear-gradient(180deg, #fff8ec, #f5e6cf)', border:'1px solid rgba(212,168,107,0.4)', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 10px rgba(107,78,41,0.15)'}}>
-              <ChoKuRei size={26} color="#d4a86b" opacity={0.6}/>
-            </div>
-            <div style={{flex:1, minWidth:0}}>
-              <div style={{fontSize:'9px', letterSpacing:'1.8px', textTransform:'uppercase', color:'#6b5646', opacity:0.7, fontWeight:700}}>Today's message</div>
-              <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'17px', fontWeight:600, color:'#4a3a2e', lineHeight:1.25, marginTop:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{todaysCard!.card!.title}</div>
-              <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontStyle:'italic', fontSize:'12px', color:'#6b5646', opacity:0.85, marginTop:'2px'}}>
-                {todaysCard!.card!.reflection ? 'Return to your reflection' : 'Sit with the message when you can'}
-              </div>
-            </div>
-            <span style={{color:'#6b5646', fontSize:'16px', opacity:0.5}}>→</span>
-          </button>
-          <button onClick={onOpenEnergyLog} style={{
-            marginTop:'8px', background:'transparent', border:'none',
-            color:'#6b5646', fontSize:'12px', fontFamily:'"Cormorant Garamond",Georgia,serif',
-            fontStyle:'italic', cursor:'pointer', letterSpacing:'0.3px', paddingLeft:'4px',
-            display:'inline-flex', alignItems:'center', gap:'4px',
-          }}>
-            Open your Energy Log <span style={{opacity:0.6}}>→</span>
-          </button>
-        </div>
-      )}
+      {/* TODAY'S MESSAGE — standalone tap-to-flip oracle card */}
+      <OracleDailyCard
+        API={API}
+        token={token}
+        todaysCard={todaysCard}
+        isSuperuser={isSuperuser}
+        onChanged={onTodaysCardChanged}
+        onOpenEnergyLog={onOpenEnergyLog}
+      />
 
       {/* Next session — placeholder until appointments API wired */}
       <Card>
@@ -373,7 +293,7 @@ const HomeTab: React.FC<{
         <QuickTile icon="📅"   label="Book Session"  onClick={() => onGo('book')}      tint={PRIMARY}/>
         <QuickTile icon="🧪"   label="Upload Labs"   onClick={() => onGo('labs')}      tint={BLUSH}/>
         <QuickTile icon="💬"   label="Messages"      onClick={() => onGo('messages')}  tint="#D4C5F5"/>
-        <QuickTile icon="🌙"   label="Energy Log"    onClick={onOracle}                tint="#FAD9A8"/>
+        <QuickTile icon="🌙"   label="Energy Log"    onClick={onOpenEnergyLog}         tint="#FAD9A8"/>
       </div>
 
       {/* Daily recommendation */}

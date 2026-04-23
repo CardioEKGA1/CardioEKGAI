@@ -4476,6 +4476,7 @@ def concierge_me(view: str | None = None, current_user: User = Depends(get_curre
     return {
         "role": "patient",
         "email": current_user.email,
+        "is_superuser": bool(getattr(current_user, "is_superuser", False)),
         "patient": {
             "id": p.id,
             "name": p.name,
@@ -4487,6 +4488,7 @@ def concierge_me(view: str | None = None, current_user: User = Depends(get_curre
             "visits_allowed": allow["visits"],
             "meditations_used": p.meditations_used or 0,
             "meditations_allowed": allow["meditations"],
+            "test_account": bool(getattr(p, "test_account", False)),
         },
     }
 
