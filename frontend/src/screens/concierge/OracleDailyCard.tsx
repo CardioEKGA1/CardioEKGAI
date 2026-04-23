@@ -1,27 +1,15 @@
 // © 2026 SoulMD, LLC. All rights reserved.
 //
-// Daily oracle card — Gabby Bernstein-style ritual.
+// Oracle card ritual — 7-card watercolor-sprite arc with guaranteed-no-overflow reveal.
 //
-// 6-step reference flow (matches the user's reference screenshot):
-//   1. CHOOSE A CARD — three periwinkle cards float on a deep misty gradient,
-//      each bearing a gold sun-moon-star mandala. Lotus icon + tagline
-//      "Trust. Pause. Receive." + hint "Swipe or tap a card".
-//   2. YOU CHOOSE — the tapped card ignites with a gold sparkle burst, the
-//      others dim.
-//   3. MOVES TO CENTER — chosen card scales up and translates to center.
-//   4. FLIPS — 3D flip with a golden ring mid-flip (conic-gradient swirl).
-//   5. MESSAGE REVEALS — cream card face with sun icon top, serif message,
-//      italic subtitle, heart at bottom.
-//   6. RECEIVE / REFLECT — "Take a moment to reflect" CTA + "Draw again
-//      tomorrow" link. Superusers can tap; regular patients see text only.
-//
-// Zero network asset dependencies: the sun-moon-star mandala, the golden
-// swirl ring, and the floating particles are all inline SVG/CSS. The
-// oracle message text comes from /concierge/oracle/today.
+// Card back: 1 of 10 watercolor flowers from frontend/src/assets/flowers.png
+// (2-row, 5-column sprite sheet). Flower rotates daily via dayOfYear % 10.
+// Card front (revealed): cream + gold, auto-fit typography bucketed by
+// message length so the longest oracle pull still fits without scrolling.
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { shareOracleCard } from './shareOracleCard';
-import FlowerOfTheDay from './FlowerOfTheDay';
+import flowersImg from '../../assets/flowers.png';
 
 interface OracleCardData {
   id: number; category: string;
@@ -42,21 +30,51 @@ interface Props {
   onOpenEnergyLog: () => void;
 }
 
-// Design tokens — light pearl/lavender stage matching the rest of the PWA.
-const BG_PEARL    = 'linear-gradient(160deg, #F5F1FF 0%, #E8E4FB 35%, #DFEAFC 70%, #F1E7F8 100%)';
-const GOLD        = '#C9A84C';
-const GOLD_SOFT   = '#E6C97A';
+const BG_PEARL  = 'linear-gradient(160deg, #F5F1FF 0%, #E8E4FB 35%, #DFEAFC 70%, #F1E7F8 100%)';
+const GOLD      = '#C9A84C';
+const GOLD_SOFT = '#E6C97A';
 const GOLD_BRIGHT = '#FFE4A3';
-const CREAM       = '#FFF8F0';
-const CREAM_EDGE  = '#F5E8C7';
-const INK_CARD    = '#2A2150';
-const INK_SOFT    = '#6B6889';
-const PURPLE      = '#534AB7';
-const PURPLE_MID  = '#9b8fe8';
-const SERIF       = '"Playfair Display",Georgia,serif';
-const EASE        = [0.22, 1, 0.36, 1] as const;
+const CREAM     = '#FFFEFA';
+const INK_CARD  = '#2A2150';
+const INK_SOFT  = '#6B6889';
+const PURPLE    = '#534AB7';
+const PURPLE_MID= '#9b8fe8';
+const SERIF     = '"Playfair Display",Georgia,serif';
+const EASE      = [0.22, 1, 0.36, 1] as const;
 
-// Keyframes + Google Fonts once per session.
+// Sprite sheet mapping — 5 columns × 2 rows, 10 flowers.
+interface FlowerCell { name: string; col: number; row: number; }
+const FLOWERS: FlowerCell[] = [
+  { name: 'Rose',           col: 0, row: 0 },
+  { name: 'Lotus',          col: 1, row: 0 },
+  { name: 'Sunflower',      col: 2, row: 0 },
+  { name: 'Cherry Blossom', col: 3, row: 0 },
+  { name: 'Iris',           col: 4, row: 0 },
+  { name: 'Peony',          col: 0, row: 1 },
+  { name: 'Lily',           col: 1, row: 1 },
+  { name: 'Dahlia',          col: 2, row: 1 },
+  { name: 'Lavender',       col: 3, row: 1 },
+  { name: 'Hibiscus',       col: 4, row: 1 },
+];
+
+const dayOfYear = (): number => {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  return Math.floor((now.getTime() - start.getTime()) / 86400000);
+};
+const todaysFlower = (): FlowerCell => FLOWERS[dayOfYear() % FLOWERS.length];
+
+// Background position for a sprite cell on a 500% × 200% backgroundSize.
+// Each cell is 20% wide + 100% tall; x-position steps by 20% and wraps
+// column 0..4 → 0%, 25%, 50%, 75%, 100%. y-position steps row 0 → 0%, row 1 → 100%.
+const spriteBgPosition = (cell: FlowerCell) => ({
+  backgroundImage: `url(${flowersImg})`,
+  backgroundSize: '500% 200%',
+  backgroundPosition: `${cell.col * 25}% ${cell.row * 100}%`,
+  backgroundRepeat: 'no-repeat' as const,
+});
+
+// Fonts + keyframes (once).
 if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-fonts')) {
   const pre1 = document.createElement('link');
   pre1.rel = 'preconnect'; pre1.href = 'https://fonts.googleapis.com';
@@ -65,7 +83,7 @@ if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-fo
   const link = document.createElement('link');
   link.id = 'oracle-daily-fonts';
   link.rel = 'stylesheet';
-  link.href = 'https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;700&family=Playfair+Display:ital,wght@0,400;0,500;0,700;1,400;1,500&family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap';
+  link.href = 'https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;700&family=Playfair+Display:ital,wght@0,400;0,500;0,700;1,400;1,500&display=swap';
   document.head.appendChild(pre1);
   document.head.appendChild(pre2);
   document.head.appendChild(link);
@@ -74,54 +92,46 @@ if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-ke
   const s = document.createElement('style');
   s.id = 'oracle-daily-keyframes';
   s.innerHTML = `
-    @keyframes oracleCardFloat {
-      0%, 100% { transform: translateY(0) rotate(var(--rot, 0deg)); }
-      50%      { transform: translateY(-10px) rotate(var(--rot, 0deg)); }
+    @keyframes oracleCenterBreathe {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-6px); }
     }
-    @keyframes oracleGoldAura {
-      0%, 100% { box-shadow:
-        0 0 18px rgba(201,168,76,0.30),
-        0 0 40px rgba(201,168,76,0.18),
-        inset 0 0 22px rgba(255,228,163,0.15); }
-      50%      { box-shadow:
-        0 0 26px rgba(201,168,76,0.55),
-        0 0 60px rgba(201,168,76,0.30),
-        inset 0 0 30px rgba(255,228,163,0.28); }
+    @keyframes oracleGoldRing {
+      0%, 100% { box-shadow: 0 0 12px rgba(201,168,76,0.25), 0 0 28px rgba(230,201,122,0.15), inset 0 0 14px rgba(255,228,163,0.12); }
+      50%      { box-shadow: 0 0 20px rgba(201,168,76,0.55), 0 0 44px rgba(230,201,122,0.28), inset 0 0 22px rgba(255,228,163,0.25); }
+    }
+    @keyframes oracleShine {
+      0%   { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
+      35%  { opacity: 0.28; }
+      65%  { opacity: 0.28; }
+      100% { transform: translateX(120%)  skewX(-18deg); opacity: 0; }
     }
     @keyframes oracleParticleDrift {
       0%   { transform: translate3d(0, 0, 0); opacity: 0; }
-      15%  { opacity: 0.9; }
+      15%  { opacity: 0.85; }
       85%  { opacity: 0.5; }
       100% { transform: translate3d(calc(var(--drift, 16px)), -110vh, 0); opacity: 0; }
     }
-    @keyframes oracleSwirl {
-      0%   { transform: rotate(0deg);   opacity: 0; }
-      15%  { opacity: 1; }
-      85%  { opacity: 1; }
-      100% { transform: rotate(360deg); opacity: 0; }
-    }
-    @keyframes oracleSparkleBurst {
-      0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
-      30%  { opacity: 1; }
-      100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
-    }
-    /* Hide scrollbars on the overflow-y auto message container */
-    .oracle-msg-scroll::-webkit-scrollbar { display: none; }
   `;
   document.head.appendChild(s);
 }
 
-// Note: superuser bypass is driven by the isSuperuser prop, populated upstream
-// by /concierge/me (which reads User.is_superuser on the server). The
-// authoritative superuser email list lives in backend/main.py:SUPERUSER_EMAILS.
-
 const dateKey = () => new Date().toISOString().slice(0, 10);
 const lockKey = () => `oracle_pulled_${dateKey()}`;
 
-const CARD_COUNT = 3;
-const CARD_W = 170;
-const CARD_H = 255;   // 2:3
-const DECK_GAP = 26;
+const CARD_W = 120;
+const CARD_H = 190;
+
+// Fan layout — 7 positions from left to right. Matches user's spec exactly.
+const FAN: { x: number; rot: number; scale: number }[] = [
+  { x: -210, rot: -22, scale: 0.72 },
+  { x: -130, rot: -14, scale: 0.82 },
+  { x:  -48, rot:  -6, scale: 0.92 },
+  { x:    0, rot:   0, scale: 1.00 },
+  { x:   48, rot:   6, scale: 0.92 },
+  { x:  130, rot:  14, scale: 0.82 },
+  { x:  210, rot:  22, scale: 0.72 },
+];
 
 const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser, onChanged, onOpenEnergyLog }) => {
   const [phase, setPhase] = useState<'deck' | 'picking' | 'revealed'>('deck');
@@ -130,7 +140,6 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
   const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
-  const [showBurst, setShowBurst] = useState(false);
 
   const [lockedToday, setLockedToday] = useState<boolean>(() => {
     try {
@@ -139,7 +148,8 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
     } catch { return false; }
   });
 
-  // Pre-load today's card if it's already been pulled.
+  const flower = todaysFlower();
+
   useEffect(() => {
     if (!(todaysCard?.pulled && todaysCard.card)) return;
     (async () => {
@@ -150,7 +160,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
         console.log('[oracle/today GET]', res.status, d);
         if (d?.card) {
           setCard(d.card);
-          setPickedIndex(Math.floor(CARD_COUNT / 2));
+          setPickedIndex(3);         // center card
           setFlipped(true);
           setPhase('revealed');
           if (!isSuperuser) {
@@ -169,8 +179,6 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
     if (phase !== 'deck' || loading || lockedToday) return;
     setErr('');
     setPickedIndex(i);
-    setShowBurst(true);                          // gold sparkle burst on tapped card
-    setTimeout(() => setShowBurst(false), 900);
     setPhase('picking');
     setLoading(true);
     try {
@@ -186,7 +194,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
       if (!d.card) throw new Error('Server returned no card object.');
       if (!d.card.title && !d.card.body) throw new Error('Server returned a card with no title or body.');
       setCard(d.card);
-      // Choreography: sparkle (0–0.9s) → glide to center (0.4–1.3s) → flip (1.3–2.3s)
+      // Choreography: glide to center (0 → 400ms) → flip (400ms → 1400ms).
       setTimeout(() => {
         setFlipped(true);
         setTimeout(() => {
@@ -196,21 +204,19 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
             setLockedToday(true);
           }
           onChanged();
-        }, 1000);    // flip duration
-      }, 1300);      // glide to center
+        }, 1000);
+      }, 400);
     } catch (e: any) {
       // eslint-disable-next-line no-console
       console.error('[oracle/today POST failed]', e);
       setErr(e.message || 'Could not draw today\'s card.');
       setPhase('deck');
       setPickedIndex(null);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, [API, token, phase, loading, lockedToday, isSuperuser, onChanged]);
 
-  const drawAgainTomorrow = useCallback(async () => {
-    if (!isSuperuser || loading) return;
+  const pullAgain = useCallback(async () => {
+    if (loading) return;
     setErr('');
     setLoading(true);
     try {
@@ -229,7 +235,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
     } catch (e: any) {
       setErr(e.message || 'Could not reset.');
     } finally { setLoading(false); }
-  }, [API, token, isSuperuser, loading, onChanged]);
+  }, [API, token, loading, onChanged]);
 
   return (
     <div style={{
@@ -259,115 +265,77 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
         </div>
       )}
 
-      {/* STAGE */}
-      <div style={{position:'relative', width:'100%', height:`${CARD_H + 100}px`, display:'flex', alignItems:'center', justifyContent:'center', perspective:'1400px', zIndex:2}}>
-        {/* Golden swirl ring — visible during flip */}
-        <GoldenSwirlRing active={phase === 'picking' && flipped === false && pickedIndex !== null} />
-        <AnimatePresence>
-          {flipped && phase !== 'revealed' && <GoldenSwirlRing active key="mid-flip" />}
-        </AnimatePresence>
-
-        {Array.from({ length: CARD_COUNT }).map((_, i) => (
-          <FloatingCard
-            key={i}
-            index={i}
-            total={CARD_COUNT}
-            phase={phase}
-            pickedIndex={pickedIndex}
-            flipped={flipped}
-            card={card}
-            locked={lockedToday}
-            sparkleOnMe={showBurst && pickedIndex === i}
-            onPick={pickCard}
-          />
+      {/* STAGE — 7 cards in an arc */}
+      <div style={{position:'relative', width:'100%', height:`${CARD_H + 90}px`, display:'flex', alignItems:'center', justifyContent:'center', perspective:'1400px', zIndex:2}}>
+        {FAN.map((pos, i) => (
+          <FanCard key={i} index={i} pos={pos} phase={phase} pickedIndex={pickedIndex}
+            flipped={flipped} card={card} locked={lockedToday}
+            flower={flower} onPick={pickCard}/>
         ))}
       </div>
 
-      {/* Hint under stage */}
+      {/* Hint */}
       <div style={{marginTop:'14px', textAlign:'center', minHeight:'22px', color: INK_SOFT, fontSize:'12.5px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.4px', position:'relative', zIndex:2}}>
-        {phase === 'deck' && !lockedToday && (loading ? 'Drawing your card…' : 'Swipe or tap a card')}
+        {phase === 'deck' && !lockedToday && (loading ? 'Drawing your card…' : `${flower.name} · Tap the card that calls to you`)}
         {phase === 'deck' &&  lockedToday && 'Your message for today is above — tap to reopen'}
         {phase === 'picking' && 'The Universe is listening…'}
-        {phase === 'revealed' && null}
       </div>
 
-      {/* Revealed CTA row */}
+      {/* Reveal actions */}
       <AnimatePresence>
         {phase === 'revealed' && card && (
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 1.2, delay: 1.4, ease: EASE }}
+            transition={{ duration: 1.0, delay: 1.2, ease: EASE }}
             style={{marginTop:'22px', display:'flex', flexDirection:'column', alignItems:'center', gap:'12px', position:'relative', zIndex:2}}>
-            <button onClick={onOpenEnergyLog}
-              style={{
-                background:'linear-gradient(135deg,#F5CF8A,#E2B567)',
-                border:`1px solid ${GOLD}`,
-                color: INK_CARD,
-                borderRadius:'999px',
-                padding:'12px 30px',
-                fontSize:'11.5px', fontWeight:700,
-                letterSpacing:'3px', textTransform:'uppercase',
-                cursor:'pointer', fontFamily:'inherit',
-                boxShadow:`0 8px 20px rgba(201,168,76,0.25)`,
-              }}>
-              Take a moment to reflect
-            </button>
-            <div style={{display:'flex', gap:'14px', alignItems:'center'}}>
-              {isSuperuser ? (
-                <button onClick={drawAgainTomorrow}
-                  style={{background:'transparent', border:'none', color: PURPLE, fontSize:'12px', fontWeight:600, fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px', cursor:'pointer', textDecoration:'underline', textUnderlineOffset:'3px'}}>
-                  Draw Again Tomorrow
-                </button>
-              ) : (
-                <span style={{color: INK_SOFT, fontSize:'12px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px'}}>
-                  Draw Again Tomorrow
-                </span>
-              )}
-              <button onClick={() => card && shareOracleCard(card).catch(() => {})}
-                style={{background:'transparent', border:'none', color: PURPLE, fontSize:'12px', fontWeight:600, fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px', cursor:'pointer'}}>
-                Share
-              </button>
+            <div style={{display:'flex', gap:'10px', flexWrap:'wrap', justifyContent:'center'}}>
+              <button onClick={onOpenEnergyLog} style={primaryPill}>Save to Energy Log</button>
+              <button onClick={() => card && shareOracleCard(card).catch(() => {})} style={ghostPill}>Share</button>
+              {isSuperuser && <button onClick={pullAgain} style={ghostPill}>Pull Again</button>}
             </div>
+            {!isSuperuser && (
+              <div style={{fontSize:'12px', color: INK_SOFT, fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.4px'}}>
+                Come back tomorrow for another message from the Universe <span aria-hidden>🌙</span>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {err && <div style={{marginTop:'10px', fontSize:'12px', color:'#ffb3b3', textAlign:'center', position:'relative', zIndex:2}}>{err}</div>}
+      {err && <div style={{marginTop:'10px', fontSize:'12px', color:'#a02020', textAlign:'center', position:'relative', zIndex:2}}>{err}</div>}
     </div>
   );
 };
 
-// ─── Floating card ────────────────────────────────────────────────────────
+// ─── Fan card ─────────────────────────────────────────────────────────────
 
-const FloatingCard: React.FC<{
+interface FanPos { x: number; rot: number; scale: number }
+
+const FanCard: React.FC<{
   index: number;
-  total: number;
+  pos: FanPos;
   phase: 'deck' | 'picking' | 'revealed';
   pickedIndex: number | null;
   flipped: boolean;
   card: OracleCardData | null;
   locked: boolean;
-  sparkleOnMe: boolean;
+  flower: FlowerCell;
   onPick: (i: number) => void;
-}> = ({ index, total, phase, pickedIndex, flipped, card, locked, sparkleOnMe, onPick }) => {
+}> = ({ index, pos, phase, pickedIndex, flipped, card, locked, flower, onPick }) => {
   const isPicked = pickedIndex === index;
-  const isOther  = pickedIndex !== null && pickedIndex !== index;
-  const middle   = (total - 1) / 2;
-  const offIdx   = index - middle;
-  const deckX    = offIdx * (CARD_W + DECK_GAP);
-  const deckRot  = offIdx * 5;
-  const floatDelay = `${-(index * 1.2)}s`;
+  const isOther  = pickedIndex !== null && !isPicked;
+  const isCenter = index === 3;
 
-  let x = 0, y = 0, rotate = 0, scale = 1, opacity = 1;
+  let x = pos.x, y = 0, rotate = pos.rot, scale = pos.scale, opacity = 1;
   if (phase === 'deck') {
-    x = deckX; rotate = deckRot; scale = 1; opacity = locked ? 0.55 : 1;
+    opacity = locked ? 0.6 : 1;
   } else if (phase === 'picking' || phase === 'revealed') {
     if (isPicked) {
-      x = 0; y = -10; rotate = 0; scale = 1.28; opacity = 1;
+      x = 0; y = -25; rotate = 0; scale = 1.15; opacity = 1;
     } else if (isOther) {
-      x = deckX; rotate = deckRot; scale = 0.88; opacity = 0.05;
+      opacity = 0.18;
     }
   }
 
@@ -375,46 +343,35 @@ const FloatingCard: React.FC<{
     <motion.div
       initial={false}
       animate={{ x, y, rotate, scale, opacity }}
-      transition={{ duration: 0.9, ease: EASE }}
-      whileHover={phase === 'deck' && !locked ? { scale: 1.06, y: -12 } : undefined}
+      transition={{ duration: 1.0, ease: EASE }}
+      whileHover={phase === 'deck' && !locked ? { y: -8, scale: pos.scale * 1.04, transition:{duration:0.25, ease: EASE} } : undefined}
       onClick={() => onPick(index)}
       style={{
         position:'absolute',
         width:`${CARD_W}px`, height:`${CARD_H}px`,
         cursor: phase === 'deck' && !locked ? 'pointer' : 'default',
         transformStyle:'preserve-3d',
-        zIndex: isPicked ? 10 : 1,
+        zIndex: isPicked ? 20 : (10 - Math.abs(index - 3)),
       }}>
-      {/* Gold aura pulse */}
-      {(phase === 'deck' || sparkleOnMe) && (
-        <div style={{
-          position:'absolute', inset:'-4px',
-          borderRadius:'20px',
-          pointerEvents:'none',
-          animation:'oracleGoldAura 3.2s ease-in-out infinite',
-          animationDelay: floatDelay,
-        }}/>
-      )}
-      {/* Sparkle burst on pick */}
-      {sparkleOnMe && (
-        <div style={{position:'absolute', top:'50%', left:'50%', pointerEvents:'none', zIndex:5}}>
-          <SparkleBurst/>
-        </div>
-      )}
-      {/* Float bobbing wrapper — separate so Framer's transform + CSS anim don't fight */}
+      {/* Aura + center breathing (only in deck phase on center card) */}
+      <div style={{
+        position:'absolute', inset:'-4px',
+        borderRadius:'14px',
+        pointerEvents:'none',
+        animation: phase === 'deck' && !locked ? 'oracleGoldRing 3.4s ease-in-out infinite' : undefined,
+        animationDelay: `${-index * 0.4}s`,
+      }}/>
       <div style={{
         width:'100%', height:'100%',
-        animation: phase === 'deck' ? 'oracleCardFloat 6s ease-in-out infinite' : undefined,
-        animationDelay: floatDelay,
+        animation: phase === 'deck' && isCenter && !locked ? 'oracleCenterBreathe 4.5s ease-in-out infinite' : undefined,
       }}>
-        {/* Flip container */}
         <motion.div
           initial={false}
           animate={{ rotateY: flipped && isPicked ? 180 : 0 }}
           transition={{ duration: 1.0, ease: EASE }}
           style={{width:'100%', height:'100%', position:'relative', transformStyle:'preserve-3d'}}>
-          <CardFrontFlower/>
-          <CardMessageFace card={card} show={phase === 'revealed' && isPicked}/>
+          <CardBack flower={flower}/>
+          <CardFront card={card} show={phase === 'revealed' && isPicked}/>
         </motion.div>
       </div>
     </motion.div>
@@ -423,57 +380,83 @@ const FloatingCard: React.FC<{
 
 // ─── Card faces ───────────────────────────────────────────────────────────
 
-// All cards share today's flower — rotates daily through 20 flower types
-// × 30 palettes × variation = 365 unique daily looks. Drawn as inline SVG.
-const CardFrontFlower: React.FC = () => (
+const CardBack: React.FC<{flower: FlowerCell}> = ({ flower }) => (
   <div style={{
     position:'absolute', inset:0,
     backfaceVisibility:'hidden',
     WebkitBackfaceVisibility:'hidden',
-    borderRadius:'16px',
+    borderRadius:'12px',
+    background: CREAM,
+    border:`1.5px solid rgba(201,168,76,0.7)`,
     overflow:'hidden',
+    display:'flex', flexDirection:'column',
   }}>
-    <FlowerOfTheDay borderRadius={14}/>
+    {/* Inner 8px inset border */}
+    <div style={{
+      position:'absolute', inset:'8px',
+      border:`1px solid ${GOLD_SOFT}80`,
+      borderRadius:'6px',
+      pointerEvents:'none',
+    }}/>
+    {/* Flower sprite fills top 85% */}
+    <div style={{
+      height:'85%',
+      margin:'8px 8px 0',
+      borderRadius:'6px',
+      ...spriteBgPosition(flower),
+    }}/>
+    {/* Flower name bottom */}
+    <div style={{
+      flex:1,
+      display:'flex', alignItems:'center', justifyContent:'center',
+      fontSize:'8px', letterSpacing:'2px', textTransform:'uppercase',
+      color: GOLD, fontWeight:700, fontFamily: SERIF,
+    }}>
+      {flower.name}
+    </div>
+    {/* Corner sparkles */}
+    <span style={{position:'absolute', top:'6px',    left:'8px',  fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
+    <span style={{position:'absolute', top:'6px',    right:'8px', fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
+    <span style={{position:'absolute', bottom:'6px', left:'8px',  fontSize:'7px', color: GOLD_SOFT, opacity: 0.7}}>✧</span>
+    <span style={{position:'absolute', bottom:'6px', right:'8px', fontSize:'7px', color: GOLD_SOFT, opacity: 0.7}}>✧</span>
+    {/* Shine sweep */}
+    <div style={{
+      position:'absolute', top:0, bottom:0, left:0, width:'50%',
+      background:'linear-gradient(100deg, transparent 35%, rgba(255,255,255,0.6) 50%, transparent 65%)',
+      animation:'oracleShine 5s ease-in-out infinite',
+      mixBlendMode:'screen', pointerEvents:'none',
+    }}/>
   </div>
 );
 
-// Auto-fit message font-size bucketed by body length. Prevents long oracle
-// pulls from overflowing the card — short messages get big handwritten flair,
-// long ones get smaller-but-still-readable type. clamp() also responds to
-// viewport width so the same bucket shrinks further on phones.
-function bodyFontFor(text: string): { size: string; lineHeight: number } {
+// Auto-fit body font by character count. Tested values sized so the longest
+// 250+ char messages fit in 120×190 portrait without overflow.
+function bodyStyleFor(text: string): { fontSize: string; lineClamp: number } {
   const len = (text || '').length;
-  if (len < 80)      return { size: 'clamp(15px, 4.2vw, 22px)', lineHeight: 1.3  };
-  if (len < 150)     return { size: 'clamp(13px, 3.6vw, 18px)', lineHeight: 1.35 };
-  return                    { size: 'clamp(11px, 3vw,   15px)', lineHeight: 1.45 };
-}
-function titleFontFor(text: string): string {
-  const len = (text || '').length;
-  if (len < 30) return 'clamp(14px, 3.6vw, 18px)';
-  if (len < 50) return 'clamp(12px, 3.2vw, 16px)';
-  return              'clamp(11px, 2.8vw, 14px)';
+  if (len < 80)  return { fontSize: '14px', lineClamp: 8 };
+  if (len < 150) return { fontSize: '12px', lineClamp: 10 };
+  return                { fontSize: '11px', lineClamp: 12 };
 }
 
-const CardMessageFace: React.FC<{card: OracleCardData | null; show: boolean}> = ({ card, show }) => {
+const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ card, show }) => {
   const cat  = useAnimation();
   const tit  = useAnimation();
   const body = useAnimation();
 
   useEffect(() => {
     if (show) {
-      cat.start({ opacity: 1, y: 0, letterSpacing: '3px',   transition: { duration: 1.4, delay: 0,   ease: EASE } });
-      tit.start({ opacity: 1, y: 0, letterSpacing: '0.05em', transition: { duration: 1.4, delay: 0.3, ease: EASE } });
-      body.start({ opacity: 1, y: 0, letterSpacing: '0.02em', transition: { duration: 1.4, delay: 0.6, ease: EASE } });
+      cat.start ({ opacity: 1, y: 0, letterSpacing: '2.5px',  transition: { duration: 1.2, delay: 0.1, ease: EASE } });
+      tit.start ({ opacity: 1, y: 0, letterSpacing: '0.02em', transition: { duration: 1.2, delay: 0.35, ease: EASE } });
+      body.start({ opacity: 1, y: 0, letterSpacing: '0em',    transition: { duration: 1.2, delay: 0.6,  ease: EASE } });
     } else {
-      cat.set ({ opacity: 0, y: 12, letterSpacing: '0em' });
-      tit.set ({ opacity: 0, y: 12, letterSpacing: '0em' });
-      body.set({ opacity: 0, y: 12, letterSpacing: '0em' });
+      cat.set ({ opacity: 0, y: 6, letterSpacing: '0em' });
+      tit.set ({ opacity: 0, y: 6, letterSpacing: '0em' });
+      body.set({ opacity: 0, y: 6, letterSpacing: '0em' });
     }
   }, [show, cat, tit, body]);
 
   const bodyText = card?.body || '';
-  const titleText = card?.title || '';
-  const bodyFont = bodyFontFor(bodyText);
+  const bodyS = bodyStyleFor(bodyText);
 
   return (
     <div style={{
@@ -481,62 +464,67 @@ const CardMessageFace: React.FC<{card: OracleCardData | null; show: boolean}> = 
       backfaceVisibility:'hidden',
       WebkitBackfaceVisibility:'hidden',
       transform:'rotateY(180deg)',
-      borderRadius:'16px',
+      borderRadius:'12px',
       background: CREAM,
-      boxShadow:`inset 0 0 0 2px ${GOLD}, inset 0 0 0 4px rgba(201,168,76,0.28)`,
-      padding:'20px',
-      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between',
+      border:`1.5px solid ${GOLD}`,
+      boxShadow:`inset 0 0 0 0.5px rgba(201,168,76,0.5)`,
+      padding:'12px 10px 10px',
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-start',
       overflow:'hidden',
       textAlign:'center',
       boxSizing:'border-box',
     }}>
-      {/* Inner gold ruled border */}
+      {/* Inner gold rule */}
       <div style={{
-        position:'absolute', inset:'10px',
-        border:`1px solid ${CREAM_EDGE}`,
-        borderRadius:'10px',
+        position:'absolute', inset:'6px',
+        border:`0.5px solid ${GOLD_SOFT}80`,
+        borderRadius:'8px',
         pointerEvents:'none',
       }}/>
 
-      {/* Sun icon top */}
-      <div style={{position:'relative', flexShrink:0}}>
-        <TopSunIcon/>
-      </div>
+      {/* Category */}
+      <motion.div animate={cat}
+        style={{fontSize:'9px', textTransform:'uppercase', color: PURPLE, fontWeight:700,
+          fontFamily: SERIF, marginTop:'2px', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+        {card?.category_label || '—'}
+      </motion.div>
 
-      {/* Content area — max 65% of card height, scrolls invisibly if long copy
-          overflows after the font-size bucket kicks in. */}
-      <div className="oracle-msg-scroll" style={{
-        flex:1, display:'flex', flexDirection:'column',
-        alignItems:'center', justifyContent:'center',
-        gap:'8px', width:'100%', padding:'4px 2px',
-        maxHeight:'65%',
-        overflowY:'auto',
-        scrollbarWidth:'none',
-      }}>
-        <motion.div animate={cat}
-          style={{fontSize:'clamp(8.5px,2.4vw,10px)', textTransform:'uppercase', color: GOLD, fontWeight:700,
-            fontFamily: SERIF, letterSpacing:'0em', flexShrink:0}}>
-          {card?.category_label || '—'}
-        </motion.div>
-        {!!titleText && (
-          <motion.div animate={tit}
-            style={{fontFamily: SERIF, fontSize: titleFontFor(titleText), fontWeight:500, fontStyle:'italic',
-              color: INK_CARD, lineHeight:1.3, letterSpacing:'0em', flexShrink:0, maxWidth:'100%', wordBreak:'break-word'}}>
-            {titleText}
-          </motion.div>
-        )}
-        {!!bodyText && (
-          <motion.div animate={body}
-            style={{fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
-              fontSize: bodyFont.size, color: INK_CARD, lineHeight: bodyFont.lineHeight, fontWeight:500,
-              letterSpacing:'0em', padding:'0 2px', maxWidth:'100%', wordBreak:'break-word'}}>
-            {bodyText}
-          </motion.div>
-        )}
-      </div>
+      {/* Sparkle divider */}
+      <div style={{fontSize:'10px', color: GOLD, margin:'4px 0 2px', opacity: 0.85}}>✦</div>
 
-      {/* Heart at bottom */}
-      <div style={{color: GOLD, opacity: 0.7, fontSize:'14px', marginTop:'4px', flexShrink:0}}>♡</div>
+      {/* Title */}
+      <motion.div animate={tit}
+        style={{fontFamily:'Georgia,serif', fontSize:'15px', fontWeight:500, fontStyle:'italic',
+          color: INK_CARD, lineHeight:1.2, padding:'0 2px', maxWidth:'100%', wordBreak:'break-word'}}>
+        {card?.title || ''}
+      </motion.div>
+
+      {/* Thin divider */}
+      <div style={{
+        width:'40%', height:'0.5px', background: `${GOLD_SOFT}99`,
+        margin:'6px 0', flexShrink:0,
+      }}/>
+
+      {/* Body — clamp lines based on length so it NEVER overflows */}
+      <motion.div animate={body}
+        style={{
+          fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
+          fontSize: bodyS.fontSize,
+          color: INK_CARD, lineHeight: 1.25, fontWeight:500,
+          padding:'0 2px',
+          flex: 1,
+          display:'-webkit-box',
+          WebkitLineClamp: bodyS.lineClamp,
+          WebkitBoxOrient: 'vertical',
+          overflow:'hidden',
+          textOverflow:'ellipsis',
+          maxWidth:'100%', wordBreak:'break-word',
+        }}>
+        {bodyText}
+      </motion.div>
+
+      {/* Heart */}
+      <div style={{color: GOLD, fontSize:'10px', opacity: 0.75, marginTop:'2px', flexShrink:0}}>♡</div>
     </div>
   );
 };
@@ -544,7 +532,7 @@ const CardMessageFace: React.FC<{card: OracleCardData | null; show: boolean}> = 
 // ─── Decorations ──────────────────────────────────────────────────────────
 
 const LotusIcon: React.FC = () => (
-  <svg width="26" height="26" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg width="26" height="26" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
     {[-60, -30, 0, 30, 60].map((a, i) => (
       <path key={i} transform={`rotate(${a} 16 22)`}
         d="M 16 22 Q 10 12, 16 4 Q 22 12, 16 22 Z"
@@ -554,77 +542,9 @@ const LotusIcon: React.FC = () => (
   </svg>
 );
 
-const TopSunIcon: React.FC = () => (
-  <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-    {Array.from({length: 12}).map((_, i) => (
-      <line key={i} x1="16" y1="2" x2="16" y2="6"
-        stroke={GOLD} strokeWidth="1" strokeLinecap="round"
-        transform={`rotate(${i * 30} 16 16)`}/>
-    ))}
-    <circle cx="16" cy="16" r="5" fill="none" stroke={GOLD} strokeWidth="1.2"/>
-    <circle cx="16" cy="16" r="2" fill={GOLD}/>
-  </svg>
-);
-
-// Animated sparkle burst — 20 gold particles radiating from center.
-const SparkleBurst: React.FC = () => (
-  <>
-    {Array.from({ length: 20 }).map((_, i) => {
-      const angle = (i / 20) * 360;
-      const dist = 70 + (i % 4) * 14;
-      return (
-        <motion.div key={i}
-          initial={{ x: 0, y: 0, opacity: 0, scale: 0.4 }}
-          animate={{
-            x: Math.cos(angle * Math.PI / 180) * dist,
-            y: Math.sin(angle * Math.PI / 180) * dist,
-            opacity: [0, 1, 0],
-            scale: [0.4, 1.2, 0.6],
-          }}
-          transition={{ duration: 0.9, ease: EASE }}
-          style={{
-            position:'absolute',
-            width:'7px', height:'7px', borderRadius:'50%',
-            background: `radial-gradient(circle, ${GOLD_BRIGHT} 0%, rgba(255,228,163,0) 70%)`,
-            boxShadow: `0 0 10px ${GOLD_SOFT}`,
-          }}/>
-      );
-    })}
-  </>
-);
-
-// Golden ring that swirls around the picked card during the flip moment.
-const GoldenSwirlRing: React.FC<{active: boolean}> = ({ active }) => {
-  if (!active) return null;
-  return (
-    <div aria-hidden style={{
-      position:'absolute', top:'50%', left:'50%',
-      width:'330px', height:'330px',
-      marginLeft:'-165px', marginTop:'-165px',
-      pointerEvents:'none',
-      borderRadius:'50%',
-      background:
-        `conic-gradient(from 0deg,
-          rgba(201,168,76,0) 0deg,
-          rgba(230,201,122,0.65) 60deg,
-          rgba(255,228,163,0.85) 90deg,
-          rgba(201,168,76,0.45) 120deg,
-          rgba(201,168,76,0) 200deg,
-          rgba(201,168,76,0) 360deg)`,
-      animation:'oracleSwirl 1.4s linear',
-      maskImage:'radial-gradient(circle, transparent 54%, black 57%, black 72%, transparent 76%)',
-      WebkitMaskImage:'radial-gradient(circle, transparent 54%, black 57%, black 72%, transparent 76%)',
-      filter:'blur(0.5px) drop-shadow(0 0 10px rgba(230,201,122,0.4))',
-      zIndex: 6,
-    }}/>
-  );
-};
-
-// Gold particles drifting upward across the light-pearl oracle panel.
-// Pure gold tones so they stay visible against the pearl gradient.
 const GoldParticles: React.FC = () => (
   <div aria-hidden style={{position:'absolute', inset:0, pointerEvents:'none', overflow:'hidden', zIndex:1}}>
-    {Array.from({ length: 32 }).map((_, i) => {
+    {Array.from({ length: 28 }).map((_, i) => {
       const size = 2 + ((i * 13) % 4);
       const dur = 14 + (i % 12);
       const delay = -(i * 0.7);
@@ -646,5 +566,21 @@ const GoldParticles: React.FC = () => (
     })}
   </div>
 );
+
+const primaryPill: React.CSSProperties = {
+  background:'linear-gradient(135deg,#7ab0f0 0%,#9b8fe8 55%,#534AB7 100%)',
+  color:'white', border:'none', borderRadius:'999px',
+  padding:'10px 18px', fontSize:'12.5px', fontWeight:700,
+  cursor:'pointer', fontFamily:'inherit',
+  boxShadow:'0 6px 16px rgba(83,74,183,0.25)',
+};
+const ghostPill: React.CSSProperties = {
+  background:'rgba(255,255,255,0.8)',
+  color: PURPLE,
+  border:`0.5px solid ${PURPLE_MID}55`,
+  borderRadius:'999px',
+  padding:'10px 18px', fontSize:'12.5px', fontWeight:700,
+  cursor:'pointer', fontFamily:'inherit',
+};
 
 export default OracleDailyCard;

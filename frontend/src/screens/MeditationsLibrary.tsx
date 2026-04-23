@@ -37,6 +37,9 @@ const INK     = '#1F1B3A';
 const INK_SOFT= '#6B6889';
 const BORDER  = 'rgba(83,74,183,0.12)';
 
+// Humanize any category slug not explicitly mapped. Example:
+// 'stress_relief' → 'Stress Relief', 'body_scan' → 'Body Scan'.
+const humanizeCategory = (slug: string): string => (slug || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 const CATEGORY_LABELS: Record<string, string> = {
   self_healing:       'Self-Healing',
   energy_balance:     'Energy Balance',
@@ -90,7 +93,9 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API}/concierge/meditations/library`, { headers: { Authorization: `Bearer ${token}` } })
+    // Default limit on the server was 60 — we need ALL 2,044 rows client-side
+    // so search/filter work without round-tripping. Server caps at 5,000 now.
+    fetch(`${API}/concierge/meditations/library?limit=5000`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`${r.status}`)))
       .then(d => setMeds(Array.isArray(d) ? d : (d.meditations || [])))
       .catch(e => setErr(`Could not load meditations: ${e.message || e}`))
@@ -147,7 +152,7 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
             style={{padding:'10px 12px', borderRadius:'10px', border:`0.5px solid ${BORDER}`, background:'#FFFFFF', fontSize:'13px', color: INK, cursor:'pointer'}}>
             <option value="all">All categories ({meds.length})</option>
             {Object.entries(categoryCounts).sort().map(([cat, n]) => (
-              <option key={cat} value={cat}>{CATEGORY_LABELS[cat] || cat} ({n})</option>
+              <option key={cat} value={cat}>{CATEGORY_LABELS[cat] || humanizeCategory(cat)} ({n})</option>
             ))}
           </select>
         </div>
@@ -161,7 +166,7 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
               Showing {filtered.length} of {meds.length}{favorites.size > 0 && ` · ${favorites.size} favorited`}
             </div>
             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:'12px'}}>
-              {filtered.slice(0, 120).map(m => (
+              {filtered.slice(0, 300).map(m => (
                 <button key={m.id} onClick={() => setOpenId(m.id)}
                   style={{textAlign:'left', background:'#FFFFFF', border:`0.5px solid ${BORDER}`, borderRadius:'14px', padding:'14px', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', gap:'6px', position:'relative'}}>
                   <span onClick={(e) => { e.stopPropagation(); toggleFav(m.id); }}
@@ -179,9 +184,9 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
                 </button>
               ))}
             </div>
-            {filtered.length > 120 && (
+            {filtered.length > 300 && (
               <div style={{textAlign:'center', color: INK_SOFT, fontSize:'12px', marginTop:'20px'}}>
-                Showing first 120 of {filtered.length}. Narrow your search to see more.
+                Showing first 300 of {filtered.length}. Narrow your search to see more.
               </div>
             )}
           </>

@@ -3507,7 +3507,7 @@ def concierge_meditations_library(
     difficulty: str | None = None,
     tag: str | None = None,
     q: str | None = None,
-    limit: int = 60,
+    limit: int = 3000,
     _: User = Depends(verify_concierge_owner),
     db: Session = Depends(get_db),
 ):
@@ -3516,8 +3516,9 @@ def concierge_meditations_library(
     generated one-off prescriptions) don't leak into the browse view —
     those live in their own flows.
 
-    Response also includes available_filters computed from what's actually
-    present so the UI can hide filter options that would return empty."""
+    Default limit now accommodates the full 2,044-script library + headroom.
+    The frontend paginates visually; this endpoint returns everything so
+    search/filter can work client-side without round-trips."""
     qset = db.query(ConciergeMeditation).filter(ConciergeMeditation.source == "library")
     if category:   qset = qset.filter(ConciergeMeditation.category == category)
     if duration:   qset = qset.filter(ConciergeMeditation.duration_min == int(duration))
@@ -3531,7 +3532,7 @@ def concierge_meditations_library(
             (ConciergeMeditation.title.ilike(needle)) |
             (ConciergeMeditation.physician_notes.ilike(needle))
         )
-    rows = qset.order_by(ConciergeMeditation.category, ConciergeMeditation.duration_min).limit(max(1, min(limit, 200))).all()
+    rows = qset.order_by(ConciergeMeditation.category, ConciergeMeditation.duration_min).limit(max(1, min(limit, 5000))).all()
     if tag:
         t = tag.strip().lower()
         rows = [r for r in rows if isinstance(r.tags, list) and any(t in (x or '').lower() for x in r.tags)]
@@ -4538,7 +4539,12 @@ def _oracle_card_payload(msg: dict, categories: dict, pull: ConciergeOraclePull 
     }
 
 
-def _pick_card_for(user_id: int, today: str, intention: str | None, db: Session) -> dict:
+def _pick_card_for(user_id: int, today: str, intention: str | None, db: Session, fresh: bool = False) -> dict:
+    """Deterministic daily pick for real patients (same card every call
+    within the day). Superusers pass fresh=True so each repeated pull
+    lands on a different message from the eligible pool — needed because
+    the /concierge/oracle/today POST handler auto-deletes prior pulls
+    for superusers and would otherwise loop on the same SHA seed."""
     oracle = _load_oracle()
     msgs = oracle["messages"]
 
@@ -4566,6 +4572,10 @@ def _pick_card_for(user_id: int, today: str, intention: str | None, db: Session)
             weighted.extend([m] * (3 if m["category"] in matched_cats else 1))
     else:
         weighted = eligible
+
+    if fresh:
+        import random as _rand
+        return _rand.choice(weighted)
 
     seed_material = f"{user_id}|{today}|{intention_l}"
     h = hashlib.sha256(seed_material.encode()).hexdigest()
@@ -4622,7 +4632,10 @@ def concierge_oracle_today_create(
         msg = next((m for m in oracle["messages"] if m["id"] == existing.message_id), oracle["messages"][0])
         return {"date": today, "pulled": True, "card": _oracle_card_payload(msg, oracle["categories"], existing)}
 
-    chosen = _pick_card_for(current_user.id, today, data.intention, db)
+    chosen = _pick_card_for(
+        current_user.id, today, data.intention, db,
+        fresh=getattr(current_user, "is_superuser", False),
+    )
     intention_clean = (data.intention or "").strip() or None
     pull = ConciergeOraclePull(
         user_id=current_user.id,
