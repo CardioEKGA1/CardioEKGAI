@@ -239,7 +239,7 @@ const OracleCardReel: React.FC<Props> = ({ API, token, userName, initialStep, on
             animate={{ rotateY: flipped ? 180 : 0 }}
             transition={{ duration: 0.75, ease: [0.4, 0.0, 0.2, 1] }}
             style={{
-              width:'min(340px, 86vw)', aspectRatio:'3/5',
+              width:'min(340px, 86vw)', aspectRatio:'2/3',
               position:'relative', transformStyle:'preserve-3d',
               filter:'drop-shadow(0 20px 50px rgba(83,74,183,0.25))',
             }}>
@@ -328,30 +328,18 @@ const CardBackFace: React.FC<{large?: boolean}> = ({ large }) => (
   <div style={{
     position:'absolute', inset:0, backfaceVisibility:'hidden',
     borderRadius: large ? '20px' : '14px',
-    // Use explicit backgroundImage + backgroundSize so CRA's public-asset
-    // URL rewriting can't get confused by shorthand form.
+    // The card-back.png already ships with its own ornate gold border
+    // and prismatic starburst — we render it clean (no synthetic ring,
+    // no shimmer overlay), letting the asset speak. backgroundSize:contain
+    // on the large card preserves the full border even though the image
+    // aspect is ~2:3 and the card wrapper may not be exactly that.
     backgroundImage: "url('/card-back.png')",
-    backgroundSize: 'cover',
+    backgroundSize: large ? 'contain' : 'cover',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
-    // Soft fallback gradient if the image somehow fails to load — keeps
-    // the card readable rather than invisible.
     backgroundColor: '#EDE6FB',
     overflow:'hidden',
-    // Subtle purple/gold ring so the card reads as "precious" on the light bg.
-    boxShadow: large
-      ? 'inset 0 0 0 1px rgba(226,181,103,0.55), inset 0 0 30px rgba(255,255,255,0.25)'
-      : 'inset 0 0 0 0.5px rgba(226,181,103,0.4)',
-  }}>
-    {/* White shimmer sweep overlay */}
-    <div style={{
-      position:'absolute', inset:0,
-      background:'linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%)',
-      animation:'oracleShimmer 3.5s ease-in-out infinite',
-      mixBlendMode:'screen',
-      pointerEvents:'none',
-    }}/>
-  </div>
+  }}/>
 );
 
 // Words in an oracle message that get tinted in a non-navy color — creates
