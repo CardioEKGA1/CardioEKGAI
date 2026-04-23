@@ -21,6 +21,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { shareOracleCard } from './shareOracleCard';
+import FlowerOfTheDay from './FlowerOfTheDay';
 
 interface OracleCardData {
   id: number; category: string;
@@ -41,19 +42,17 @@ interface Props {
   onOpenEnergyLog: () => void;
 }
 
-// Design tokens
-const BG_DEEP     = '#2a2060';
-const BG_MID      = '#4a3080';
-const BG_LIGHT    = '#7060a0';
+// Design tokens — light pearl/lavender stage matching the rest of the PWA.
+const BG_PEARL    = 'linear-gradient(160deg, #F5F1FF 0%, #E8E4FB 35%, #DFEAFC 70%, #F1E7F8 100%)';
 const GOLD        = '#C9A84C';
 const GOLD_SOFT   = '#E6C97A';
 const GOLD_BRIGHT = '#FFE4A3';
-const PERIWINKLE  = '#C4C8F0';
-const PERIWINKLE_2= '#A8ADE5';
 const CREAM       = '#FFF8F0';
 const CREAM_EDGE  = '#F5E8C7';
 const INK_CARD    = '#2A2150';
-const INK_SOFT    = '#6a5a9a';
+const INK_SOFT    = '#6B6889';
+const PURPLE      = '#534AB7';
+const PURPLE_MID  = '#9b8fe8';
 const SERIF       = '"Playfair Display",Georgia,serif';
 const EASE        = [0.22, 1, 0.36, 1] as const;
 
@@ -106,6 +105,8 @@ if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-ke
       30%  { opacity: 1; }
       100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
     }
+    /* Hide scrollbars on the overflow-y auto message container */
+    .oracle-msg-scroll::-webkit-scrollbar { display: none; }
   `;
   document.head.appendChild(s);
 }
@@ -236,19 +237,20 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
       padding:'clamp(20px,4vw,32px) 16px 28px',
       borderRadius:'22px',
       overflow:'hidden',
-      background: `radial-gradient(ellipse at 50% 30%, ${BG_LIGHT} 0%, ${BG_MID} 45%, ${BG_DEEP} 100%)`,
+      background: BG_PEARL,
       marginBottom:'14px',
-      boxShadow:'0 18px 40px rgba(42,32,96,0.25)',
+      boxShadow:'0 10px 30px rgba(83,74,183,0.12)',
+      border:'0.5px solid rgba(155,143,232,0.2)',
     }}>
-      <StarAtmosphere/>
+      <GoldParticles/>
 
       {/* HEADER */}
       {phase !== 'revealed' && (
-        <div style={{textAlign:'center', color:'white', marginBottom:'18px', position:'relative', zIndex:2}}>
-          <div style={{fontFamily: SERIF, fontSize:'clamp(20px,4.4vw,26px)', fontWeight:500, letterSpacing:'0.4px', lineHeight:1.25}}>
+        <div style={{textAlign:'center', color: INK_CARD, marginBottom:'18px', position:'relative', zIndex:2}}>
+          <div style={{fontFamily: SERIF, fontSize:'clamp(20px,4.4vw,26px)', fontWeight:500, letterSpacing:'0.4px', lineHeight:1.25, color: INK_CARD}}>
             What message is for you today?
           </div>
-          <div style={{fontSize:'13px', color:'rgba(255,255,255,0.75)', fontStyle:'italic', marginTop:'6px', fontFamily: SERIF, letterSpacing:'0.6px'}}>
+          <div style={{fontSize:'13px', color: INK_SOFT, fontStyle:'italic', marginTop:'6px', fontFamily: SERIF, letterSpacing:'0.6px'}}>
             Trust. Pause. Receive.
           </div>
           <div style={{marginTop:'10px', display:'flex', justifyContent:'center'}}>
@@ -282,7 +284,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
       </div>
 
       {/* Hint under stage */}
-      <div style={{marginTop:'14px', textAlign:'center', minHeight:'22px', color:'rgba(255,255,255,0.72)', fontSize:'12.5px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.4px', position:'relative', zIndex:2}}>
+      <div style={{marginTop:'14px', textAlign:'center', minHeight:'22px', color: INK_SOFT, fontSize:'12.5px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.4px', position:'relative', zIndex:2}}>
         {phase === 'deck' && !lockedToday && (loading ? 'Drawing your card…' : 'Swipe or tap a card')}
         {phase === 'deck' &&  lockedToday && 'Your message for today is above — tap to reopen'}
         {phase === 'picking' && 'The Universe is listening…'}
@@ -300,31 +302,31 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
             style={{marginTop:'22px', display:'flex', flexDirection:'column', alignItems:'center', gap:'12px', position:'relative', zIndex:2}}>
             <button onClick={onOpenEnergyLog}
               style={{
-                background:'transparent',
-                border:`1px solid ${GOLD_SOFT}99`,
-                color:'white',
+                background:'linear-gradient(135deg,#F5CF8A,#E2B567)',
+                border:`1px solid ${GOLD}`,
+                color: INK_CARD,
                 borderRadius:'999px',
                 padding:'12px 30px',
                 fontSize:'11.5px', fontWeight:700,
                 letterSpacing:'3px', textTransform:'uppercase',
                 cursor:'pointer', fontFamily:'inherit',
-                boxShadow:`0 0 18px rgba(201,168,76,0.25)`,
+                boxShadow:`0 8px 20px rgba(201,168,76,0.25)`,
               }}>
               Take a moment to reflect
             </button>
             <div style={{display:'flex', gap:'14px', alignItems:'center'}}>
               {isSuperuser ? (
                 <button onClick={drawAgainTomorrow}
-                  style={{background:'transparent', border:'none', color: GOLD_SOFT, fontSize:'12px', fontWeight:500, fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px', cursor:'pointer', textDecoration:'underline', textUnderlineOffset:'3px'}}>
+                  style={{background:'transparent', border:'none', color: PURPLE, fontSize:'12px', fontWeight:600, fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px', cursor:'pointer', textDecoration:'underline', textUnderlineOffset:'3px'}}>
                   Draw Again Tomorrow
                 </button>
               ) : (
-                <span style={{color:'rgba(255,255,255,0.55)', fontSize:'12px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px'}}>
+                <span style={{color: INK_SOFT, fontSize:'12px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px'}}>
                   Draw Again Tomorrow
                 </span>
               )}
               <button onClick={() => card && shareOracleCard(card).catch(() => {})}
-                style={{background:'transparent', border:'none', color:'rgba(255,255,255,0.55)', fontSize:'12px', fontWeight:500, fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px', cursor:'pointer'}}>
+                style={{background:'transparent', border:'none', color: PURPLE, fontSize:'12px', fontWeight:600, fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.6px', cursor:'pointer'}}>
                 Share
               </button>
             </div>
@@ -411,7 +413,7 @@ const FloatingCard: React.FC<{
           animate={{ rotateY: flipped && isPicked ? 180 : 0 }}
           transition={{ duration: 1.0, ease: EASE }}
           style={{width:'100%', height:'100%', position:'relative', transformStyle:'preserve-3d'}}>
-          <CardFrontMandala/>
+          <CardFrontFlower/>
           <CardMessageFace card={card} show={phase === 'revealed' && isPicked}/>
         </motion.div>
       </div>
@@ -421,65 +423,36 @@ const FloatingCard: React.FC<{
 
 // ─── Card faces ───────────────────────────────────────────────────────────
 
-// Periwinkle + gold border + centered sun-moon-star mandala.
-const CardFrontMandala: React.FC = () => (
+// All cards share today's flower — rotates daily through 20 flower types
+// × 30 palettes × variation = 365 unique daily looks. Drawn as inline SVG.
+const CardFrontFlower: React.FC = () => (
   <div style={{
     position:'absolute', inset:0,
     backfaceVisibility:'hidden',
     WebkitBackfaceVisibility:'hidden',
     borderRadius:'16px',
-    background: `linear-gradient(160deg, ${PERIWINKLE} 0%, ${PERIWINKLE_2} 100%)`,
     overflow:'hidden',
-    boxShadow:'inset 0 0 0 2px rgba(201,168,76,0.8), inset 0 0 0 4px rgba(201,168,76,0.25)',
   }}>
-    {/* Inner decorative ruled border */}
-    <div style={{
-      position:'absolute', inset:'10px',
-      border:`1px solid ${GOLD_SOFT}80`,
-      borderRadius:'10px',
-      pointerEvents:'none',
-    }}/>
-    <svg viewBox="0 0 170 255" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
-      {/* Center mandala anchor: cx=85 cy=127 */}
-      <g transform="translate(85 127)">
-        {/* Outer radiating rays (long + short alternating) */}
-        {Array.from({ length: 24 }).map((_, i) => {
-          const angle = i * 15;
-          const long = i % 2 === 0;
-          const y1 = long ? -38 : -34;
-          const y2 = long ? -58 : -48;
-          return (
-            <line key={i} x1="0" y1={y1} x2="0" y2={y2}
-              stroke={GOLD} strokeWidth={long ? 1.2 : 0.8} opacity={long ? 0.9 : 0.65}
-              strokeLinecap="round" transform={`rotate(${angle})`}/>
-          );
-        })}
-        {/* Sun disc */}
-        <circle r="32" fill="none" stroke={GOLD} strokeWidth="1.5" opacity="0.9"/>
-        <circle r="26" fill="none" stroke={GOLD_SOFT} strokeWidth="0.8" strokeDasharray="2 2" opacity="0.75"/>
-        {/* Crescent moon behind sun (overlapping) */}
-        <path d="M 0 -24 A 24 24 0 1 1 0 24 A 18 18 0 1 0 0 -24 Z"
-          fill={GOLD} opacity="0.38"/>
-        {/* Central star */}
-        <g>
-          <path d="M 0 -14 L 3 -4 L 13 -4 L 5 2 L 8 12 L 0 6 L -8 12 L -5 2 L -13 -4 L -3 -4 Z"
-            fill={GOLD} opacity="0.95"/>
-        </g>
-        {/* Surrounding small stars */}
-        {[0, 60, 120, 180, 240, 300].map((a, i) => (
-          <g key={i} transform={`rotate(${a}) translate(0 -50)`}>
-            <circle r="1.5" fill={GOLD_BRIGHT}/>
-          </g>
-        ))}
-      </g>
-      {/* Subtle Cormorant italic "soulmd" foil at bottom */}
-      <text x="85" y="236" textAnchor="middle" fontFamily="'Cormorant Garamond', serif"
-        fontStyle="italic" fontSize="10" letterSpacing="4" fill={GOLD} opacity="0.65">
-        soulmd
-      </text>
-    </svg>
+    <FlowerOfTheDay borderRadius={14}/>
   </div>
 );
+
+// Auto-fit message font-size bucketed by body length. Prevents long oracle
+// pulls from overflowing the card — short messages get big handwritten flair,
+// long ones get smaller-but-still-readable type. clamp() also responds to
+// viewport width so the same bucket shrinks further on phones.
+function bodyFontFor(text: string): { size: string; lineHeight: number } {
+  const len = (text || '').length;
+  if (len < 80)      return { size: 'clamp(15px, 4.2vw, 22px)', lineHeight: 1.3  };
+  if (len < 150)     return { size: 'clamp(13px, 3.6vw, 18px)', lineHeight: 1.35 };
+  return                    { size: 'clamp(11px, 3vw,   15px)', lineHeight: 1.45 };
+}
+function titleFontFor(text: string): string {
+  const len = (text || '').length;
+  if (len < 30) return 'clamp(14px, 3.6vw, 18px)';
+  if (len < 50) return 'clamp(12px, 3.2vw, 16px)';
+  return              'clamp(11px, 2.8vw, 14px)';
+}
 
 const CardMessageFace: React.FC<{card: OracleCardData | null; show: boolean}> = ({ card, show }) => {
   const cat  = useAnimation();
@@ -498,6 +471,10 @@ const CardMessageFace: React.FC<{card: OracleCardData | null; show: boolean}> = 
     }
   }, [show, cat, tit, body]);
 
+  const bodyText = card?.body || '';
+  const titleText = card?.title || '';
+  const bodyFont = bodyFontFor(bodyText);
+
   return (
     <div style={{
       position:'absolute', inset:0,
@@ -507,10 +484,11 @@ const CardMessageFace: React.FC<{card: OracleCardData | null; show: boolean}> = 
       borderRadius:'16px',
       background: CREAM,
       boxShadow:`inset 0 0 0 2px ${GOLD}, inset 0 0 0 4px rgba(201,168,76,0.28)`,
-      padding:'22px 16px 18px',
+      padding:'20px',
       display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between',
       overflow:'hidden',
       textAlign:'center',
+      boxSizing:'border-box',
     }}>
       {/* Inner gold ruled border */}
       <div style={{
@@ -521,31 +499,44 @@ const CardMessageFace: React.FC<{card: OracleCardData | null; show: boolean}> = 
       }}/>
 
       {/* Sun icon top */}
-      <div style={{position:'relative'}}>
+      <div style={{position:'relative', flexShrink:0}}>
         <TopSunIcon/>
       </div>
 
-      <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'8px', width:'100%', padding:'0 4px'}}>
+      {/* Content area — max 65% of card height, scrolls invisibly if long copy
+          overflows after the font-size bucket kicks in. */}
+      <div className="oracle-msg-scroll" style={{
+        flex:1, display:'flex', flexDirection:'column',
+        alignItems:'center', justifyContent:'center',
+        gap:'8px', width:'100%', padding:'4px 2px',
+        maxHeight:'65%',
+        overflowY:'auto',
+        scrollbarWidth:'none',
+      }}>
         <motion.div animate={cat}
-          style={{fontSize:'9.5px', textTransform:'uppercase', color: GOLD, fontWeight:700,
-            fontFamily: SERIF, letterSpacing:'0em'}}>
+          style={{fontSize:'clamp(8.5px,2.4vw,10px)', textTransform:'uppercase', color: GOLD, fontWeight:700,
+            fontFamily: SERIF, letterSpacing:'0em', flexShrink:0}}>
           {card?.category_label || '—'}
         </motion.div>
-        <motion.div animate={tit}
-          style={{fontFamily: SERIF, fontSize:'16px', fontWeight:500, fontStyle:'italic',
-            color: INK_CARD, lineHeight:1.3, letterSpacing:'0em'}}>
-          {card?.title || ''}
-        </motion.div>
-        <motion.div animate={body}
-          style={{fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
-            fontSize:'20px', color: INK_CARD, lineHeight:1.3, fontWeight:500,
-            letterSpacing:'0em', padding:'0 2px'}}>
-          {card?.body || ''}
-        </motion.div>
+        {!!titleText && (
+          <motion.div animate={tit}
+            style={{fontFamily: SERIF, fontSize: titleFontFor(titleText), fontWeight:500, fontStyle:'italic',
+              color: INK_CARD, lineHeight:1.3, letterSpacing:'0em', flexShrink:0, maxWidth:'100%', wordBreak:'break-word'}}>
+            {titleText}
+          </motion.div>
+        )}
+        {!!bodyText && (
+          <motion.div animate={body}
+            style={{fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
+              fontSize: bodyFont.size, color: INK_CARD, lineHeight: bodyFont.lineHeight, fontWeight:500,
+              letterSpacing:'0em', padding:'0 2px', maxWidth:'100%', wordBreak:'break-word'}}>
+            {bodyText}
+          </motion.div>
+        )}
       </div>
 
       {/* Heart at bottom */}
-      <div style={{color: GOLD, opacity: 0.7, fontSize:'14px', marginTop:'4px'}}>♡</div>
+      <div style={{color: GOLD, opacity: 0.7, fontSize:'14px', marginTop:'4px', flexShrink:0}}>♡</div>
     </div>
   );
 };
@@ -629,12 +620,13 @@ const GoldenSwirlRing: React.FC<{active: boolean}> = ({ active }) => {
   );
 };
 
-// Ambient cosmic particles floating upward across the whole oracle panel.
-const StarAtmosphere: React.FC = () => (
+// Gold particles drifting upward across the light-pearl oracle panel.
+// Pure gold tones so they stay visible against the pearl gradient.
+const GoldParticles: React.FC = () => (
   <div aria-hidden style={{position:'absolute', inset:0, pointerEvents:'none', overflow:'hidden', zIndex:1}}>
-    {Array.from({ length: 40 }).map((_, i) => {
-      const size = 1 + ((i * 13) % 4);
-      const dur = 16 + (i % 14);
+    {Array.from({ length: 32 }).map((_, i) => {
+      const size = 2 + ((i * 13) % 4);
+      const dur = 14 + (i % 12);
       const delay = -(i * 0.7);
       const drift = ((i % 5) - 2) * 12;
       return (
@@ -643,11 +635,9 @@ const StarAtmosphere: React.FC = () => (
           left: `${(i * 41) % 100}%`,
           bottom: `-${10 + (i % 20)}px`,
           width: `${size}px`, height: `${size}px`, borderRadius:'50%',
-          background: i % 3 === 0
-            ? `radial-gradient(circle, ${GOLD_BRIGHT} 0%, rgba(255,228,163,0) 70%)`
-            : 'radial-gradient(circle, #ffffff 0%, rgba(255,255,255,0) 70%)',
-          boxShadow: i % 3 === 0 ? `0 0 ${size * 3}px ${GOLD_SOFT}` : `0 0 ${size * 2}px rgba(255,255,255,0.4)`,
-          opacity: 0.5 + ((i * 17) % 50) / 100,
+          background: `radial-gradient(circle, ${GOLD_BRIGHT} 0%, rgba(245,207,138,0) 70%)`,
+          boxShadow: `0 0 ${size * 3}px ${GOLD_SOFT}`,
+          opacity: 0.45 + ((i * 17) % 50) / 100,
           // @ts-expect-error CSS custom property
           '--drift': `${drift}px`,
           animation: `oracleParticleDrift ${dur}s linear ${delay}s infinite`,

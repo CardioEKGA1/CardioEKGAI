@@ -174,8 +174,42 @@ const App: React.FC = () => {
   const handleAuth = useCallback((data: any) => {
     localStorage.setItem('token', data.access_token);
     setToken(data.access_token);
-    setUser({ email: data.email || '', scan_count: data.scan_count, is_subscribed: data.is_subscribed });
-    navigate(isSoulMD ? 'dashboard' : 'upload');
+    setUser({
+      email: data.email || '',
+      scan_count: data.scan_count,
+      is_subscribed: data.is_subscribed,
+      is_superuser: !!data.is_superuser,
+    });
+
+    // Post-auth redirect precedence:
+    //   1. sessionStorage['soulmd_post_auth_redirect'] — explicit intent set
+    //      before the magic-link request was made (e.g. the user clicked
+    //      "Sign in" from the concierge patient portal). Highest priority.
+    //   2. ?rt=… query param on the magic-link landing URL (cross-device
+    //      case — the magic-link itself carries the intent).
+    //   3. Default: SoulMD → dashboard, EKGScan → upload.
+    let redirected = false;
+    try {
+      const stored = sessionStorage.getItem('soulmd_post_auth_redirect');
+      if (stored && stored.startsWith('/')) {
+        sessionStorage.removeItem('soulmd_post_auth_redirect');
+        // Using window.location so we preserve the full path + query exactly,
+        // which the in-app navigate() can't do for ephemeral state like
+        // ?view=patient.
+        window.location.href = stored;
+        redirected = true;
+      }
+      if (!redirected) {
+        const rt = new URLSearchParams(window.location.search).get('rt');
+        if (rt && rt.startsWith('/')) {
+          window.location.href = rt;
+          redirected = true;
+        }
+      }
+    } catch {}
+    if (!redirected) {
+      navigate(isSoulMD ? 'dashboard' : 'upload');
+    }
   }, [isSoulMD, navigate]);
 
   // Initial auth bootstrap — runs once, at mount.
@@ -270,8 +304,15 @@ const App: React.FC = () => {
   // If someone lands directly on /concierge without being signed in, redirect
   // to the sign-in screen. Without this, the concierge render guard leaves
   // the page blank forever (waiting for a user that will never exist).
+  // Also stash the intended URL (including ?view=patient) so handleAuth
+  // can restore it after the magic-link round-trip — keeps superusers from
+  // bouncing to the tool dashboard when they meant to reach the patient PWA.
   useEffect(() => {
     if (screen === 'concierge' && !user && !token) {
+      try {
+        const target = window.location.pathname + window.location.search;
+        sessionStorage.setItem('soulmd_post_auth_redirect', target);
+      } catch {}
       navigate('auth');
     }
   }, [screen, user, token, navigate]);
