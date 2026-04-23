@@ -437,14 +437,16 @@ const CardBack: React.FC<{flower: FlowerCell}> = ({ flower }) => (
   </div>
 );
 
-// Body font + line clamp by length. User-specified 3-bucket schedule
-// (14/12/11 px, 5/6/8 lines) applied inline at render so it never
-// overflows the revealed face.
+// Body font + line clamp by length. 4-bucket schedule tuned for readability
+// on the 220×340 revealed face with 20px/16px padding — at 1.5 line-height
+// the tallest bucket (20px × 4 lines) uses 120px, leaving headroom for the
+// category / sparkle / title / divider / heart chrome above and below.
 function bodyStyleFor(text: string): { fontSize: string; lineClamp: number } {
   const len = (text || '').length;
-  if (len < 80)  return { fontSize: '14px', lineClamp: 5 };
-  if (len < 150) return { fontSize: '12px', lineClamp: 6 };
-  return                { fontSize: '11px', lineClamp: 8 };
+  if (len < 80)  return { fontSize: '20px', lineClamp: 4 };
+  if (len < 150) return { fontSize: '17px', lineClamp: 5 };
+  if (len < 220) return { fontSize: '15px', lineClamp: 6 };
+  return                { fontSize: '13px', lineClamp: 7 };
 }
 
 const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ card, show }) => {
@@ -520,7 +522,7 @@ const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ car
         style={{
           fontFamily:'"Caveat","Playfair Display",cursive',
           fontSize: bodyS.fontSize,
-          color: INK_CARD, lineHeight: 1.3, fontWeight:500,
+          color: INK_CARD, lineHeight: 1.5, fontWeight:500,
           padding:'0 2px',
           flex: 1,
           width: '100%',
