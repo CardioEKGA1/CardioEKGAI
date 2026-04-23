@@ -104,6 +104,10 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
   const activeLabel = NAV.find(n => n.id === section)?.label || 'Home';
 
   const go = (s: Section) => { setSection(s); setMoreSheetOpen(false); };
+  const signOut = () => {
+    try { localStorage.removeItem('token'); } catch {}
+    onBack();
+  };
 
   return (
     <div style={{minHeight:'100vh', display:'flex', background: PAGE_BG, fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif', color: INK, overflowX:'hidden'}}>
@@ -161,11 +165,15 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
             </button>
           </div>
 
-          <div style={{padding:'6px 14px 0'}}>
+          <div style={{padding:'6px 14px 0', display:'flex', flexDirection:'column', gap:'6px'}}>
             <a href={`${window.location.pathname}?view=patient`}
               style={{display:'block', padding:'8px 10px', fontSize:'11px', color: PURPLE, fontWeight:600, textDecoration:'none', borderRadius:'8px', background: 'rgba(83,74,183,0.06)', textAlign:'center'}}>
               View as test patient →
             </a>
+            <button onClick={signOut}
+              style={{display:'block', width:'100%', padding:'8px 10px', fontSize:'11px', color: INK_SOFT, fontWeight:600, border:`0.5px solid ${BORDER}`, borderRadius:'8px', background:'rgba(255,255,255,0.6)', cursor:'pointer', fontFamily:'inherit'}}>
+              Sign out
+            </button>
           </div>
           <div style={{padding:'12px 18px 16px', borderTop:`0.5px solid ${BORDER}`, display:'flex', alignItems:'center', gap:'8px', fontSize:'11px', color: INK_SOFT, marginTop:'8px'}}>
             <span style={{width:'8px', height:'8px', borderRadius:'50%', background: systemOk === null ? '#d0cfe0' : systemOk ? '#58C48E' : '#E06A6A', boxShadow: systemOk ? '0 0 0 3px rgba(88,196,142,0.15)' : undefined}}/>
@@ -209,7 +217,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
           <BottomTabBar section={section} onChange={go} onOpenMore={() => setMoreSheetOpen(true)}/>
         )}
         {isMobile && moreSheetOpen && (
-          <MoreSheet section={section} onChange={go} onClose={() => setMoreSheetOpen(false)}/>
+          <MoreSheet section={section} onChange={go} onClose={() => setMoreSheetOpen(false)} onSignOut={signOut}/>
         )}
       </div>
     </div>
@@ -294,7 +302,7 @@ const BottomTabBar: React.FC<{section: Section; onChange: (s: Section) => void; 
 // Sheet that slides up on mobile when "More" is tapped. Lists the
 // secondary nav items (Conversations, Protocols, Coaching, Resources,
 // Practice) plus the intention + view-as-patient shortcuts.
-const MoreSheet: React.FC<{section: Section; onChange: (s: Section) => void; onClose: () => void}> = ({ section, onChange, onClose }) => {
+const MoreSheet: React.FC<{section: Section; onChange: (s: Section) => void; onClose: () => void; onSignOut: () => void}> = ({ section, onChange, onClose, onSignOut }) => {
   const secondary = NAV.filter(n => !MOBILE_PRIMARY.includes(n.id));
   return (
     <div onClick={onClose} style={{position:'fixed', inset:0, zIndex:100, background:'rgba(20,18,40,0.35)', display:'flex', alignItems:'flex-end'}}>
@@ -317,6 +325,11 @@ const MoreSheet: React.FC<{section: Section; onChange: (s: Section) => void; onC
             <span style={{fontSize:'16px', width:'20px', textAlign:'center'}}>◈</span>
             View as test patient →
           </a>
+          <button onClick={onSignOut}
+            style={{display:'flex', alignItems:'center', gap:'14px', padding:'14px 12px', borderRadius:'10px', background:'transparent', color: INK_SOFT, fontSize:'14px', fontWeight:600, border:'none', textAlign:'left', cursor:'pointer', fontFamily:'inherit'}}>
+            <span style={{fontSize:'16px', width:'20px', textAlign:'center'}}>↵</span>
+            Sign out
+          </button>
         </div>
       </div>
     </div>
