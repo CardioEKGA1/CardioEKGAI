@@ -53,7 +53,8 @@ type Screen =
   | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd'
   | 'tool_labread' | 'tool_cliniscore'
   | 'concierge'
-  | 'meditations_library' | 'concierge_access';
+  | 'meditations_library' | 'concierge_access'
+  | 'dev_login';
 
 const API = 'https://ekgscan.com';
 
@@ -74,6 +75,7 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/concierge')         return 'concierge';
   if (path === '/meditations')       return 'meditations_library';
   if (path === '/concierge-access')  return 'concierge_access';
+  if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
     const candidate = `tool_${slug}` as Screen;
@@ -99,6 +101,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'concierge') return '/concierge';
   if (s === 'meditations_library') return '/meditations';
   if (s === 'concierge_access')    return '/concierge-access';
+  if (s === 'dev_login')           return '/dev-login';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
 };
@@ -293,6 +296,7 @@ const App: React.FC = () => {
       concierge:         'Concierge Medicine',
       meditations_library: `Meditations Library · ${brand}`,
       concierge_access:    `Concierge Portal · ${brand}`,
+      dev_login:           `Dev Login · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
   }, [screen, isSoulMD]);
@@ -392,6 +396,7 @@ const App: React.FC = () => {
         <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', color:'#8a6e50', fontSize:'14px'}}>Loading…</div>
       )}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
+      {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
@@ -405,4 +410,84 @@ const App: React.FC = () => {
     </div>
   );
 };
+// ─── Dev Login ─────────────────────────────────────────────────────────────
+// Hidden superuser fast-login page at /dev-login. Not linked anywhere;
+// reach it by typing the URL. Two buttons, no email input. Calls a
+// backend endpoint that's gated by DEV_LOGIN_ENABLED env + SUPERUSER_EMAILS
+// allowlist, so this page is cosmetically available on any deploy but
+// the endpoint returns 404 unless the env flag is set (or the caller is
+// localhost). Test Patient button additionally stashes the post-auth
+// redirect so handleAuth lands at /concierge?view=patient.
+const DevLogin: React.FC<{API: string; onAuth: (d: any) => void}> = ({ API, onAuth }) => {
+  const [loading, setLoading] = useState<string>('');
+  const [err, setErr] = useState<string>('');
+  const signIn = async (email: string, redirect?: string) => {
+    setErr(''); setLoading(email);
+    try {
+      if (redirect) {
+        try { sessionStorage.setItem('soulmd_post_auth_redirect', redirect); } catch {}
+      }
+      const res = await fetch(`${API}/auth/dev-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `dev-login unavailable (${res.status})`);
+      }
+      const data = await res.json();
+      onAuth(data);
+    } catch (e: any) {
+      setErr(e.message || 'Sign-in failed');
+    } finally {
+      setLoading('');
+    }
+  };
+  return (
+    <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)', fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif', padding:'24px'}}>
+      <div style={{background:'rgba(255,255,255,0.85)', backdropFilter:'blur(10px)', borderRadius:'22px', padding:'36px 28px', maxWidth:'420px', width:'100%', boxShadow:'0 20px 40px rgba(20,18,40,0.1)', border:'0.5px solid rgba(83,74,183,0.15)'}}>
+        <div style={{fontSize:'11px', letterSpacing:'2px', textTransform:'uppercase', color:'#534AB7', fontWeight:800, marginBottom:'10px'}}>Dev Login · Superuser Only</div>
+        <div style={{fontSize:'22px', fontWeight:800, color:'#1F1B3A', marginBottom:'6px', letterSpacing:'-0.3px'}}>Instant test sign-in</div>
+        <div style={{fontSize:'13px', color:'#6B6889', marginBottom:'24px', lineHeight:1.6}}>
+          Skips the magic-link email round-trip. Only works when the backend has
+          <code style={{background:'rgba(83,74,183,0.08)', padding:'2px 6px', borderRadius:'4px', margin:'0 4px'}}>DEV_LOGIN_ENABLED=true</code>
+          set in Railway, or when running against <code style={{background:'rgba(83,74,183,0.08)', padding:'2px 6px', borderRadius:'4px'}}>localhost</code>.
+        </div>
+        <button
+          disabled={!!loading}
+          onClick={() => signIn('anderson@soulmd.us')}
+          style={{
+            width:'100%', padding:'14px 18px', marginBottom:'10px',
+            background:'linear-gradient(135deg,#7ab0f0,#9b8fe8,#534AB7)',
+            color:'white', border:'none', borderRadius:'14px',
+            fontSize:'14px', fontWeight:800, cursor: loading ? 'default' : 'pointer',
+            opacity: loading === 'anderson@soulmd.us' ? 0.7 : 1,
+            fontFamily:'inherit', boxShadow:'0 8px 20px rgba(83,74,183,0.25)',
+          }}>
+          {loading === 'anderson@soulmd.us' ? 'Signing in…' : 'Sign in as Dr. Anderson'}
+        </button>
+        <button
+          disabled={!!loading}
+          onClick={() => signIn('spicymolecule@gmail.com', '/concierge?view=patient')}
+          style={{
+            width:'100%', padding:'14px 18px',
+            background:'rgba(255,255,255,0.9)',
+            color:'#534AB7', border:'0.5px solid rgba(83,74,183,0.3)', borderRadius:'14px',
+            fontSize:'14px', fontWeight:800, cursor: loading ? 'default' : 'pointer',
+            opacity: loading === 'spicymolecule@gmail.com' ? 0.7 : 1,
+            fontFamily:'inherit',
+          }}>
+          {loading === 'spicymolecule@gmail.com' ? 'Signing in…' : 'Sign in as Test Patient'}
+        </button>
+        {err && <div style={{marginTop:'14px', fontSize:'12px', color:'#a02020', textAlign:'center'}}>{err}</div>}
+        <div style={{marginTop:'22px', fontSize:'11px', color:'#8aa0c0', textAlign:'center', fontStyle:'italic', lineHeight:1.6}}>
+          If you see "Not found", the dev endpoint is gated on prod.<br/>
+          Set <code style={{background:'rgba(83,74,183,0.08)', padding:'1px 5px', borderRadius:'3px'}}>DEV_LOGIN_ENABLED=true</code> in Railway or run locally.
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default App;

@@ -902,7 +902,70 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
         "email": user.email,
         "scan_count": user.scan_count,
         "is_subscribed": user.is_subscribed,
+        "is_superuser": bool(getattr(user, "is_superuser", False)),
     }
+
+
+class DevLoginRequest(BaseModel):
+    email: str
+
+
+DEV_LOGIN_ENABLED = os.getenv("DEV_LOGIN_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+def _is_localhost_request(request: Request) -> bool:
+    """True when the HTTP request is coming from the same machine as the
+    backend (localhost development). Behind a reverse proxy, client.host
+    will be the proxy's IP, not 127.0.0.1 — so in production the env-var
+    gate is the authoritative switch; this check only helps in `uvicorn
+    main:app` local runs without a proxy."""
+    host = (request.client.host if request.client else "") or ""
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
+@app.post("/auth/dev-login")
+@limiter.limit("10/minute")
+def dev_login(request: Request, data: DevLoginRequest, db: Session = Depends(get_db)):
+    """Instant-login endpoint for the two known test accounts. Bypasses the
+    magic-link email round-trip entirely — used to keep iterative testing
+    fast when Gmail is slow/filtering.
+
+    Security gates (defense in depth):
+     1. Requires either DEV_LOGIN_ENABLED=true env var OR a localhost
+        origin, so it's inert on a hardened production image unless
+        explicitly opted in.
+     2. Email must be in SUPERUSER_EMAILS — no way to log in as an
+        arbitrary user via this endpoint.
+    """
+    if not (DEV_LOGIN_ENABLED or _is_localhost_request(request)):
+        raise HTTPException(status_code=404, detail="Not found")
+    email = (data.email or "").strip().lower()
+    if not _is_superuser_email(email):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        # First-time dev login bootstraps the User row so later prod magic-link
+        # sign-ins pick up the same row with is_superuser preserved.
+        user = User(
+            email=email, hashed_password="", is_verified=True,
+            subscription_tier="free", is_superuser=True, is_clinician=False,
+            scan_count=0,
+        )
+        db.add(user); db.commit(); db.refresh(user)
+    elif not user.is_superuser:
+        user.is_superuser = True
+        db.commit()
+
+    access_token = create_token({"sub": user.email})
+    print(f"DEV_LOGIN_OK email={email} host={request.client.host if request.client else '?'}")
+    return {
+        "access_token": access_token,
+        "email": user.email,
+        "scan_count": user.scan_count,
+        "is_subscribed": user.is_subscribed,
+        "is_superuser": True,
+    }
+
 
 @app.post("/auth/delete-account")
 @limiter.limit("3/minute")
