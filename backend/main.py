@@ -117,6 +117,44 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "support@soulmd.us")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 SUPERUSER_EMAIL = os.getenv("SUPERUSER_EMAIL", "").strip().lower()
+# Multi-email superuser list. Any of these emails is treated as
+# is_superuser=True on login + bypasses oracle once-per-day + concierge
+# owner checks. Defaults to the two known test accounts so the flag doesn't
+# need Railway-env-var coordination for the common case; extra entries can
+# be added via SUPERUSER_EMAILS="a@x.com,b@y.com" env (comma-separated).
+_DEFAULT_SUPERUSER_EMAILS = {"anderson@soulmd.us", "spicymolecule@gmail.com"}
+SUPERUSER_EMAILS: set[str] = {
+    e.strip().lower()
+    for e in (os.getenv("SUPERUSER_EMAILS", "") or "").split(",")
+    if e.strip()
+} | ({SUPERUSER_EMAIL} if SUPERUSER_EMAIL else set()) | _DEFAULT_SUPERUSER_EMAILS
+
+def _is_superuser_email(email: str | None) -> bool:
+    return bool(email) and email.strip().lower() in SUPERUSER_EMAILS
+
+# One-shot backfill at boot: flip is_superuser=True for any existing User
+# whose email is in SUPERUSER_EMAILS but whose flag wasn't yet set. Wrapped
+# in try/except so a transient DB issue at startup can't prevent app boot.
+def _backfill_superusers() -> None:
+    try:
+        from database import SessionLocal as _Session
+        _db = _Session()
+        try:
+            targets = [e for e in SUPERUSER_EMAILS if e]
+            if not targets:
+                return
+            rows = _db.query(User).filter(User.email.in_(targets), User.is_superuser == False).all()  # noqa: E712
+            if rows:
+                for r in rows:
+                    r.is_superuser = True
+                _db.commit()
+                print(f"[boot] promoted {len(rows)} user(s) to superuser via SUPERUSER_EMAILS backfill: {[r.email for r in rows]}")
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f"[boot] superuser backfill skipped: {type(e).__name__}: {e}")
+
+_backfill_superusers()
 EMAIL_HASH_PEPPER = os.getenv("EMAIL_HASH_PEPPER")
 if not EMAIL_HASH_PEPPER:
     EMAIL_HASH_PEPPER = "soulmd-default-pepper-set-EMAIL_HASH_PEPPER-env-var-for-prod"
@@ -796,7 +834,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
 
         user = existing_user
         if not user:
-            is_super = bool(SUPERUSER_EMAIL) and email == SUPERUSER_EMAIL
+            is_super = _is_superuser_email(email)
             user = User(
                 email=email, hashed_password="", is_verified=False,
                 subscription_tier="free", is_superuser=is_super,
@@ -808,7 +846,7 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
             db.commit()
         else:
             changed = False
-            if SUPERUSER_EMAIL and email == SUPERUSER_EMAIL and not user.is_superuser:
+            if _is_superuser_email(email) and not user.is_superuser:
                 user.is_superuser = True
                 changed = True
             if data.is_clinician and not user.is_clinician:
