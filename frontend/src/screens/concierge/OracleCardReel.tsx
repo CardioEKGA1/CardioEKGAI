@@ -80,12 +80,17 @@ const OracleCardReel: React.FC<Props> = ({ API, token, userName, initialStep, on
         try {
           const res = await fetch(`${API}/concierge/oracle/today`, { headers: { Authorization: `Bearer ${token}` } });
           const d: TodayPayload = await res.json();
+          // eslint-disable-next-line no-console
+          console.log('[oracle/today GET]', res.status, d);
           if (d.pulled && d.card) {
             setCard(d.card);
             setPhase('revealed');
             setFlipped(true);
           }
-        } catch {}
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[oracle/today GET failed]', e);
+        }
       })();
     }
   }, [API, token, initialStep]);
@@ -127,7 +132,10 @@ const OracleCardReel: React.FC<Props> = ({ API, token, userName, initialStep, on
         body: JSON.stringify({}),
       });
       const d = await res.json();
+      // eslint-disable-next-line no-console
+      console.log('[oracle/today POST]', res.status, d);
       if (!res.ok) throw new Error(d.detail || 'Could not draw today\'s card.');
+      if (!d.card) throw new Error('Server returned no card.');
       setCard(d.card);
       // Pause briefly to let the "revealing" dim effect play, then flip.
       setTimeout(() => {
@@ -424,14 +432,24 @@ const CardFrontFace: React.FC<{card: OracleCardData | null; large?: boolean; sho
           {card.title}
         </div>
       )}
-      <div style={{
-        fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
-        fontSize: large ? 'clamp(22px,5.8vw,30px)' : '12px',
-        color: INK, lineHeight: 1.35, fontWeight:500,
-        padding: large ? '0 6px' : 0,
-      }}>
-        {renderAccented(card?.body || '')}
-      </div>
+      {card?.body ? (
+        <div style={{
+          fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
+          fontSize: large ? 'clamp(22px,5.8vw,30px)' : '12px',
+          color: INK, lineHeight: 1.35, fontWeight:500,
+          padding: large ? '0 6px' : 0,
+        }}>
+          {renderAccented(card.body)}
+        </div>
+      ) : (
+        <div style={{
+          fontFamily:'"Playfair Display",Georgia,serif',
+          fontSize: large ? '14px' : '11px',
+          color: INK_SOFT, fontStyle:'italic', padding: '0 6px',
+        }}>
+          The Universe is composing your message…
+        </div>
+      )}
       {large && <span style={{fontSize:'18px', color: PURPLE_MID, opacity:0.6}}>✦</span>}
     </motion.div>
 

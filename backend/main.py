@@ -4519,14 +4519,19 @@ def concierge_oracle_today_create(
     current_user: User = Depends(verify_concierge_member),
     db: Session = Depends(get_db),
 ):
-    """Create today's pull. Idempotent: if one already exists, returns it
-    unchanged (intention can't be edited after the card is drawn)."""
+    """Create today's pull. Idempotent for real patients: if one already
+    exists, returns it unchanged (intention can't be edited after the
+    card is drawn). Superusers bypass the daily cap — existing pull is
+    deleted so a fresh card is drawn each time, giving unlimited
+    shuffles for testing."""
     oracle = _load_oracle()
     today = _today_mst()
     existing = db.query(ConciergeOraclePull).filter(
         ConciergeOraclePull.user_id == current_user.id,
         ConciergeOraclePull.pull_date == today,
     ).first()
+    if existing and getattr(current_user, "is_superuser", False):
+        db.delete(existing); db.commit(); existing = None
     if existing:
         msg = next((m for m in oracle["messages"] if m["id"] == existing.message_id), oracle["messages"][0])
         return {"date": today, "pulled": True, "card": _oracle_card_payload(msg, oracle["categories"], existing)}
