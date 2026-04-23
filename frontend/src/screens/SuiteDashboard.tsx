@@ -32,15 +32,24 @@ const TOOLS: Tool[] = [
   { slug:'cerebralai',   name:'CerebralAI',      icon:'🧠', desc:'Brain and spine MRI and CT interpretation',                                                                                      monthly:24.99, yearly:179.99, keywords:'brain spine mri ct neuroimaging stroke hemorrhage head radiology neurology cord cerebralai' },
   { slug:'clinicalnote', name:'ClinicalNote AI', icon:'📝', desc:'AI that writes clinical notes in your voice — SOAP, H&P, discharge, consult, procedure — with style learning',                  monthly:24.99, yearly:179.99, keywords:'soap h&p note documentation discharge summary procedure consult hpi prior auth pa style learning voice personalized clinicalnote' },
   { slug:'cliniscore',   name:'CliniScore',      icon:'📊', desc:'Clinical risk calculators with AI interpretation',                                                                               monthly:0,     yearly:0,      free:true,  keywords:'calculator mdcalc chadsvasc hasbled heart score wells curb65 meld child-pugh fib4 phq9 gad7 qsofa bmi egfr anion gap winters' },
+  { slug:'concierge',    name:'Concierge Medicine', icon:'🌿', desc:'Where science meets the soul — Dr. Anderson\'s integrative practice. Membership + à la carte care.',                        monthly:0,     yearly:0,      free:true,  keywords:'concierge anderson membership integrative direct-pay soul ritual meditation oracle holistic reiki chakra' },
   { slug:'ekgscan',      name:'EKGScan',         icon:'🫀', desc:'12-lead EKG interpretation in seconds',                                                                                          monthly:9.99,  yearly:89.99,  keywords:'ekg ecg cardiac rhythm heart 12-lead cardiology arrhythmia atrial ventricular qtc' },
   { slug:'labread',      name:'LabRead',         icon:'🧪', desc:'AI lab-panel interpretation — paste, dictate, or upload',                                                                         monthly:0,     yearly:0,      free:true,  keywords:'labs chemistry cbc bmp cmp electrolytes liver renal thyroid iron ferritin ldh tsh ptt inr ca+k+na' },
+  { slug:'meditations',  name:'Meditations',     icon:'🕯️', desc:'2,000+ guided meditation scripts — browse, search, favorite. Superuser tool.',                                                  monthly:0,     yearly:0,      free:true,  keywords:'meditation mindfulness breathwork sleep chakra grounding visualization library scripts' },
   { slug:'nephroai',     name:'NephroAI',        icon:'🫘', desc:'Comprehensive nephrology decision support',                                                                                      monthly:9.99,  yearly:89.99,  keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology nephroai' },
   { slug:'palliativemd', name:'PalliativeMD',    icon:'🫶', desc:'AI-guided palliative care — goals of care, prognosis, family meetings',                                                          monthly:24.99, yearly:179.99, keywords:'palliative goals of care prognosis hospice family meeting dnr dni code status end of life comfort' },
   { slug:'rxcheck',      name:'RxCheck',         icon:'💊', desc:'Full medication interaction safety check',                                                                                       monthly:9.99,  yearly:89.99,  keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
   { slug:'xrayread',     name:'XrayRead',        icon:'🩻', desc:'Structured radiology report from any X-ray image',                                                                               monthly:24.99, yearly:179.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
 ];
 
-const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','xrayread','cerebralai','palliativemd','labread','cliniscore']);
+// Tools that open directly (no subscribe step) when clicked — concierge +
+// meditations are listed here so their tile shows "Open →" instead of price.
+const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','xrayread','cerebralai','palliativemd','labread','cliniscore','concierge','meditations']);
+
+// Tools the superuser sees but regular users don't (admin-scoped content).
+// concierge is intentionally NOT here — everyone should be able to discover
+// the concierge practice from the tool grid.
+const SUPERUSER_ONLY_TOOLS = new Set(['meditations']);
 
 // The 8 tools with the 1-use-free-trial model. labread + cliniscore are
 // already 5/day free for everyone so they stay out of the trial system.
@@ -261,7 +270,15 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   const hasAnyPaidSub = !!access && !isSuper && access.has_budget;
   const suiteActive = hasAccess('suite');
   const suiteMonthly = access?.tiers?.suite === 'monthly';
-  const lockedCount = TOOLS.filter(t => !hasAccess(t.slug)).length;
+  // Don't include free-access tiles (concierge, meditations, labread,
+  // cliniscore) or superuser-only tiles in the "N locked" banner count —
+  // it's meant to nudge users toward the paid Suite, not flag discovery
+  // or admin tiles as locked.
+  const lockedCount = TOOLS.filter(t =>
+    !t.free
+    && !SUPERUSER_ONLY_TOOLS.has(t.slug)
+    && !hasAccess(t.slug)
+  ).length;
 
   // Trial state resolution: server is source of truth; localStorage is a
   // fast fallback used during the post-use round trip.
@@ -276,9 +293,14 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
   };
 
   const q = search.trim().toLowerCase();
+  // Hide superuser-only tools from regular users. Concierge is intentionally
+  // visible to everyone so the practice is discoverable from the grid.
+  const accessibleTools = user.is_superuser
+    ? TOOLS
+    : TOOLS.filter(t => !SUPERUSER_ONLY_TOOLS.has(t.slug));
   const filtered = q
-    ? TOOLS.filter(t => (t.name + ' ' + t.desc + ' ' + t.keywords).toLowerCase().includes(q))
-    : TOOLS;
+    ? accessibleTools.filter(t => (t.name + ' ' + t.desc + ' ' + t.keywords).toLowerCase().includes(q))
+    : accessibleTools;
   // Reorder: untried-trial tools first (free invitation), then
   // subscribed/accessible tools, then used-trial tools (locked), then
   // the rest. labread + cliniscore (always free) slot into the
@@ -474,6 +496,8 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
                 {t.free && (
                   <div style={{fontSize:'11px', color:'#4a7ad0', fontWeight:600, background:'rgba(122,176,240,0.12)', padding:'4px 10px', borderRadius:'999px', alignSelf:'flex-start'}}>
                     {(() => {
+                      if (t.slug === 'concierge')   return 'Membership practice';
+                      if (t.slug === 'meditations') return 'Library · 2,000+ scripts';
                       const rem = access?.free_tier_remaining?.[t.slug];
                       const suiteOrOwn = suiteActive || !!access?.tiers?.[t.slug];
                       if (suiteOrOwn) return 'Unlimited · Suite';

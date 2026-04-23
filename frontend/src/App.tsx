@@ -343,6 +343,9 @@ const App: React.FC = () => {
       {screen==='privacy' && <Privacy onBack={goBack}/>}
       {screen==='terms' && <Terms onBack={goBack}/>}
       {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'} onOpenTool={(slug)=>{
+        // Non-clinical "discovery" tiles route to their own screens.
+        if (slug === 'concierge')   { navigate('concierge'); return; }
+        if (slug === 'meditations') { navigate('meditations_library'); return; }
         const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', antibioticai:'tool_antibioticai', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd', labread:'tool_labread', cliniscore:'tool_cliniscore'};
         if (map[slug]) navigate(map[slug]);
       }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}
