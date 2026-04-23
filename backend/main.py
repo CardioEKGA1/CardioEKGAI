@@ -3676,6 +3676,12 @@ def concierge_meditations_library(
             "tags": r.tags or [],
             "physician_notes": r.physician_notes or "",
             "description": r.description or "",
+            # Full script payload — the detail modal reads this field directly.
+            # Response grows ~3kB × rows = ~3MB raw for 1,074 rows, ~300kB
+            # gzipped. Acceptable for an admin-only browse view that rarely
+            # reloads. Kept script_excerpt + script_chars for backward-compat
+            # with any consumer that still wants the short preview.
+            "script": r.script or "",
             "script_excerpt": (r.script or "")[:280],
             "script_chars": len(r.script or ""),
             "assignment_count": db.query(ConciergeMeditationAssignment).filter(ConciergeMeditationAssignment.meditation_id == r.id).count(),
