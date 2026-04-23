@@ -41,11 +41,19 @@ const RADIUS = 480;     // px — distance from center to each card
 const CARD_W = 160;     // px
 const CARD_H = 240;     // px
 
-const GOLD      = '#E2B567';
-const GOLD_SOFT = '#F5CF8A';
-const INK       = '#2A1F3F';
-const INK_SOFT  = '#6D627F';
-const SERIF     = '"Cormorant Garamond","Playfair Display",Georgia,serif';
+const GOLD       = '#E2B567';
+const GOLD_SOFT  = '#F5CF8A';
+const INK        = '#2a3a6b';   // deep navy — for body text on light bg
+const INK_SOFT   = '#6B6889';
+const PURPLE     = '#534AB7';
+const PURPLE_MID = '#9b8fe8';
+const LIGHT_BLUE = '#7ab0f0';
+const SERIF      = '"Cormorant Garamond","Playfair Display",Georgia,serif';
+// Ethereal pearl-lavender page background. Matches the main SoulMD palette
+// (same linear-gradient family used on Landing + Dashboard) so the oracle
+// doesn't feel like a different app.
+const SCREEN_BG  = 'linear-gradient(135deg,#F5F1FF 0%,#E8E4FB 35%,#DFEAFC 70%,#F1E7F8 100%)';
+const PURPLE_BTN = 'linear-gradient(135deg,#7ab0f0 0%,#9b8fe8 55%,#534AB7 100%)';
 
 const greetingFor = (d: Date): string => {
   const h = d.getHours();
@@ -148,24 +156,24 @@ const OracleCardReel: React.FC<Props> = ({ API, token, userName, initialStep, on
   return (
     <div style={{
       position:'fixed', inset:0, zIndex:2500,
-      background:'radial-gradient(ellipse at 50% 30%, #2B2148 0%, #14102A 60%, #06040F 100%)',
+      background: SCREEN_BG,
       color: INK, overflow:'hidden',
       display:'flex', flexDirection:'column',
       fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif',
     }}>
-      <StarField/>
+      <GoldSparkles/>
       {shuffling && <ParticleBurst/>}
 
       {/* Close */}
       <button onClick={onClose} aria-label="Close"
-        style={{position:'absolute', top:'14px', right:'14px', zIndex:20, background:'rgba(255,255,255,0.08)', color:'white', border:'0.5px solid rgba(255,255,255,0.15)', width:'36px', height:'36px', borderRadius:'50%', cursor:'pointer', fontSize:'16px'}}>×</button>
+        style={{position:'absolute', top:'14px', right:'14px', zIndex:20, background:'rgba(255,255,255,0.85)', color: PURPLE, border:'0.5px solid rgba(155,143,232,0.35)', width:'36px', height:'36px', borderRadius:'50%', cursor:'pointer', fontSize:'18px', boxShadow:'0 2px 8px rgba(83,74,183,0.1)'}}>×</button>
 
       {phase !== 'revealed' && (
-        <div style={{padding:'clamp(18px,5vw,36px) 20px 0', textAlign:'center', color:'white'}}>
-          <div style={{fontFamily:SERIF, fontSize:'clamp(22px,4vw,30px)', fontWeight:500, letterSpacing:'0.3px', lineHeight:1.3}}>
-            {greetingFor(new Date())}, {userName || 'friend'} <span style={{color: GOLD_SOFT}}>✦</span>
+        <div style={{padding:'clamp(18px,5vw,36px) 20px 0', textAlign:'center', color: INK, position:'relative', zIndex:2}}>
+          <div style={{fontFamily:SERIF, fontSize:'clamp(22px,4vw,30px)', fontWeight:500, letterSpacing:'0.3px', lineHeight:1.3, color: INK}}>
+            {greetingFor(new Date())}, {userName || 'friend'} <span style={{color: GOLD}}>✦</span>
           </div>
-          <div style={{fontSize:'13px', color:'rgba(255,255,255,0.72)', marginTop:'6px', fontStyle:'italic', fontFamily:SERIF}}>
+          <div style={{fontSize:'13px', color: INK_SOFT, marginTop:'6px', fontStyle:'italic', fontFamily:SERIF}}>
             The Universe has a message for you today.
           </div>
         </div>
@@ -195,20 +203,20 @@ const OracleCardReel: React.FC<Props> = ({ API, token, userName, initialStep, on
             </motion.div>
           </div>
 
-          <div style={{padding:'0 20px clamp(24px,6vw,44px)', display:'flex', flexDirection:'column', alignItems:'center', gap:'12px', color:'white'}}>
-            {err && <div style={{fontSize:'12px', color:'#ff9090'}}>{err}</div>}
+          <div style={{padding:'0 20px clamp(24px,6vw,44px)', display:'flex', flexDirection:'column', alignItems:'center', gap:'12px', position:'relative', zIndex:2}}>
+            {err && <div style={{fontSize:'12px', color:'#a02020'}}>{err}</div>}
             <button onClick={shuffle} disabled={shuffling}
               style={{
-                background:'linear-gradient(135deg,#F5CF8A,#E2B567,#C38F3C)',
-                color:'#2A1F08', border:'none', borderRadius:'999px',
+                background: PURPLE_BTN,
+                color:'white', border:'none', borderRadius:'999px',
                 padding:'12px 28px', fontSize:'13px', fontWeight:800,
                 letterSpacing:'0.5px', textTransform:'uppercase', cursor: shuffling ? 'default' : 'pointer',
                 opacity: shuffling ? 0.7 : 1,
-                boxShadow:'0 8px 22px rgba(226,181,103,0.35)', fontFamily:'inherit',
+                boxShadow:'0 8px 22px rgba(155,143,232,0.35)', fontFamily:'inherit',
               }}>
               {shuffling ? 'Shuffling…' : 'Shuffle the Deck'}
             </button>
-            <div style={{fontSize:'11.5px', color:'rgba(255,255,255,0.55)', fontStyle:'italic', fontFamily:SERIF}}>
+            <div style={{fontSize:'11.5px', color: INK_SOFT, fontStyle:'italic', fontFamily:SERIF}}>
               Swipe to browse · tap the glowing card to confirm
             </div>
           </div>
@@ -217,46 +225,39 @@ const OracleCardReel: React.FC<Props> = ({ API, token, userName, initialStep, on
 
       {/* REVEALING — single card centered, flipping */}
       {(phase === 'revealing' || phase === 'revealed') && (
-        <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', perspective:'1400px', padding:'20px'}}>
+        <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', perspective:'1400px', padding:'clamp(16px,4vw,32px)'}}>
           <motion.div
             initial={false}
             animate={{ rotateY: flipped ? 180 : 0 }}
             transition={{ duration: 0.75, ease: [0.4, 0.0, 0.2, 1] }}
             style={{
-              width:`${Math.min(300, CARD_W * 1.75)}px`, height:`${Math.min(450, CARD_H * 1.75)}px`,
+              width:'min(340px, 86vw)', aspectRatio:'3/5',
               position:'relative', transformStyle:'preserve-3d',
-              filter:'drop-shadow(0 20px 40px rgba(226,181,103,0.35))',
+              filter:'drop-shadow(0 20px 50px rgba(83,74,183,0.25))',
             }}>
             <CardBackFace large/>
-            <CardFrontFace card={card} large/>
+            <CardFrontFace card={card} large showContent={phase === 'revealed'} onBookMeditation={onBookMeditation}/>
           </motion.div>
         </div>
       )}
 
-      {/* POST-REVEAL */}
+      {/* POST-REVEAL — link row below the card (sparkle burst lives on the card) */}
       <AnimatePresence>
         {phase === 'revealed' && card && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            style={{padding:'0 20px clamp(20px,5vw,40px)', color:'white', textAlign:'center'}}>
-            <div style={{fontFamily:SERIF, fontSize:'11px', letterSpacing:'2px', textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:'10px'}}>
-              Today's Message
-            </div>
-            <div style={{fontFamily:SERIF, fontSize:'22px', color:'white', fontWeight:500, lineHeight:1.3, marginBottom:'8px'}}>
-              {card.title}
-            </div>
-            <div style={{fontSize:'14px', color:'rgba(255,255,255,0.82)', lineHeight:1.6, maxWidth:'420px', margin:'0 auto 18px'}}>
-              {card.body}
-            </div>
-            <div style={{display:'flex', gap:'8px', flexWrap:'wrap', justifyContent:'center'}}>
-              <ActionBtn label="Save to Energy Log" onClick={() => alert('Saved ✓')}/>
-              <ActionBtn label="Share" onClick={() => card && shareOracleCard(card).catch(() => {})}/>
-              {onBookMeditation && <ActionBtn label="Book a session" onClick={onBookMeditation}/>}
-              <ActionBtn label="Pull Again Tomorrow" onClick={onClose} variant="ghost"/>
-            </div>
+            transition={{ duration: 0.5, delay: 0.9 }}
+            style={{padding:'0 20px clamp(20px,5vw,40px)', textAlign:'center', position:'relative', zIndex:2, display:'flex', gap:'18px', justifyContent:'center', flexWrap:'wrap'}}>
+            <button onClick={() => alert('Saved to your Energy Log ✓')}
+              style={{background:'transparent', border:'none', color: PURPLE, fontSize:'13px', fontWeight:700, cursor:'pointer', fontFamily:'inherit', letterSpacing:'0.3px'}}>
+              Save to Energy Log →
+            </button>
+            <button onClick={onClose}
+              style={{background:'transparent', border:'none', color: INK_SOFT, fontSize:'13px', fontWeight:600, cursor:'pointer', fontFamily:'inherit'}}>
+              Pull Again Tomorrow
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -319,59 +320,188 @@ const CardBackFace: React.FC<{large?: boolean}> = ({ large }) => (
   <div style={{
     position:'absolute', inset:0, backfaceVisibility:'hidden',
     borderRadius: large ? '20px' : '14px',
-    background: 'center / cover no-repeat url(/card-back.png)',
+    // Use explicit backgroundImage + backgroundSize so CRA's public-asset
+    // URL rewriting can't get confused by shorthand form.
+    backgroundImage: "url('/card-back.png')",
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+    // Soft fallback gradient if the image somehow fails to load — keeps
+    // the card readable rather than invisible.
+    backgroundColor: '#EDE6FB',
     overflow:'hidden',
+    // Subtle purple/gold ring so the card reads as "precious" on the light bg.
+    boxShadow: large
+      ? 'inset 0 0 0 1px rgba(226,181,103,0.55), inset 0 0 30px rgba(255,255,255,0.25)'
+      : 'inset 0 0 0 0.5px rgba(226,181,103,0.4)',
   }}>
+    {/* White shimmer sweep overlay */}
     <div style={{
       position:'absolute', inset:0,
-      background:'linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.18) 50%, transparent 70%)',
+      background:'linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%)',
       animation:'oracleShimmer 3.5s ease-in-out infinite',
-      mixBlendMode:'overlay',
+      mixBlendMode:'screen',
+      pointerEvents:'none',
     }}/>
   </div>
 );
 
-const CardFrontFace: React.FC<{card: OracleCardData | null; large?: boolean}> = ({ card, large }) => (
+// Words in an oracle message that get tinted in a non-navy color — creates
+// visual emphasis on the "spiritual" nouns without needing a real NLP pass.
+// Deterministic per-word: each hit gets purple, gold, or teal in rotation
+// based on word length.
+const ACCENT_WORDS = new Set([
+  'love','universe','breath','light','heart','body','soul','wisdom','peace',
+  'healing','grace','truth','trust','divine','sacred','energy','spirit',
+  'presence','power','life','stillness','flow','release','receive','gratitude',
+  'abundance','joy','moon','sun','star','earth','sky','you','yourself',
+]);
+const ACCENT_COLORS = ['#534AB7', '#C9A84C', '#1D9E75'] as const;
+
+function renderAccented(text: string): React.ReactNode[] {
+  if (!text) return [];
+  return text.split(/(\s+)/).map((tok, i) => {
+    const word = tok.toLowerCase().replace(/[^a-z]/g, '');
+    if (ACCENT_WORDS.has(word)) {
+      const color = ACCENT_COLORS[word.length % ACCENT_COLORS.length];
+      return <span key={i} style={{ color, fontWeight: 700 }}>{tok}</span>;
+    }
+    return <React.Fragment key={i}>{tok}</React.Fragment>;
+  });
+}
+
+const CardFrontFace: React.FC<{card: OracleCardData | null; large?: boolean; showContent?: boolean; onBookMeditation?: () => void}> = ({ card, large, showContent, onBookMeditation }) => (
   <div style={{
     position:'absolute', inset:0, backfaceVisibility:'hidden',
     transform:'rotateY(180deg)',
-    borderRadius: large ? '20px' : '14px',
-    background:'linear-gradient(155deg,#FFF8ED 0%,#F5E1C0 55%,#E6C79A 100%)',
-    padding:'22px 18px',
-    display:'flex', flexDirection:'column', justifyContent:'space-between',
-    border:'0.5px solid rgba(226,181,103,0.5)',
+    borderRadius: large ? '22px' : '14px',
+    // Pure white, warm cream tint — Gabby's oracle deck palette.
+    background:'linear-gradient(180deg,#FFFFFF 0%,#FFFDF7 100%)',
+    padding: large ? 'clamp(22px,5vw,32px)' : '18px 14px',
+    display:'flex', flexDirection:'column',
+    // Soft purple ring with inner warm cream wash.
+    border: `1px solid ${PURPLE_MID}33`,
+    boxShadow:'inset 0 0 60px rgba(255,248,232,0.8), 0 0 0 1px rgba(201,168,76,0.18)',
     overflow:'hidden',
-    boxShadow:'inset 0 0 40px rgba(226,181,103,0.25)',
+    textAlign:'center',
   }}>
-    <div>
-      <div style={{fontSize:'10px', letterSpacing:'2.5px', textTransform:'uppercase', color: card?.category_color || GOLD, fontWeight:800, marginBottom:'6px'}}>
-        {card?.category_label || '—'}
-      </div>
-      <div style={{fontFamily: SERIF, fontSize: large ? '22px' : '15px', color: INK, fontWeight:500, lineHeight:1.25}}>
-        {card?.title || 'Your message is arriving…'}
-      </div>
+    {/* Decorative corner stars — four corners, Gabby-style whimsy */}
+    {large && (
+      <>
+        <span style={{position:'absolute', top:'14px', left:'16px',  fontSize:'14px', color: GOLD, opacity: 0.75}}>✦</span>
+        <span style={{position:'absolute', top:'14px', right:'16px', fontSize:'14px', color: PURPLE_MID, opacity: 0.7}}>✦</span>
+        <span style={{position:'absolute', bottom:'14px', left:'16px', fontSize:'12px', color: PURPLE_MID, opacity: 0.55}}>✧</span>
+        <span style={{position:'absolute', bottom:'14px', right:'16px', fontSize:'12px', color: GOLD, opacity: 0.6}}>✧</span>
+      </>
+    )}
+
+    {/* Category */}
+    <div style={{
+      fontSize: large ? '10px' : '9px',
+      letterSpacing:'3px', textTransform:'uppercase',
+      color: PURPLE, fontWeight:700,
+      fontFamily:'"Playfair Display",Georgia,serif',
+      marginBottom: large ? 'clamp(14px,3vw,20px)' : '6px',
+    }}>
+      {card?.category_label || '—'}
     </div>
-    <div style={{fontSize: large ? '13.5px' : '10.5px', color: INK_SOFT, lineHeight:1.55, fontFamily: SERIF, fontStyle:'italic'}}>
-      {card?.body || ''}
-    </div>
+
+    {/* Body — star · message · star layout, animated fade-in after flip */}
+    <motion.div
+      initial={false}
+      animate={{ opacity: showContent ? 1 : 0 }}
+      transition={{ duration: 0.5, delay: showContent ? 0.55 : 0 }}
+      style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap: large ? '14px' : '6px'}}>
+      {large && <span style={{fontSize:'18px', color: GOLD, opacity:0.7}}>✦</span>}
+      {card?.title && (
+        <div style={{
+          fontFamily:'"Playfair Display",Georgia,serif',
+          fontSize: large ? 'clamp(18px,4vw,22px)' : '14px',
+          fontWeight:500, fontStyle:'italic',
+          color: PURPLE, lineHeight:1.3,
+          padding: large ? '0 4px' : 0,
+        }}>
+          {card.title}
+        </div>
+      )}
+      <div style={{
+        fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
+        fontSize: large ? 'clamp(22px,5.8vw,30px)' : '12px',
+        color: INK, lineHeight: 1.35, fontWeight:500,
+        padding: large ? '0 6px' : 0,
+      }}>
+        {renderAccented(card?.body || '')}
+      </div>
+      {large && <span style={{fontSize:'18px', color: PURPLE_MID, opacity:0.6}}>✦</span>}
+    </motion.div>
+
+    {/* Footer: heart · play · share */}
+    {large && showContent && (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4, delay: 1.0 }}
+        style={{display:'flex', justifyContent:'center', gap:'22px', paddingTop: 'clamp(12px,3vw,20px)', borderTop:`0.5px solid ${PURPLE_MID}22`, marginTop:'auto'}}>
+        <IconButton aria-label="Favorite" onClick={() => alert('Saved ♡')}>
+          <HeartIcon/>
+        </IconButton>
+        <IconButton aria-label="Open session" onClick={() => onBookMeditation && onBookMeditation()}>
+          <PlayIcon/>
+        </IconButton>
+        <IconButton aria-label="Share" onClick={() => card && shareOracleCard(card).catch(() => {})}>
+          <ShareIcon/>
+        </IconButton>
+      </motion.div>
+    )}
   </div>
+);
+
+const IconButton: React.FC<React.PropsWithChildren<{onClick: () => void; 'aria-label': string}>> = ({ onClick, children, ...rest }) => (
+  <button onClick={onClick} {...rest}
+    style={{background:'transparent', border:'none', cursor:'pointer', padding:'6px', display:'flex', alignItems:'center', justifyContent:'center', color: PURPLE}}>
+    {children}
+  </button>
+);
+
+const HeartIcon: React.FC = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+  </svg>
+);
+const PlayIcon: React.FC = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+);
+const ShareIcon: React.FC = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="18" cy="5"  r="3"/><circle cx="6"  cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+    <line x1="8.59"  y1="13.51" x2="15.42" y2="17.49"/>
+    <line x1="15.41" y1="6.51"  x2="8.59"  y2="10.49"/>
+  </svg>
 );
 
 // ──── Atmosphere ───────────────────────────────────────────────────────────
 
-const StarField: React.FC = () => (
+// Floating gold sparkles drifting upward — replaces the dark-mode starfield.
+// 28 dots at random offsets drift from bottom to top over 12–22s cycles.
+const GoldSparkles: React.FC = () => (
   <div aria-hidden style={{position:'absolute', inset:0, pointerEvents:'none', overflow:'hidden', zIndex:0}}>
-    {Array.from({ length: 40 }).map((_, i) => (
-      <div key={i} style={{
-        position:'absolute',
-        top: `${(i * 37) % 100}%`,
-        left: `${(i * 73) % 100}%`,
-        width:'2px', height:'2px', borderRadius:'50%',
-        background:'white',
-        opacity: 0.15 + ((i * 17) % 50) / 100,
-        animation: `oracleTwinkle ${3 + (i % 5)}s ease-in-out ${(i % 10) * 0.3}s infinite`,
-      }}/>
-    ))}
+    {Array.from({ length: 28 }).map((_, i) => {
+      const size = 3 + (i % 4);
+      const dur  = 12 + (i % 10);
+      const delay = -(i * 0.8);   // negative delay so some start partway up on mount
+      return (
+        <div key={i} style={{
+          position:'absolute',
+          left: `${(i * 37) % 100}%`,
+          bottom: `-${10 + (i % 20)}px`,
+          width: `${size}px`, height: `${size}px`, borderRadius:'50%',
+          background: `radial-gradient(circle, ${GOLD_SOFT} 0%, rgba(245,207,138,0) 70%)`,
+          boxShadow:`0 0 ${size * 2}px ${GOLD_SOFT}`,
+          opacity: 0.4 + ((i * 13) % 50) / 100,
+          animation: `oracleSparkleDrift ${dur}s linear ${delay}s infinite`,
+        }}/>
+      );
+    })}
   </div>
 );
 
@@ -392,9 +522,9 @@ const ParticleBurst: React.FC = () => (
           transition={{ duration: 2, repeat: Infinity, delay: (i % 6) * 0.1 }}
           style={{
             position:'absolute', top:'50%', left:'50%',
-            width:'6px', height:'6px', borderRadius:'50%',
-            background:'radial-gradient(circle, #F5CF8A 0%, rgba(245,207,138,0) 70%)',
-            boxShadow:'0 0 12px #F5CF8A',
+            width:'8px', height:'8px', borderRadius:'50%',
+            background:`radial-gradient(circle, ${GOLD_SOFT} 0%, rgba(245,207,138,0) 70%)`,
+            boxShadow:`0 0 14px ${GOLD_SOFT}`,
           }}/>
       );
     })}
@@ -404,23 +534,44 @@ const ParticleBurst: React.FC = () => (
 const ActionBtn: React.FC<{label:string; onClick:()=>void; variant?: 'solid'|'ghost'}> = ({ label, onClick, variant='solid' }) => (
   <button onClick={onClick}
     style={{
-      background: variant === 'solid' ? 'rgba(245,207,138,0.2)' : 'transparent',
-      color: variant === 'solid' ? GOLD_SOFT : 'rgba(255,255,255,0.65)',
-      border: variant === 'solid' ? '0.5px solid rgba(245,207,138,0.4)' : '0.5px solid rgba(255,255,255,0.2)',
-      borderRadius:'999px', padding:'9px 16px', fontSize:'12px', fontWeight:700,
+      background: variant === 'solid' ? PURPLE_BTN : 'rgba(255,255,255,0.75)',
+      color: variant === 'solid' ? 'white' : PURPLE,
+      border: variant === 'solid' ? 'none' : `0.5px solid ${PURPLE_MID}55`,
+      borderRadius:'999px', padding:'10px 18px', fontSize:'12px', fontWeight:700,
       cursor:'pointer', fontFamily:'inherit',
+      boxShadow: variant === 'solid' ? '0 6px 16px rgba(83,74,183,0.25)' : 'none',
     }}>
     {label}
   </button>
 );
 
-// Inject keyframes once per session.
+// Inject Google Fonts (Caveat + Playfair Display) + keyframes once per
+// session. Kept out of index.html so the 50kB font blob only loads when the
+// oracle reel actually mounts — most users won't see it until first open.
+if (typeof document !== 'undefined' && !document.getElementById('oracle-reel-fonts')) {
+  const pre1 = document.createElement('link');
+  pre1.rel = 'preconnect'; pre1.href = 'https://fonts.googleapis.com';
+  const pre2 = document.createElement('link');
+  pre2.rel = 'preconnect'; pre2.href = 'https://fonts.gstatic.com'; pre2.crossOrigin = '';
+  const link = document.createElement('link');
+  link.id = 'oracle-reel-fonts';
+  link.rel = 'stylesheet';
+  link.href = 'https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Playfair+Display:ital,wght@0,500;0,700;1,500&display=swap';
+  document.head.appendChild(pre1);
+  document.head.appendChild(pre2);
+  document.head.appendChild(link);
+}
 if (typeof document !== 'undefined' && !document.getElementById('oracle-reel-keyframes')) {
   const s = document.createElement('style');
   s.id = 'oracle-reel-keyframes';
   s.innerHTML = `
     @keyframes oracleShimmer { 0%,100% { transform: translateX(-30%) } 50% { transform: translateX(30%) } }
-    @keyframes oracleTwinkle { 0%,100% { opacity: 0.2 } 50% { opacity: 0.9 } }
+    @keyframes oracleSparkleDrift {
+      0%   { transform: translateY(0) translateX(0); opacity: 0 }
+      10%  { opacity: 0.9 }
+      85%  { opacity: 0.7 }
+      100% { transform: translateY(-110vh) translateX(16px); opacity: 0 }
+    }
   `;
   document.head.appendChild(s);
 }
