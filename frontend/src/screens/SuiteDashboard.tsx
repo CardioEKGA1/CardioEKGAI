@@ -1,6 +1,7 @@
 // © 2026 SoulMD, LLC. All rights reserved.
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import SuperuserTabNav from './SuperuserTabNav';
 import DictationButton from '../DictationButton';
 import ComplianceDisclaimer from '../ComplianceDisclaimer';
 import { User } from '../App';
@@ -16,6 +17,8 @@ interface Props {
   onPrivacy: () => void;
   onTerms: () => void;
   checkoutResult: string | null;
+  onNavigateMeditations?: () => void;
+  onNavigateConciergeAccess?: () => void;
 }
 
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; keywords: string; free?: boolean; }
@@ -98,7 +101,7 @@ interface CasesResp {
   retention_days: number;
 }
 
-const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, onPrivacy, onTerms, checkoutResult }) => {
+const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, onPrivacy, onTerms, checkoutResult, onNavigateMeditations, onNavigateConciergeAccess }) => {
   const [access, setAccess] = useState<AccessResp | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [cases, setCases] = useState<CasesResp | null>(null);
@@ -291,6 +294,14 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 
   return (
     <div style={{minHeight:'100vh', background:'linear-gradient(135deg, #dce8fb 0%, #ede8fb 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif'}}>
+    {!!user.is_superuser && onNavigateMeditations && onNavigateConciergeAccess && (
+      <SuperuserTabNav
+        active="dashboard"
+        onDashboard={() => {}}
+        onMeditations={onNavigateMeditations}
+        onConcierge={onNavigateConciergeAccess}
+      />
+    )}
     <div style={{padding:'20px 16px', maxWidth:'1200px', margin:'0 auto'}}>
 
       <nav style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'20px', flexWrap:'wrap', gap:'12px'}}>

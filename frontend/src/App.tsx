@@ -12,6 +12,8 @@ import Admin from './screens/Admin';
 import CookieBanner from './CookieBanner';
 import SoulMDLanding from './screens/SoulMDLanding';
 import SuiteDashboard from './screens/SuiteDashboard';
+import MeditationsLibrary from './screens/MeditationsLibrary';
+import ConciergeAccess from './screens/ConciergeAccess';
 import NephroAITool from './screens/tools/NephroAITool';
 import RxCheckTool from './screens/tools/RxCheckTool';
 import AntibioticAITool from './screens/tools/AntibioticAITool';
@@ -41,6 +43,7 @@ export interface User {
   email: string;
   scan_count: number;
   is_subscribed: boolean;
+  is_superuser?: boolean;
 }
 
 type Screen =
@@ -49,7 +52,8 @@ type Screen =
   | 'tool_nephroai' | 'tool_rxcheck' | 'tool_antibioticai' | 'tool_clinicalnote'
   | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd'
   | 'tool_labread' | 'tool_cliniscore'
-  | 'concierge';
+  | 'concierge'
+  | 'meditations_library' | 'concierge_access';
 
 const API = 'https://ekgscan.com';
 
@@ -68,6 +72,8 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/privacy')           return 'privacy';
   if (path === '/terms')             return 'terms';
   if (path === '/concierge')         return 'concierge';
+  if (path === '/meditations')       return 'meditations_library';
+  if (path === '/concierge-access')  return 'concierge_access';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
     const candidate = `tool_${slug}` as Screen;
@@ -91,6 +97,8 @@ const screenToPath = (s: Screen): string => {
   if (s === 'privacy')   return '/privacy';
   if (s === 'terms')     return '/terms';
   if (s === 'concierge') return '/concierge';
+  if (s === 'meditations_library') return '/meditations';
+  if (s === 'concierge_access')    return '/concierge-access';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
 };
@@ -249,6 +257,8 @@ const App: React.FC = () => {
       tool_labread:      `LabRead · ${brand}`,
       tool_cliniscore:   `CliniScore · ${brand}`,
       concierge:         'Concierge Medicine',
+      meditations_library: `Meditations Library · ${brand}`,
+      concierge_access:    `Concierge Portal · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
   }, [screen, isSoulMD]);
@@ -290,7 +300,9 @@ const App: React.FC = () => {
       {screen==='dashboard' && user && <SuiteDashboard API={API} token={token} user={user} onLogout={handleLogout} onOpenEkgscan={()=>window.location.href='https://ekgscan.com'} onOpenTool={(slug)=>{
         const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', antibioticai:'tool_antibioticai', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd', labread:'tool_labread', cliniscore:'tool_cliniscore'};
         if (map[slug]) navigate(map[slug]);
-      }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}/>}
+      }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}
+        onNavigateMeditations={()=>navigate('meditations_library')}
+        onNavigateConciergeAccess={()=>navigate('concierge_access')}/>}
       {/* Tool screens are accessible WITHOUT auth — the 8 trial tools run
           one free call per browser via the server-side trial gate. labread
           and cliniscore still allow 5/day for everyone. Tools themselves
@@ -305,6 +317,36 @@ const App: React.FC = () => {
       {screen==='tool_labread'      && <LabReadTool      API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='tool_cliniscore'   && <CliniScoreTool   API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='concierge' && user && <Concierge API={API} token={token} onBack={()=>navigate('dashboard')}/>}
+      {/* Superuser-only tabs. We still render the screens if non-superuser
+          hits the URL directly (minor defense-in-depth), but the UI nav
+          only exposes them to is_superuser=true. Backend endpoints they
+          call are owner/superuser-gated on the server side. */}
+      {screen==='meditations_library' && user && user.is_superuser && (
+        <MeditationsLibrary
+          API={API} token={token}
+          onBack={()=>navigate('dashboard')}
+          onNavigateDashboard={()=>navigate('dashboard')}
+          onNavigateConciergeAccess={()=>navigate('concierge_access')}
+        />
+      )}
+      {screen==='concierge_access' && user && user.is_superuser && (
+        <ConciergeAccess
+          API={API} token={token}
+          onBack={()=>navigate('dashboard')}
+          onNavigateDashboard={()=>navigate('dashboard')}
+          onNavigateMeditations={()=>navigate('meditations_library')}
+          onOpenConcierge={()=>navigate('concierge')}
+        />
+      )}
+      {(screen==='meditations_library' || screen==='concierge_access') && user && !user.is_superuser && (
+        <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', textAlign:'center', fontFamily:'-apple-system,sans-serif'}}>
+          <div>
+            <div style={{fontSize:'48px', marginBottom:'8px', opacity:0.4}}>🔒</div>
+            <div style={{fontSize:'18px', fontWeight:800, color:'#1a2a4a', marginBottom:'6px'}}>Not available</div>
+            <button onClick={()=>navigate('dashboard')} style={{marginTop:'12px', background:'#534AB7', color:'white', border:'none', borderRadius:'10px', padding:'10px 20px', fontSize:'13px', fontWeight:700, cursor:'pointer'}}>Back to dashboard</button>
+          </div>
+        </div>
+      )}
       {screen==='concierge' && !user && token && (
         <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', color:'#8a6e50', fontSize:'14px'}}>Loading…</div>
       )}

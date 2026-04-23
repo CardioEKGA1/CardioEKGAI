@@ -11,7 +11,7 @@
  * placeholder push handler here so future backend work can deliver messages
  * without shipping a new SW.
  */
-const VERSION = 'soulmd-v4';
+const VERSION = 'soulmd-v5';
 const STATIC_CACHE = `${VERSION}-static`;
 const SHELL = [
   '/',
@@ -79,16 +79,36 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for hashed JS/CSS + static assets (fonts/icons). Safe
-  // because CRA's hashed filenames change when content changes.
+  // Cache-first is ONLY safe for content-addressed (hashed) assets under
+  // /static/ — their filename contains a content hash so changes always
+  // produce a new URL. For any other asset (e.g. /card-back.png,
+  // /manifest.json, root-level PNGs), a bad cached response at that stable
+  // URL sticks forever; use network-first with cache as offline fallback.
+  const isHashedStatic = url.pathname.startsWith('/static/');
+  if (isHashedStatic) {
+    event.respondWith(
+      caches.match(request).then(hit => hit || fetch(request).then(resp => {
+        if (resp && resp.ok && resp.type === 'basic') {
+          const copy = resp.clone();
+          caches.open(STATIC_CACHE).then(c => c.put(request, copy));
+        }
+        return resp;
+      }).catch(() => caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // Everything else (images, fonts, manifest, etc.) — network-first so a
+  // transient 404 or mis-deploy can't poison the cache at a stable URL.
+  // Only cache successful 200 responses with basic origin.
   event.respondWith(
-    caches.match(request).then(hit => hit || fetch(request).then(resp => {
+    fetch(request).then(resp => {
       if (resp && resp.ok && resp.type === 'basic') {
         const copy = resp.clone();
         caches.open(STATIC_CACHE).then(c => c.put(request, copy));
       }
       return resp;
-    }).catch(() => caches.match('/index.html')))
+    }).catch(() => caches.match(request))
   );
 });
 

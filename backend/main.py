@@ -961,7 +961,12 @@ def delete_account(request: Request, data: AccountDeletion, current_user: User =
 def me(current_user: User = Depends(get_current_user)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return {"email": current_user.email, "scan_count": current_user.scan_count, "is_subscribed": current_user.is_subscribed}
+    return {
+        "email": current_user.email,
+        "scan_count": current_user.scan_count,
+        "is_subscribed": current_user.is_subscribed,
+        "is_superuser": bool(getattr(current_user, "is_superuser", False)),
+    }
 
 @app.post("/analyze")
 @limiter.limit("2/minute")
