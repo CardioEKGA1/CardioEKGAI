@@ -7,6 +7,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { shareOracleCard } from './shareOracleCard';
+// Module-imported asset — webpack hashes + fingerprints the PNG into
+// /static/media/card-back.<hash>.png, so the browser can't hit a stale
+// root-level cached URL and the SW cache-first-for-/static/ rule applies
+// cleanly (content-addressed = safe to cache forever).
+import cardBackImg from '../../assets/card-back.png';
 
 interface OracleCardData {
   id: number; category: string;
@@ -215,8 +220,8 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
             overflow:'hidden',
             backgroundColor:'#EDE6FB',
           }}>
-            <img src="/card-back.png" alt="" aria-hidden="true"
-              style={{width:'100%', height:'100%', objectFit:'cover', objectPosition:'center', display:'block', userSelect:'none', pointerEvents:'none'}}/>
+            <img src={cardBackImg} alt="" aria-hidden="true"
+              style={{width:'100%', height:'100%', objectFit:'cover', objectPosition:'center', display:'block', userSelect:'none', pointerEvents:'none', borderRadius:'inherit'}}/>
           </div>
           {/* FRONT — Gabby-style reveal */}
           <div style={{

@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { shareOracleCard } from './shareOracleCard';
+import cardBackImg from '../../assets/card-back.png';
 
 interface OracleCardData {
   id: number; category: string;
@@ -364,7 +365,7 @@ const CardBackFace: React.FC = () => (
     overflow:'hidden',
     backgroundColor:'#EDE6FB',   // fallback if the image fails to load
   }}>
-    <img src="/card-back.png" alt="" aria-hidden="true"
+    <img src={cardBackImg} alt="" aria-hidden="true"
       style={{
         width:'100%', height:'100%',
         objectFit:'cover', objectPosition:'center',
