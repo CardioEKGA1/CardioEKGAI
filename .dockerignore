@@ -1,0 +1,36 @@
+# Keep the Docker build context small and deterministic.
+# Without this, `COPY backend/ .` would slurp up any local venv,
+# __pycache__, generator scratch dirs, and atomic-write tempfiles
+# — inflating the image and occasionally breaking cache layers.
+
+# Python local state
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Generator workdirs + atomic-write scratch
+backend/meditations_shards/
+backend/meditations.json.tmp
+backend/oracle_messages.json.tmp
+
+# Secrets that should never leak into an image layer
+backend/.env
+backend/stripe_prices.json
+
+# Frontend source is not needed in the image — only frontend/build/ is copied
+# explicitly in the Dockerfile, so exclude the node_modules + src:
+frontend/node_modules/
+frontend/src/
+frontend/public/
+
+# Editor + OS cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Git state
+.git/
+.github/
