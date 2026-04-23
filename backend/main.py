@@ -2169,13 +2169,24 @@ def admin_load_meditation_library(
             ))
             inserted += 1
         else:
-            row.description     = m.get("category_label") or row.description
-            row.duration_min    = int(m.get("duration_minutes") or row.duration_min or 10)
-            row.script          = m.get("script") or row.script
-            row.difficulty      = m.get("difficulty") or row.difficulty
-            row.affirmations    = m.get("affirmations") or row.affirmations
-            row.tags            = m.get("tags") or row.tags
-            row.physician_notes = m.get("physician_notes") or row.physician_notes
+            # Always overwrite fields when the incoming JSON has a value;
+            # previous `or row.X` short-circuit preserved legacy empty
+            # strings from an initial partial-generation load, which was
+            # the "scripts are empty in DB" symptom.
+            new_script = m.get("script")
+            new_desc   = m.get("category_label")
+            new_dur    = m.get("duration_minutes")
+            new_diff   = m.get("difficulty")
+            new_affs   = m.get("affirmations")
+            new_tags   = m.get("tags")
+            new_notes  = m.get("physician_notes")
+            if new_desc   is not None: row.description     = new_desc
+            if new_dur    is not None: row.duration_min    = int(new_dur)
+            if new_script is not None: row.script          = new_script
+            if new_diff   is not None: row.difficulty      = new_diff
+            if new_affs   is not None: row.affirmations    = new_affs
+            if new_tags   is not None: row.tags            = new_tags
+            if new_notes  is not None: row.physician_notes = new_notes
             updated += 1
         # Commit in chunks of 200 so a mid-load failure still persists earlier work.
         if (inserted + updated) % 200 == 0:

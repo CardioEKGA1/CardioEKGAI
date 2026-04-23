@@ -39,7 +39,7 @@ const INK_CARD  = '#2A2150';
 const INK_SOFT  = '#6B6889';
 const PURPLE    = '#534AB7';
 const PURPLE_MID= '#9b8fe8';
-const SERIF     = '"Playfair Display",Georgia,serif';
+const SERIF     = '"Playfair Display",serif';
 const EASE      = [0.22, 1, 0.36, 1] as const;
 
 // Sprite sheet mapping — 5 columns × 2 rows, 10 flowers.
@@ -62,7 +62,7 @@ const dayOfYear = (): number => {
   const start = new Date(now.getFullYear(), 0, 0);
   return Math.floor((now.getTime() - start.getTime()) / 86400000);
 };
-const todaysFlower = (): FlowerCell => FLOWERS[dayOfYear() % FLOWERS.length];
+const initialFlowerIndex = (): number => dayOfYear() % FLOWERS.length;
 
 // Background position for a sprite cell on a 500% × 200% backgroundSize.
 // Each cell is 20% wide + 100% tall; x-position steps by 20% and wraps
@@ -119,18 +119,24 @@ if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-ke
 const dateKey = () => new Date().toISOString().slice(0, 10);
 const lockKey = () => `oracle_pulled_${dateKey()}`;
 
-const CARD_W = 120;
-const CARD_H = 190;
+// Option C dimensions — side cards 200×310, center 220×340. x-offsets tightened
+// for 390px-viewport mobile fit; center fully visible, far-left/right allowed
+// to clip off-screen (per spec — "feels like endless deck").
+const CARD_W_SIDE = 200;
+const CARD_H_SIDE = 310;
+const CARD_W_CENTER = 220;
+const CARD_H_CENTER = 340;
+const STAGE_H = 440;   // accommodates center 340 + breathe + hover + reveal y-shift
 
-// Fan layout — 7 positions from left to right. Matches user's spec exactly.
-const FAN: { x: number; rot: number; scale: number }[] = [
-  { x: -210, rot: -22, scale: 0.72 },
-  { x: -130, rot: -14, scale: 0.82 },
-  { x:  -48, rot:  -6, scale: 0.92 },
-  { x:    0, rot:   0, scale: 1.00 },
-  { x:   48, rot:   6, scale: 0.92 },
-  { x:  130, rot:  14, scale: 0.82 },
-  { x:  210, rot:  22, scale: 0.72 },
+interface FanPos { x: number; rot: number; scale: number; isCenter: boolean; }
+const FAN: FanPos[] = [
+  { x: -195, rot: -20, scale: 0.75, isCenter: false }, // far left
+  { x: -105, rot: -12, scale: 0.85, isCenter: false }, // mid left
+  { x:  -48, rot:  -6, scale: 0.95, isCenter: false }, // near left
+  { x:    0, rot:   0, scale: 1.00, isCenter: true  }, // center
+  { x:   48, rot:   6, scale: 0.95, isCenter: false }, // near right
+  { x:  105, rot:  12, scale: 0.85, isCenter: false }, // mid right
+  { x:  195, rot:  20, scale: 0.75, isCenter: false }, // far right
 ];
 
 const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser, onChanged, onOpenEnergyLog }) => {
@@ -140,6 +146,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
   const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [flowerIndex, setFlowerIndex] = useState<number>(initialFlowerIndex);
 
   const [lockedToday, setLockedToday] = useState<boolean>(() => {
     try {
@@ -148,7 +155,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
     } catch { return false; }
   });
 
-  const flower = todaysFlower();
+  const flower = FLOWERS[flowerIndex % FLOWERS.length];
 
   useEffect(() => {
     if (!(todaysCard?.pulled && todaysCard.card)) return;
@@ -231,6 +238,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
       setCard(null);
       setPickedIndex(null);
       setPhase('deck');
+      setFlowerIndex(prev => (prev + 1) % FLOWERS.length);
       onChanged();
     } catch (e: any) {
       setErr(e.message || 'Could not reset.');
@@ -266,7 +274,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
       )}
 
       {/* STAGE — 7 cards in an arc */}
-      <div style={{position:'relative', width:'100%', height:`${CARD_H + 90}px`, display:'flex', alignItems:'center', justifyContent:'center', perspective:'1400px', zIndex:2}}>
+      <div style={{position:'relative', width:'100%', height:`${STAGE_H}px`, display:'flex', alignItems:'center', justifyContent:'center', perspective:'1400px', zIndex:2}}>
         {FAN.map((pos, i) => (
           <FanCard key={i} index={i} pos={pos} phase={phase} pickedIndex={pickedIndex}
             flipped={flipped} card={card} locked={lockedToday}
@@ -311,8 +319,6 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
 
 // ─── Fan card ─────────────────────────────────────────────────────────────
 
-interface FanPos { x: number; rot: number; scale: number }
-
 const FanCard: React.FC<{
   index: number;
   pos: FanPos;
@@ -326,7 +332,9 @@ const FanCard: React.FC<{
 }> = ({ index, pos, phase, pickedIndex, flipped, card, locked, flower, onPick }) => {
   const isPicked = pickedIndex === index;
   const isOther  = pickedIndex !== null && !isPicked;
-  const isCenter = index === 3;
+  const isCenter = pos.isCenter;
+  const baseW = isCenter ? CARD_W_CENTER : CARD_W_SIDE;
+  const baseH = isCenter ? CARD_H_CENTER : CARD_H_SIDE;
 
   let x = pos.x, y = 0, rotate = pos.rot, scale = pos.scale, opacity = 1;
   if (phase === 'deck') {
@@ -348,7 +356,7 @@ const FanCard: React.FC<{
       onClick={() => onPick(index)}
       style={{
         position:'absolute',
-        width:`${CARD_W}px`, height:`${CARD_H}px`,
+        width:`${baseW}px`, height:`${baseH}px`,
         cursor: phase === 'deck' && !locked ? 'pointer' : 'default',
         transformStyle:'preserve-3d',
         zIndex: isPicked ? 20 : (10 - Math.abs(index - 3)),
@@ -398,18 +406,18 @@ const CardBack: React.FC<{flower: FlowerCell}> = ({ flower }) => (
       borderRadius:'6px',
       pointerEvents:'none',
     }}/>
-    {/* Flower sprite fills top 85% */}
+    {/* Flower sprite fills top 82% */}
     <div style={{
-      height:'85%',
+      height:'82%',
       margin:'8px 8px 0',
       borderRadius:'6px',
       ...spriteBgPosition(flower),
     }}/>
-    {/* Flower name bottom */}
+    {/* Flower name — fixed 36px height, 12px label */}
     <div style={{
-      flex:1,
+      height:'36px', flexShrink:0,
       display:'flex', alignItems:'center', justifyContent:'center',
-      fontSize:'8px', letterSpacing:'2px', textTransform:'uppercase',
+      fontSize:'12px', letterSpacing:'2.5px', textTransform:'uppercase',
       color: GOLD, fontWeight:700, fontFamily: SERIF,
     }}>
       {flower.name}
@@ -429,13 +437,14 @@ const CardBack: React.FC<{flower: FlowerCell}> = ({ flower }) => (
   </div>
 );
 
-// Auto-fit body font by character count. Tested values sized so the longest
-// 250+ char messages fit in 120×190 portrait without overflow.
+// Body font + line clamp by length. User-specified 3-bucket schedule
+// (14/12/11 px, 5/6/8 lines) applied inline at render so it never
+// overflows the revealed face.
 function bodyStyleFor(text: string): { fontSize: string; lineClamp: number } {
   const len = (text || '').length;
-  if (len < 80)  return { fontSize: '14px', lineClamp: 8 };
-  if (len < 150) return { fontSize: '12px', lineClamp: 10 };
-  return                { fontSize: '11px', lineClamp: 12 };
+  if (len < 80)  return { fontSize: '14px', lineClamp: 5 };
+  if (len < 150) return { fontSize: '12px', lineClamp: 6 };
+  return                { fontSize: '11px', lineClamp: 8 };
 }
 
 const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ card, show }) => {
@@ -468,7 +477,7 @@ const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ car
       background: CREAM,
       border:`1.5px solid ${GOLD}`,
       boxShadow:`inset 0 0 0 0.5px rgba(201,168,76,0.5)`,
-      padding:'12px 10px 10px',
+      padding:'20px 16px',
       display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-start',
       overflow:'hidden',
       textAlign:'center',
@@ -476,7 +485,7 @@ const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ car
     }}>
       {/* Inner gold rule */}
       <div style={{
-        position:'absolute', inset:'6px',
+        position:'absolute', inset:'8px',
         border:`0.5px solid ${GOLD_SOFT}80`,
         borderRadius:'8px',
         pointerEvents:'none',
@@ -484,41 +493,43 @@ const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ car
 
       {/* Category */}
       <motion.div animate={cat}
-        style={{fontSize:'9px', textTransform:'uppercase', color: PURPLE, fontWeight:700,
+        style={{fontSize:'10px', textTransform:'uppercase', color: PURPLE, fontWeight:700,
           fontFamily: SERIF, marginTop:'2px', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
         {card?.category_label || '—'}
       </motion.div>
 
       {/* Sparkle divider */}
-      <div style={{fontSize:'10px', color: GOLD, margin:'4px 0 2px', opacity: 0.85}}>✦</div>
+      <div style={{fontSize:'11px', color: GOLD, margin:'6px 0 4px', opacity: 0.85}}>✦</div>
 
-      {/* Title */}
+      {/* Title — clamped to 2 lines so a rare long title can't displace body */}
       <motion.div animate={tit}
-        style={{fontFamily:'Georgia,serif', fontSize:'15px', fontWeight:500, fontStyle:'italic',
-          color: INK_CARD, lineHeight:1.2, padding:'0 2px', maxWidth:'100%', wordBreak:'break-word'}}>
+        style={{fontFamily: SERIF, fontSize:'18px', fontWeight:500, fontStyle:'italic',
+          color: INK_CARD, lineHeight:1.2, padding:'0 2px', maxWidth:'100%', wordBreak:'break-word',
+          display:'-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>
         {card?.title || ''}
       </motion.div>
 
       {/* Thin divider */}
       <div style={{
         width:'40%', height:'0.5px', background: `${GOLD_SOFT}99`,
-        margin:'6px 0', flexShrink:0,
+        margin:'10px 0 8px', flexShrink:0,
       }}/>
 
-      {/* Body — clamp lines based on length so it NEVER overflows */}
+      {/* Body — user-spec inline clamp; can NOT overflow */}
       <motion.div animate={body}
         style={{
-          fontFamily:'"Caveat","Playfair Display",Georgia,cursive',
+          fontFamily:'"Caveat","Playfair Display",cursive',
           fontSize: bodyS.fontSize,
-          color: INK_CARD, lineHeight: 1.25, fontWeight:500,
+          color: INK_CARD, lineHeight: 1.3, fontWeight:500,
           padding:'0 2px',
           flex: 1,
+          width: '100%',
           display:'-webkit-box',
           WebkitLineClamp: bodyS.lineClamp,
           WebkitBoxOrient: 'vertical',
           overflow:'hidden',
           textOverflow:'ellipsis',
-          maxWidth:'100%', wordBreak:'break-word',
+          wordBreak:'break-word',
         }}>
         {bodyText}
       </motion.div>
