@@ -5,6 +5,19 @@
 // fields (today's focus, clinical insight, recent conversations, retention).
 import React, { useEffect, useMemo, useState } from 'react';
 
+function useIsMobile(): boolean {
+  const [m, setM] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = (e: MediaQueryListEvent) => setM(e.matches);
+    if (mq.addEventListener) mq.addEventListener('change', handler);
+    else mq.addListener(handler);
+    return () => { if (mq.removeEventListener) mq.removeEventListener('change', handler); else mq.removeListener(handler); };
+  }, []);
+  return m;
+}
+
 interface Props { API: string; token: string; accent: string; }
 
 interface TodaySession {
@@ -96,6 +109,7 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showOracleSender, setShowOracleSender] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     let alive = true;
@@ -139,27 +153,32 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
   const upcoming = data.today_sessions.slice(0, 3);
 
   return (
-    <div style={{display:'flex', flexDirection:'column', gap:'18px'}}>
+    <div style={{display:'flex', flexDirection:'column', gap:'16px'}}>
       {/* HERO */}
       <div style={{
-        position:'relative', borderRadius:'18px', overflow:'hidden',
-        background: HERO_BG, minHeight:'150px',
-        display:'flex', alignItems:'center', padding:'22px 26px',
+        position:'relative', borderRadius:'16px', overflow:'hidden',
+        background: HERO_BG, minHeight: isMobile ? '120px' : '150px',
+        display:'flex', flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        gap: isMobile ? '14px' : 0,
+        padding: isMobile ? '18px 18px' : '22px 26px',
         boxShadow:'0 4px 20px rgba(92,75,179,0.15)',
       }}>
         <div style={{flex:1, minWidth:0, color:'white', textShadow:'0 1px 2px rgba(0,0,0,0.15)'}}>
-          <div style={{fontSize:'clamp(20px,3vw,28px)', fontWeight:800, letterSpacing:'-0.4px', lineHeight:1.2}}>
+          <div style={{fontSize: isMobile ? '18px' : 'clamp(20px,3vw,28px)', fontWeight:800, letterSpacing:'-0.3px', lineHeight:1.25}}>
             Your practice is making an impact.
           </div>
-          <div style={{fontSize:'13px', opacity:0.92, marginTop:'6px', maxWidth:'520px', lineHeight:1.5}}>
+          <div style={{fontSize: isMobile ? '12px' : '13px', opacity:0.92, marginTop:'6px', maxWidth:'520px', lineHeight:1.45}}>
             You have <b>{focusMembers.length}</b> member{focusMembers.length === 1 ? '' : 's'} who may benefit from attention today.
           </div>
         </div>
         <button style={{
           background:'rgba(30,20,60,0.55)', border:'0.5px solid rgba(255,255,255,0.3)',
-          color:'white', borderRadius:'999px', padding:'10px 18px',
+          color:'white', borderRadius:'999px',
+          padding: isMobile ? '11px 18px' : '10px 18px',
           fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'inherit',
           whiteSpace:'nowrap', flexShrink:0, backdropFilter:'blur(8px)',
+          width: isMobile ? '100%' : 'auto',
         }}>
           View today's focus
         </button>
@@ -300,7 +319,7 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
             <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Practice Snapshot</div>
             <button style={CARD_LINK}>View full report →</button>
           </div>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'10px', flex:1}}>
+          <div style={{display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? '14px' : '10px', flex:1}}>
             <Snapshot label="Active Members" value={data.total_active_members} trend="↗"/>
             <Snapshot label="Visits MTD" value={data.today_sessions.length * 7 /* rough demo */} trend="↗"/>
             <Snapshot label="Retention" value="96%" trend="↗"/>
