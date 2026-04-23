@@ -2255,11 +2255,51 @@ def admin_load_meditation_library(
         if (inserted + updated) % 200 == 0:
             db.commit()
     db.commit()
+
+    # Post-load integrity check — how many library rows have usable scripts?
+    total_rows = db.query(ConciergeMeditation).filter(ConciergeMeditation.source == "library").count()
+    empty_rows = db.query(ConciergeMeditation).filter(
+        ConciergeMeditation.source == "library",
+        (ConciergeMeditation.script.is_(None)) | (ConciergeMeditation.script == ""),
+    ).count()
     return {
         "ok": True,
         "inserted": inserted,
         "updated": updated,
         "library_count": len(meds),
+        "db_rows_after":  total_rows,
+        "db_rows_empty_script": empty_rows,
+    }
+
+
+@app.get("/admin/concierge/meditations/sample")
+def admin_meditations_sample(
+    _: bool = Depends(verify_admin),
+    db: Session = Depends(get_db),
+):
+    """Diagnostic: returns top-3 library rows + counts so we can verify
+    whether scripts actually landed in the DB after a loader run. Read-only.
+    """
+    rows = db.query(ConciergeMeditation).filter(ConciergeMeditation.source == "library").order_by(ConciergeMeditation.id.asc()).limit(3).all()
+    total = db.query(ConciergeMeditation).filter(ConciergeMeditation.source == "library").count()
+    empty = db.query(ConciergeMeditation).filter(
+        ConciergeMeditation.source == "library",
+        (ConciergeMeditation.script.is_(None)) | (ConciergeMeditation.script == ""),
+    ).count()
+    return {
+        "total_library_rows": total,
+        "empty_script_rows":  empty,
+        "populated_rows":     total - empty,
+        "sample": [
+            {
+                "id": r.id,
+                "title": r.title,
+                "category": r.category,
+                "script_len": len(r.script or ""),
+                "script_preview": (r.script or "")[:120],
+            }
+            for r in rows
+        ],
     }
 
 
