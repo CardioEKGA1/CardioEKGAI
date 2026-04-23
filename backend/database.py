@@ -127,6 +127,10 @@ class ConciergePatient(Base):
     visits_used = Column(Integer, default=0)
     meditations_used = Column(Integer, default=0)
     period_counter_reset_at = Column(DateTime, nullable=True)
+    # Flag for superuser-owned test rows — excluded from physician dashboard
+    # aggregates and billing so the practice owner can exercise the full
+    # patient PWA without polluting real panel metrics.
+    test_account = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -327,6 +331,8 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS visits_used INTEGER DEFAULT 0"))
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS meditations_used INTEGER DEFAULT 0"))
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS period_counter_reset_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS test_account BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_test_account ON concierge_patients(test_account)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_customer_id ON concierge_patients(stripe_customer_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_subscription_id ON concierge_patients(stripe_subscription_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_user_id ON concierge_patients(user_id)"))

@@ -22,8 +22,20 @@ const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
     try { return localStorage.getItem(HIPAA_ACK_KEY) === '1'; } catch { return false; }
   });
 
+  // Superuser override: when the URL carries ?view=patient, ask the backend
+  // to hand back patient-role for the Concierge owner/superuser so the
+  // practice owner can exercise the patient PWA on their own account.
+  // Backend auto-provisions a test-flagged ConciergePatient row on first hit.
+  const viewOverride = React.useMemo(() => {
+    try { return new URLSearchParams(window.location.search).get('view'); }
+    catch { return null; }
+  }, []);
+
   useEffect(() => {
-    fetch(`${API}/concierge/me`, { headers: { Authorization: `Bearer ${token}` } })
+    const url = viewOverride === 'patient'
+      ? `${API}/concierge/me?view=patient`
+      : `${API}/concierge/me`;
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then(async r => {
         if (r.status === 401) { onBack(); return null; }
         if (!r.ok) throw new Error('load_failed');
@@ -31,7 +43,7 @@ const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
       })
       .then(d => { if (d) setMe(d); })
       .catch(() => setErr('Could not load your Concierge account.'));
-  }, [API, token, onBack]);
+  }, [API, token, onBack, viewOverride]);
 
   const ackHipaa = () => {
     try { localStorage.setItem(HIPAA_ACK_KEY, '1'); } catch {}

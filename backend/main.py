@@ -4348,18 +4348,41 @@ def _load_oracle() -> dict:
 
 
 @app.get("/concierge/me")
-def concierge_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def concierge_me(view: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Role resolution for the PWA router. Returns:
       role='physician'  → show physician dashboard
       role='patient'    → show patient app
       role='none'       → show concierge landing/signup (or just kick out)
     Always 200 so the frontend can render the right screen without leaking
-    existence to non-authenticated users (they never see this endpoint)."""
+    existence to non-authenticated users (they never see this endpoint).
+
+    Superuser override: when ?view=patient is passed AND the caller is a
+    concierge owner/superuser, we return (and if necessary auto-provision)
+    a test-flagged ConciergePatient row so the owner can exercise the
+    patient PWA on their own account. The row is marked test_account=True
+    and is excluded from physician dashboard aggregates + billing.
+    """
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    if _is_concierge_owner(current_user):
+    p = None
+    if _is_concierge_owner(current_user) and view == "patient":
+        p = _lookup_concierge_patient_for_user(current_user, db)
+        if not p:
+            p = ConciergePatient(
+                name=(current_user.email or "Test Patient").split("@")[0].replace(".", " ").title(),
+                email=current_user.email or "test@example.com",
+                membership_tier="ascend",
+                subscription_status="active",
+                test_account=True,
+                user_id=current_user.id,
+            )
+            db.add(p)
+            db.commit()
+            db.refresh(p)
+    elif _is_concierge_owner(current_user):
         return {"role": "physician", "email": current_user.email, "owner_email": CONCIERGE_OWNER_EMAIL}
-    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p:
+        p = _lookup_concierge_patient_for_user(current_user, db)
     if not p:
         return {"role": "none", "email": current_user.email}
     tier_entry = CONCIERGE_TIER_PRICE.get(p.membership_tier or "awaken", {})
@@ -4560,6 +4583,25 @@ def concierge_oracle_save(
     pull.saved = True
     db.commit()
     return {"saved": True}
+
+
+@app.delete("/concierge/oracle/today/reset")
+def concierge_oracle_reset_today(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Dev/test convenience — wipe today's pull for the calling user so the
+    reel can be re-shuffled. Gated to superusers only so real patients can't
+    game the once-a-day ritual."""
+    if not current_user or not current_user.is_superuser:
+        raise HTTPException(status_code=404, detail="Not found")
+    today = _today_mst()
+    n = db.query(ConciergeOraclePull).filter(
+        ConciergeOraclePull.user_id == current_user.id,
+        ConciergeOraclePull.pull_date == today,
+    ).delete()
+    db.commit()
+    return {"ok": True, "cleared": n}
 
 
 @app.get("/concierge/oracle/history")
@@ -4798,8 +4840,11 @@ def physician_dashboard(
         "status": a.status,
     } for a in appts]
 
-    # Tier counts — only active subscriptions.
-    all_patients = db.query(ConciergePatient).all()
+    # Tier counts — only active subscriptions. Exclude test_account rows so
+    # the superuser's own test patient doesn't pad the real panel numbers.
+    all_patients = db.query(ConciergePatient).filter(
+        (ConciergePatient.test_account == False) | (ConciergePatient.test_account.is_(None))  # noqa: E712
+    ).all()
     tier_counts = {"awaken": 0, "align": 0, "ascend": 0}
     for p in all_patients:
         if (p.subscription_status or "").lower() == "active":

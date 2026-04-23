@@ -136,7 +136,13 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
           </button>
         </div>
 
-        <div style={{padding:'12px 18px 16px', borderTop:`0.5px solid ${BORDER}`, display:'flex', alignItems:'center', gap:'8px', fontSize:'11px', color: INK_SOFT}}>
+        <div style={{padding:'6px 14px 0'}}>
+          <a href={`${window.location.pathname}?view=patient`}
+            style={{display:'block', padding:'8px 10px', fontSize:'11px', color: PURPLE, fontWeight:600, textDecoration:'none', borderRadius:'8px', background: 'rgba(83,74,183,0.06)', textAlign:'center'}}>
+            View as test patient →
+          </a>
+        </div>
+        <div style={{padding:'12px 18px 16px', borderTop:`0.5px solid ${BORDER}`, display:'flex', alignItems:'center', gap:'8px', fontSize:'11px', color: INK_SOFT, marginTop:'8px'}}>
           <span style={{width:'8px', height:'8px', borderRadius:'50%', background: systemOk === null ? '#d0cfe0' : systemOk ? '#58C48E' : '#E06A6A', boxShadow: systemOk ? '0 0 0 3px rgba(88,196,142,0.15)' : undefined}}/>
           <span>{systemOk === null ? 'Checking system…' : systemOk ? 'All systems healthy' : 'System degraded'}</span>
         </div>
