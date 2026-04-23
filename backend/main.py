@@ -2150,6 +2150,76 @@ def stripe_webhook_health():
         "stale": stale,
     }
 
+
+@app.post("/admin/concierge/meditations/load")
+def admin_load_meditation_library(
+    _: bool = Depends(verify_admin),
+    db: Session = Depends(get_db),
+):
+    """Idempotent loader for the 2,044-meditation library shipped in
+    backend/meditations.json. Upserts on (source='library', category,
+    lower(title)) so re-running after future expansions won't duplicate,
+    and physician-created meditations (source='manual') are untouched.
+
+    Runs in-process against whatever DB the app is connected to, which on
+    Railway is prod Postgres — avoids needing to expose DATABASE_URL or
+    SSH to run a separate script.
+    """
+    path = os.path.join(os.path.dirname(__file__), "meditations.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=500, detail="meditations.json not on disk (deploy may be missing the asset)")
+    with open(path) as f:
+        data = json.load(f)
+    meds = data.get("meditations") or []
+    if not meds:
+        return {"ok": True, "inserted": 0, "updated": 0, "library_count": 0, "note": "JSON had no meditations"}
+
+    # Pre-index existing library rows for O(1) upsert lookup.
+    existing = db.query(ConciergeMeditation).filter(ConciergeMeditation.source == "library").all()
+    idx = {(m.category or "", (m.title or "").strip().lower()): m for m in existing}
+
+    inserted = updated = 0
+    for m in meds:
+        cat   = (m.get("category") or "").strip()
+        title = (m.get("title") or "").strip()
+        if not cat or not title:
+            continue
+        key = (cat, title.lower())
+        row = idx.get(key)
+        if row is None:
+            db.add(ConciergeMeditation(
+                title=title, category=cat,
+                description=m.get("category_label") or "",
+                duration_min=int(m.get("duration_minutes") or 10),
+                script=m.get("script") or "",
+                difficulty=m.get("difficulty"),
+                affirmations=m.get("affirmations") or [],
+                tags=m.get("tags") or [],
+                physician_notes=m.get("physician_notes") or "",
+                source="library",
+            ))
+            inserted += 1
+        else:
+            row.description     = m.get("category_label") or row.description
+            row.duration_min    = int(m.get("duration_minutes") or row.duration_min or 10)
+            row.script          = m.get("script") or row.script
+            row.difficulty      = m.get("difficulty") or row.difficulty
+            row.affirmations    = m.get("affirmations") or row.affirmations
+            row.tags            = m.get("tags") or row.tags
+            row.physician_notes = m.get("physician_notes") or row.physician_notes
+            updated += 1
+        # Commit in chunks of 200 so a mid-load failure still persists earlier work.
+        if (inserted + updated) % 200 == 0:
+            db.commit()
+    db.commit()
+    return {
+        "ok": True,
+        "inserted": inserted,
+        "updated": updated,
+        "library_count": len(meds),
+    }
+
+
 @app.get("/admin/feedback")
 def admin_feedback_list(limit: int = 50, _: bool = Depends(verify_admin), db: Session = Depends(get_db)):
     rows = db.query(ToolFeedback).filter(ToolFeedback.comment.isnot(None)).order_by(ToolFeedback.created_at.desc()).limit(min(max(limit, 1), 200)).all()
