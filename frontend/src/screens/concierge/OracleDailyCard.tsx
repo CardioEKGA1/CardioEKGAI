@@ -7,11 +7,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { shareOracleCard } from './shareOracleCard';
-// Module-imported asset — webpack hashes + fingerprints the PNG into
-// /static/media/card-back.<hash>.png, so the browser can't hit a stale
-// root-level cached URL and the SW cache-first-for-/static/ rule applies
-// cleanly (content-addressed = safe to cache forever).
-import cardBackImg from '../../assets/card-back.png';
+// Card back is drawn inline as SVG — no asset path, no cache, no SW, no
+// network request. One flower shape + palette rotates deterministically
+// per day (7 × 6 = 42 combos).
+import CardBackFlower from './CardBackFlower';
 
 interface OracleCardData {
   id: number; category: string;
@@ -211,17 +210,15 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
           animate={{ rotateY: flipped ? 180 : 0 }}
           transition={{ duration: 0.85, ease: [0.45, 0, 0.2, 1] }}
           style={{width:'100%', height:'100%', position:'relative', transformStyle:'preserve-3d'}}>
-          {/* BACK — holographic image */}
+          {/* BACK — inline SVG flower of the day */}
           <div style={{
             position:'absolute', inset:0,
             backfaceVisibility:'hidden',
             WebkitBackfaceVisibility:'hidden',
             borderRadius:'16px',
             overflow:'hidden',
-            backgroundColor:'#EDE6FB',
           }}>
-            <img src={cardBackImg} alt="" aria-hidden="true"
-              style={{width:'100%', height:'100%', objectFit:'cover', objectPosition:'center', display:'block', userSelect:'none', pointerEvents:'none', borderRadius:'inherit'}}/>
+            <CardBackFlower/>
           </div>
           {/* FRONT — Gabby-style reveal */}
           <div style={{
