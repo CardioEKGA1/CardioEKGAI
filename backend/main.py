@@ -680,12 +680,31 @@ elif SENDGRID_API_KEY and FROM_EMAIL:
     print(f"SendGrid sender: {FROM_EMAIL} — verify this address (or its domain) is authenticated in SendGrid or sends will silently drop.")
 
 _sendgrid_error_count = 0
+# Latest send diagnostics — surfaced via /admin/health so an operator can tell
+# whether the most recent call went through without having to tail Railway
+# logs. Per-process (resets on boot); to_email is redacted so the endpoint
+# can stay admin-authed without leaking recipient addresses into support
+# screenshots.
+_sendgrid_last_send_at: datetime | None = None
+_sendgrid_last_status_code: int | None = None
+_sendgrid_last_error: str | None = None
+_sendgrid_last_error_at: datetime | None = None
+
+def _redact_email(addr: str | None) -> str:
+    if not addr or "@" not in addr:
+        return "—"
+    local, _, domain = addr.partition("@")
+    return f"{local[:2]}…@{domain}"
 
 def send_email(to_email, subject, html):
-    global _sendgrid_error_count
+    global _sendgrid_error_count, _sendgrid_last_send_at, _sendgrid_last_status_code, _sendgrid_last_error, _sendgrid_last_error_at
     if not SENDGRID_API_KEY:
+        msg = "no SENDGRID_API_KEY"
+        _sendgrid_last_error = msg
+        _sendgrid_last_error_at = datetime.utcnow()
         print(f"Email skipped (no SENDGRID_API_KEY): to={to_email} subject={subject!r}")
         return
+    _sendgrid_last_send_at = datetime.utcnow()
     try:
         sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
         msg = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html)
@@ -693,11 +712,29 @@ def send_email(to_email, subject, html):
         # SendGrid 202 = queued. Anything else is worth flagging: 401 = bad key,
         # 403 = sender not verified, 413 = too large, etc.
         status = getattr(resp, "status_code", None)
+        _sendgrid_last_status_code = status
         if status is None or status >= 300:
             _sendgrid_error_count += 1
+            err = f"non-2xx status={status}"
+            # SendGrid responses sometimes carry a body with the specific reason
+            # (e.g. "sender identity not verified"). Capture first 300 chars.
+            body = getattr(resp, "body", None)
+            if body:
+                try:
+                    err += f" body={body.decode('utf-8', errors='replace')[:300]}"
+                except Exception:
+                    pass
+            _sendgrid_last_error = err
+            _sendgrid_last_error_at = datetime.utcnow()
             print(f"SendGrid non-2xx: status={status} from={FROM_EMAIL} to={to_email}")
+        else:
+            # Clear stale error state on a successful send so the admin page
+            # doesn't lie about "last_error" after a transient blip recovers.
+            _sendgrid_last_error = None
     except Exception as e:
         _sendgrid_error_count += 1
+        _sendgrid_last_error = f"{type(e).__name__}: {str(e)[:300]}"
+        _sendgrid_last_error_at = datetime.utcnow()
         print(f"Email error (from={FROM_EMAIL} to={to_email}): {type(e).__name__}: {e}")
 
 @app.get("/health")
@@ -1949,7 +1986,15 @@ def admin_health(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
         checks["database"] = {"ok": True}
     except Exception as e:
         checks["database"] = {"ok": False, "error": str(e)[:200]}
-    checks["sendgrid"] = {"ok": bool(SENDGRID_API_KEY), "from_email": FROM_EMAIL, "error_count_since_boot": _sendgrid_error_count}
+    checks["sendgrid"] = {
+        "ok": bool(SENDGRID_API_KEY),
+        "from_email": FROM_EMAIL,
+        "error_count_since_boot": _sendgrid_error_count,
+        "last_send_at":     _sendgrid_last_send_at.isoformat() + "Z" if _sendgrid_last_send_at else None,
+        "last_status_code": _sendgrid_last_status_code,
+        "last_error":       _sendgrid_last_error,
+        "last_error_at":    _sendgrid_last_error_at.isoformat() + "Z" if _sendgrid_last_error_at else None,
+    }
     # Global magic-link send counter — read-only visibility for capacity planning.
     # _magic_link_global_cap_hit() also prunes stale entries, giving an accurate count.
     _magic_link_global_cap_hit()
