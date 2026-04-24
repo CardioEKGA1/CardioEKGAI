@@ -24,6 +24,7 @@ import PalliativeMDTool from './screens/tools/PalliativeMDTool';
 import LabReadTool from './screens/tools/LabReadTool';
 import CliniScoreTool from './screens/tools/CliniScoreTool';
 import Concierge from './screens/concierge/Concierge';
+import PatientLogin from './screens/PatientLogin';
 import TrialSignupModal from './TrialSignupModal';
 
 export interface EkgResult {
@@ -54,6 +55,7 @@ type Screen =
   | 'tool_labread' | 'tool_cliniscore'
   | 'concierge'
   | 'meditations_library' | 'concierge_access'
+  | 'patient_login'
   | 'dev_login';
 
 const API = 'https://ekgscan.com';
@@ -75,6 +77,7 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/concierge')         return 'concierge';
   if (path === '/meditations')       return 'meditations_library';
   if (path === '/concierge-access')  return 'concierge_access';
+  if (path === '/patient')           return 'patient_login';
   if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -101,6 +104,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'concierge') return '/concierge';
   if (s === 'meditations_library') return '/meditations';
   if (s === 'concierge_access')    return '/concierge-access';
+  if (s === 'patient_login')       return '/patient';
   if (s === 'dev_login')           return '/dev-login';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
@@ -193,9 +197,12 @@ const App: React.FC = () => {
     //   3. Default: SoulMD → dashboard, EKGScan → upload.
     let redirected = false;
     try {
-      const stored = sessionStorage.getItem('soulmd_post_auth_redirect');
+      const stored =
+        sessionStorage.getItem('soulmd_post_auth_redirect') ||
+        localStorage.getItem('post_auth_redirect');
       if (stored && stored.startsWith('/')) {
-        sessionStorage.removeItem('soulmd_post_auth_redirect');
+        try { sessionStorage.removeItem('soulmd_post_auth_redirect'); } catch {}
+        try { localStorage.removeItem('post_auth_redirect'); } catch {}
         // Using window.location so we preserve the full path + query exactly,
         // which the in-app navigate() can't do for ephemeral state like
         // ?view=patient.
@@ -296,6 +303,7 @@ const App: React.FC = () => {
       concierge:         'Concierge Medicine',
       meditations_library: `Meditations Library · ${brand}`,
       concierge_access:    `Concierge Portal · ${brand}`,
+      patient_login:       'SoulMD Concierge · Sign in',
       dev_login:           `Dev Login · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
@@ -320,6 +328,16 @@ const App: React.FC = () => {
       navigate('auth');
     }
   }, [screen, user, token, navigate]);
+
+  // /patient — if the user already has a session, send them straight to the
+  // patient PWA. We wait until the /auth/me bootstrap has resolved a real
+  // `user` before redirecting so a stale token doesn't bounce a not-yet-
+  // authenticated visitor away from the sign-in form.
+  useEffect(() => {
+    if (screen === 'patient_login' && user) {
+      window.location.href = '/concierge?view=patient';
+    }
+  }, [screen, user]);
 
   if (isAdminRoute) {
     return (
@@ -399,6 +417,7 @@ const App: React.FC = () => {
         <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', color:'#8a6e50', fontSize:'14px'}}>Loading…</div>
       )}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
+      {screen==='patient_login' && !user && <PatientLogin API={API}/>}
       {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
