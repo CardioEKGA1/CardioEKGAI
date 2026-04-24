@@ -23,23 +23,24 @@ interface Props {
 
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; keywords: string; free?: boolean; }
 
-// Sorted alphabetically by display name. Full branded names preserved
-// (AntibioticAI, NephroAI, etc.) — the earlier "drop AI suffix" pass was
-// reverted after it created inconsistency with Stripe product names,
-// welcome email, landing pages, and the trial signup modal.
+// Clinical AI tools sorted alphabetically (branded names preserved). Concierge
+// Medicine and Meditations intentionally appended last — they're discovery /
+// admin tiles, not clinical tools, and rank-1 stable-sort preserves that
+// intent within the accessible bucket.
 const TOOLS: Tool[] = [
   { slug:'antibioticai', name:'AntibioticAI',    icon:'🦠', desc:'IDSA-based antibiotic recommendations',                                                                                          monthly:9.99,  yearly:89.99,  keywords:'infectious disease antibiotics idsa uti cellulitis pneumonia cap hap sepsis bacteremia organism antibioticai' },
   { slug:'cerebralai',   name:'CerebralAI',      icon:'🧠', desc:'Brain and spine MRI and CT interpretation',                                                                                      monthly:24.99, yearly:179.99, keywords:'brain spine mri ct neuroimaging stroke hemorrhage head radiology neurology cord cerebralai' },
   { slug:'clinicalnote', name:'ClinicalNote AI', icon:'📝', desc:'AI that writes clinical notes in your voice — SOAP, H&P, discharge, consult, procedure — with style learning',                  monthly:24.99, yearly:179.99, keywords:'soap h&p note documentation discharge summary procedure consult hpi prior auth pa style learning voice personalized clinicalnote' },
   { slug:'cliniscore',   name:'CliniScore',      icon:'📊', desc:'Clinical risk calculators with AI interpretation',                                                                               monthly:0,     yearly:0,      free:true,  keywords:'calculator mdcalc chadsvasc hasbled heart score wells curb65 meld child-pugh fib4 phq9 gad7 qsofa bmi egfr anion gap winters' },
-  { slug:'concierge',    name:'Concierge Medicine', icon:'🌿', desc:'Where science meets the soul — Dr. Anderson\'s integrative practice. Membership + à la carte care.',                        monthly:0,     yearly:0,      free:true,  keywords:'concierge anderson membership integrative direct-pay soul ritual meditation oracle holistic reiki chakra' },
   { slug:'ekgscan',      name:'EKGScan',         icon:'🫀', desc:'12-lead EKG interpretation in seconds',                                                                                          monthly:9.99,  yearly:89.99,  keywords:'ekg ecg cardiac rhythm heart 12-lead cardiology arrhythmia atrial ventricular qtc' },
   { slug:'labread',      name:'LabRead',         icon:'🧪', desc:'AI lab-panel interpretation — paste, dictate, or upload',                                                                         monthly:0,     yearly:0,      free:true,  keywords:'labs chemistry cbc bmp cmp electrolytes liver renal thyroid iron ferritin ldh tsh ptt inr ca+k+na' },
-  { slug:'meditations',  name:'Meditations',     icon:'🕯️', desc:'2,000+ guided meditation scripts — browse, search, favorite. Superuser tool.',                                                  monthly:0,     yearly:0,      free:true,  keywords:'meditation mindfulness breathwork sleep chakra grounding visualization library scripts' },
   { slug:'nephroai',     name:'NephroAI',        icon:'🫘', desc:'Comprehensive nephrology decision support',                                                                                      monthly:9.99,  yearly:89.99,  keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology nephroai' },
   { slug:'palliativemd', name:'PalliativeMD',    icon:'🫶', desc:'AI-guided palliative care — goals of care, prognosis, family meetings',                                                          monthly:24.99, yearly:179.99, keywords:'palliative goals of care prognosis hospice family meeting dnr dni code status end of life comfort' },
   { slug:'rxcheck',      name:'RxCheck',         icon:'💊', desc:'Full medication interaction safety check',                                                                                       monthly:9.99,  yearly:89.99,  keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
   { slug:'xrayread',     name:'XrayRead',        icon:'🩻', desc:'Structured radiology report from any X-ray image',                                                                               monthly:24.99, yearly:179.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
+  // ── Discovery / admin tiles — pinned last ────────────────────────────
+  { slug:'concierge',    name:'Concierge Medicine', icon:'🌿', desc:'Where science meets the soul — Dr. Anderson\'s integrative practice. Membership + à la carte care.',                        monthly:0,     yearly:0,      free:true,  keywords:'concierge anderson membership integrative direct-pay soul ritual meditation oracle holistic reiki chakra' },
+  { slug:'meditations',  name:'Meditations',     icon:'🕯️', desc:'2,000+ guided meditation scripts — browse, search, favorite. Superuser tool.',                                                  monthly:0,     yearly:0,      free:true,  keywords:'meditation mindfulness breathwork sleep chakra grounding visualization library scripts' },
 ];
 
 // Tools that open directly (no subscribe step) when clicked — concierge +
