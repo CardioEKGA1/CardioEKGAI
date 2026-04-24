@@ -75,7 +75,7 @@ const PatientTerms: React.FC<Props> = ({ API, token, onComplete, onSignInRequire
       <SparkleLayer count={18}/>
 
       <main style={{position:'relative', zIndex:1, maxWidth:'640px', margin:'0 auto', padding:'28px 18px 40px', display:'flex', flexDirection:'column', alignItems:'center'}}>
-        <SoulMDLogo size={56}/>
+        <SoulMDLogo size={44} showText={false}/>
         <div style={{marginTop:'18px', width:'100%', display:'flex', justifyContent:'center'}}>
           <ProgressIndicator step={2}/>
         </div>

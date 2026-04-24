@@ -35,14 +35,8 @@ const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 const GRAD_TEXT: React.CSSProperties = {background: WORDMARK, WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text'};
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'24px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)'};
 
-export const SoulMDBrand: React.FC<{size?: number}> = ({ size = 40 }) => (
-  <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-    <SoulMDLogo size={size}/>
-    <div>
-      <div style={{fontSize:'20px', fontWeight:'800', lineHeight:'1.1'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
-      <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'4px'}}>AI CLINICAL SUITE</div>
-    </div>
-  </div>
+export const SoulMDBrand: React.FC<{size?: number}> = ({ size = 32 }) => (
+  <SoulMDLogo size={size}/>
 );
 
 const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms }) => (
@@ -57,9 +51,7 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
 
     <section style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px 40px', textAlign:'center'}}>
       <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'10px', marginBottom:'28px'}}>
-        <SoulMDLogo size={72}/>
-        <div style={{fontSize:'clamp(28px,6vw,36px)', fontWeight:'800', lineHeight:'1.1', letterSpacing:'-0.5px'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
-        <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'4px'}}>AI CLINICAL SUITE</div>
+        <SoulMDLogo size={48}/>
       </div>
       <h1 style={{fontSize:'clamp(30px,7vw,44px)', fontWeight:'900', color:'#1a2a4a', lineHeight:'1.1', marginBottom:'14px', maxWidth:'720px', letterSpacing:'-1.2px', padding:'0 16px', wordBreak:'break-word'}}>
         Specialist-grade AI<br/>

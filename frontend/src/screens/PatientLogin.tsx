@@ -58,7 +58,7 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
       <main style={{position:'relative', zIndex:1, flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'32px 20px'}}>
         <div style={{width:'100%', maxWidth:'440px', display:'flex', flexDirection:'column', alignItems:'center'}}>
           <div style={{marginBottom:'24px'}}>
-            <SoulMDLogo size={80}/>
+            <SoulMDLogo size={56} showText={false}/>
           </div>
 
           <div style={{fontFamily: SERIF, fontSize:'clamp(30px,6vw,38px)', fontWeight:600, color: NAVY, letterSpacing:'-0.3px', textAlign:'center', lineHeight:1.15}}>
