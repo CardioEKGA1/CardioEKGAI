@@ -1,83 +1,17 @@
 // © 2026 SoulMD, LLC. All rights reserved.
-// /patient — patient-branded sign-in page. Sends a magic link and stashes
-// a post-auth redirect so the user lands on /concierge?view=patient after
-// clicking the link.
+// /patient — patient-branded sign-in. Sends a magic link and stashes a
+// post-auth redirect to /patient so the onboarding gate in App.tsx can
+// route through Terms → Intake → Patient PWA after the round-trip.
 import React, { useEffect, useState } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
+import { PATIENT_BG, NAVY, PURPLE, PURPLE_SOFT, SERIF, SparkleLayer, SparkleDivider } from './patient/shared';
 
 interface Props { API: string; }
 
-const BG = 'linear-gradient(160deg, #F5F1FF 0%, #E8E4FB 50%, #DFEAFC 100%)';
-const NAVY = '#1F1B3A';
-const PURPLE = '#534AB7';
-const PURPLE_SOFT = '#6B6889';
-const GOLD = '#C9A84C';
-const SERIF = '"Cormorant Garamond","Playfair Display",Georgia,serif';
-
-const POST_AUTH_REDIRECT = '/concierge?view=patient';
-
-// Inject floating-sparkle keyframes once. The sparkles are absolutely
-// positioned spans with random left/duration/delay that drift from below
-// the viewport up and out the top, fading near the end.
-if (typeof document !== 'undefined' && !document.getElementById('__soulmd_patient_sparkles')) {
-  const s = document.createElement('style');
-  s.id = '__soulmd_patient_sparkles';
-  s.textContent = `
-    @keyframes soulmdSparkleDrift {
-      0%   { transform: translate3d(0, 8vh, 0)  scale(0.6); opacity: 0; }
-      10%  { opacity: 0.9; }
-      60%  { opacity: 0.85; }
-      100% { transform: translate3d(6px, -110vh, 0) scale(1.05); opacity: 0; }
-    }
-    @keyframes soulmdSparkleTwinkle {
-      0%,100% { filter: brightness(1); }
-      50%     { filter: brightness(1.6); }
-    }
-  `;
-  document.head.appendChild(s);
-}
-
-interface Sparkle { id: number; left: number; size: number; duration: number; delay: number; opacity: number; }
-
-const makeSparkles = (n: number): Sparkle[] => {
-  const out: Sparkle[] = [];
-  for (let i = 0; i < n; i++) {
-    out.push({
-      id: i,
-      left: Math.random() * 100,
-      size: 4 + Math.random() * 7,
-      duration: 14 + Math.random() * 14,
-      delay: -Math.random() * 20,
-      opacity: 0.4 + Math.random() * 0.5,
-    });
-  }
-  return out;
-};
-
-const SparkleLayer: React.FC = () => {
-  const [sparkles] = useState(() => makeSparkles(22));
-  return (
-    <div aria-hidden="true" style={{position:'fixed', inset:0, zIndex:0, pointerEvents:'none', overflow:'hidden'}}>
-      {sparkles.map(sp => (
-        <span
-          key={sp.id}
-          style={{
-            position:'absolute',
-            left: `${sp.left}vw`,
-            bottom: '-6vh',
-            width: `${sp.size}px`,
-            height: `${sp.size}px`,
-            borderRadius: '50%',
-            background: `radial-gradient(circle at 50% 50%, ${GOLD} 0%, rgba(201,168,76,0.6) 45%, transparent 72%)`,
-            boxShadow: `0 0 ${Math.round(sp.size * 1.2)}px rgba(201,168,76,0.35)`,
-            opacity: sp.opacity,
-            animation: `soulmdSparkleDrift ${sp.duration}s linear ${sp.delay}s infinite, soulmdSparkleTwinkle ${sp.duration * 0.37}s ease-in-out ${sp.delay}s infinite`,
-          }}
-        />
-      ))}
-    </div>
-  );
-};
+// The onboarding gate lives at /patient (see App.tsx) — it reads the
+// onboarding status and routes to /patient/terms, /patient/intake, or
+// /concierge?view=patient as appropriate.
+const POST_AUTH_REDIRECT = '/patient';
 
 const PatientLogin: React.FC<Props> = ({ API }) => {
   const [email, setEmail] = useState('');
@@ -85,12 +19,9 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
 
-  // Stash the post-auth destination as soon as this screen mounts. Doing it
-  // here (rather than on submit) covers the case where the user clicks the
-  // link from the same browser but never actually hits "Send" — e.g. they
-  // typed /patient, realised they're logged in elsewhere, and went to the
-  // patient PWA via a different tab. handleAuth reads sessionStorage
-  // first; localStorage acts as a cross-tab/longer-lived fallback.
+  // Stash the post-auth destination as soon as this screen mounts so the
+  // redirect survives the magic-link round-trip. handleAuth reads
+  // sessionStorage first; localStorage is the longer-lived fallback.
   useEffect(() => {
     try { sessionStorage.setItem('soulmd_post_auth_redirect', POST_AUTH_REDIRECT); } catch {}
     try { localStorage.setItem('post_auth_redirect', POST_AUTH_REDIRECT); } catch {}
@@ -121,17 +52,15 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
   const canSubmit = !!email.trim();
 
   return (
-    <div style={{minHeight:'100vh', background: BG, fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif', position:'relative', overflow:'hidden', display:'flex', flexDirection:'column'}}>
+    <div style={{minHeight:'100vh', background: PATIENT_BG, fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif', position:'relative', overflow:'hidden', display:'flex', flexDirection:'column'}}>
       <SparkleLayer/>
 
       <main style={{position:'relative', zIndex:1, flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'32px 20px'}}>
         <div style={{width:'100%', maxWidth:'440px', display:'flex', flexDirection:'column', alignItems:'center'}}>
-          {/* Logo */}
           <div style={{marginBottom:'24px'}}>
             <SoulMDLogo size={80}/>
           </div>
 
-          {/* Heading */}
           <div style={{fontFamily: SERIF, fontSize:'clamp(30px,6vw,38px)', fontWeight:600, color: NAVY, letterSpacing:'-0.3px', textAlign:'center', lineHeight:1.15}}>
             SoulMD Concierge
           </div>
@@ -139,14 +68,8 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
             Where Science Meets the Soul
           </div>
 
-          {/* Divider with sparkle */}
-          <div style={{display:'flex', alignItems:'center', gap:'12px', width:'60%', margin:'22px 0 26px', opacity:0.75}}>
-            <div style={{flex:1, height:'0.5px', background: `linear-gradient(90deg, transparent, ${GOLD}99, transparent)`}}/>
-            <span style={{color: GOLD, fontSize:'12px', letterSpacing:'1px'}}>✦</span>
-            <div style={{flex:1, height:'0.5px', background: `linear-gradient(90deg, transparent, ${GOLD}99, transparent)`}}/>
-          </div>
+          <SparkleDivider/>
 
-          {/* Card */}
           <div style={{width:'100%', background:'rgba(255,255,255,0.78)', backdropFilter:'blur(14px)', WebkitBackdropFilter:'blur(14px)', borderRadius:'22px', padding:'28px 24px', boxShadow:'0 20px 40px rgba(83,74,183,0.12)', border:'0.5px solid rgba(255,255,255,0.9)'}}>
             {sent ? (
               <div style={{textAlign:'center', padding:'8px 0 4px'}}>
@@ -205,7 +128,6 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
             )}
           </div>
 
-          {/* Footer */}
           <div style={{marginTop:'28px', fontFamily: SERIF, fontStyle:'italic', fontSize:'13px', color: PURPLE_SOFT, textAlign:'center', letterSpacing:'0.3px', opacity:0.85}}>
             Your journey. Your healing. Your space.
           </div>
