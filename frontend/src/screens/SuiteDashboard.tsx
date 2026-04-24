@@ -19,6 +19,7 @@ interface Props {
   checkoutResult: string | null;
   onNavigateMeditations?: () => void;
   onNavigateConciergeAccess?: () => void;
+  onNavigateConciergeMedicine?: () => void;
 }
 
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; keywords: string; free?: boolean; }
@@ -111,7 +112,7 @@ interface CasesResp {
   retention_days: number;
 }
 
-const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, onPrivacy, onTerms, checkoutResult, onNavigateMeditations, onNavigateConciergeAccess }) => {
+const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, onPrivacy, onTerms, checkoutResult, onNavigateMeditations, onNavigateConciergeAccess, onNavigateConciergeMedicine }) => {
   const [access, setAccess] = useState<AccessResp | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [cases, setCases] = useState<CasesResp | null>(null);
@@ -343,6 +344,16 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
               </div>
             )}
           </div>
+          {!!user.is_superuser && onNavigateConciergeMedicine && (
+            <button
+              onClick={onNavigateConciergeMedicine}
+              title="Concierge Medicine"
+              style={{background:'linear-gradient(135deg,rgba(201,168,76,0.12),rgba(155,143,232,0.15))', border:'0.5px solid rgba(201,168,76,0.4)', borderRadius:'10px', padding:'8px 14px', fontSize:'12px', fontWeight:700, color:'#534AB7', cursor:'pointer', letterSpacing:'0.3px', display:'inline-flex', alignItems:'center', gap:'6px'}}
+            >
+              <span style={{color:'#C9A84C'}}>✦</span>
+              Concierge
+            </button>
+          )}
           {hasAnyPaidSub && <button onClick={openPortal} style={{...BTN, flex:'none'}}>Manage billing</button>}
           <button onClick={onLogout} style={{background:'rgba(255,255,255,0.7)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'8px 14px', fontSize:'12px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>Sign Out</button>
         </div>

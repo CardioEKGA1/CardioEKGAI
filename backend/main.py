@@ -3,6 +3,7 @@
 
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse as _RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -193,6 +194,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ekgscan.com is a legacy domain — soulmd.us is the primary brand. Browser
+# navigations (HTML loads) to ekgscan.com are 301-redirected to soulmd.us
+# with the same path + query preserved. /scan stays functional on
+# ekgscan.com so the EKG tool keeps its direct URL. Fetch/XHR requests
+# (Accept != text/html) pass through untouched — the SPA still calls the
+# API at https://ekgscan.com from the soulmd.us frontend, and we don't
+# want to break those with a 301 the browser turns into a CORS failure.
+_EKGSCAN_HOSTS = {"ekgscan.com", "www.ekgscan.com"}
+
+@app.middleware("http")
+async def _ekgscan_to_soulmd(request, call_next):
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    if host in _EKGSCAN_HOSTS:
+        path = request.url.path or "/"
+        if path != "/scan":
+            accept = (request.headers.get("accept") or "").lower()
+            wants_html = "text/html" in accept
+            # Top-level navigations may omit Accept entirely (curl, og-scrapers)
+            # but Sec-Fetch-Dest lets us identify real browser document loads.
+            sec_fetch_dest = (request.headers.get("sec-fetch-dest") or "").lower()
+            if wants_html or sec_fetch_dest == "document":
+                target = f"https://soulmd.us{path}"
+                qs = request.url.query
+                if qs:
+                    target += f"?{qs}"
+                return _RedirectResponse(target, status_code=301)
+    return await call_next(request)
 
 # Stripe webhook health: last successful signature-verified webhook we processed.
 # In-memory (per-process) — resets on restart, which the admin endpoint reports honestly.
@@ -837,8 +866,11 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
         host = request.headers.get("origin") or request.headers.get("referer") or ""
         is_soulmd = "soulmd.us" in host
         brand = "SoulMD" if is_soulmd else "EKGScan"
-        link_base = "https://soulmd.us" if is_soulmd else "https://ekgscan.com"
-        link = f"{link_base}/?token={token}"
+        # soulmd.us is the primary brand domain. Magic links always land
+        # there; ekgscan.com is kept as a functional entry point only for
+        # /scan (see _ekgscan_to_soulmd middleware) and is no longer used
+        # in outbound email URLs even for EKGScan-branded signups.
+        link = f"https://soulmd.us/?token={token}"
         _record_magic_link_send()
         send_email(email, f"Your {brand} sign-in link",
             f"""<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:40px">
@@ -890,7 +922,7 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
                     <h1 style="color:#1a2a4a;margin-bottom:24px">EKGScan</h1>
                     <h2 style="color:#1a2a4a">Welcome</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your account is ready. Your first 12-lead EKG interpretation is free — upload any image and get a structured report in seconds.</p>
-                    <a href="https://ekgscan.com/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Analyze an EKG</a>
+                    <a href="https://soulmd.us/scan" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Analyze an EKG</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI interpretation must be reviewed by a qualified clinician. In emergencies, call 911.</p>
                     <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
                     </div>""")
@@ -4197,12 +4229,21 @@ def patient_onboarding_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """Routing data for the /patient post-login gate. Invitation-only by
+    design — regular tool users hitting this endpoint do NOT get a
+    ConciergePatient row created for them. Only owner/superuser accounts
+    auto-provision (so Dr. Anderson can exercise the PWA on her own)."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    p = _get_or_create_patient_row(current_user, db)
+    is_super = _is_concierge_owner(current_user)
+    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p and is_super:
+        p = _get_or_create_patient_row(current_user, db)
     return {
-        "terms_accepted": p.terms_accepted_at is not None,
-        "intake_completed": p.intake_completed_at is not None,
+        "enrolled": p is not None,
+        "is_superuser": is_super,
+        "terms_accepted": (p.terms_accepted_at is not None) if p else False,
+        "intake_completed": (p.intake_completed_at is not None) if p else False,
     }
 
 @app.post("/concierge/patient/accept-terms")
