@@ -17,6 +17,12 @@ interface Props {
   token: string;
   medId: number;
   onClose: () => void;
+  // Fired after the patient taps Complete (or Return gently). The parent is
+  // responsible for opening PostMeditationJournal with this id + title so
+  // the reflection step lands the moment the meditation ends. Optional —
+  // when omitted, Complete behaves the same as Close (e.g. previewing the
+  // script from the physician dashboard).
+  onComplete?: (medId: number, title: string) => void;
 }
 
 const WARM_BG = 'radial-gradient(ellipse at 30% 20%, #fbeedd 0%, #f6d8c4 45%, #e9c4a4 100%)';
@@ -27,7 +33,11 @@ const SERIF   = '"Cormorant Garamond","Playfair Display",Georgia,"Times New Roma
 
 const FONT_SIZES = [16, 18, 20, 22, 24];
 
-const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose }) => {
+const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose, onComplete }) => {
+  const finish = () => {
+    if (onComplete && med) onComplete(med.id, med.title);
+    else onClose();
+  };
   const [med, setMed] = useState<Meditation | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -138,11 +148,17 @@ const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose }) => {
               </div>
             </div>
 
-            <div style={{display:'flex', justifyContent:'center', paddingBottom:'32px', marginTop:'22px'}}>
-              <button onClick={onClose}
+            <div style={{display:'flex', justifyContent:'center', gap:'10px', flexWrap:'wrap', paddingBottom:'32px', marginTop:'22px'}}>
+              <button onClick={finish}
                 style={{background:'linear-gradient(135deg,#d4a86b,#8e5d2e)', color:'white', border:'none', borderRadius:'14px', padding:'12px 26px', fontSize:'13px', fontWeight:800, cursor:'pointer', fontFamily:'inherit', letterSpacing:'0.5px', textTransform:'uppercase', boxShadow:'0 10px 22px rgba(142,93,46,0.25)'}}>
-                Return gently
+                Complete
               </button>
+              {onComplete && (
+                <button onClick={onClose}
+                  style={{background:'rgba(255,255,255,0.7)', color:INK_SOFT, border:'1px solid rgba(107,86,70,0.25)', borderRadius:'14px', padding:'12px 22px', fontSize:'12px', fontWeight:700, cursor:'pointer', fontFamily:'inherit', letterSpacing:'0.4px'}}>
+                  Skip reflection
+                </button>
+              )}
             </div>
           </>
         ) : null}

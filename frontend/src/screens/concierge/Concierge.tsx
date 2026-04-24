@@ -27,8 +27,13 @@ const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
   // practice owner can exercise the patient PWA on their own account.
   // Backend auto-provisions a test-flagged ConciergePatient row on first hit.
   const viewOverride = React.useMemo(() => {
-    try { return new URLSearchParams(window.location.search).get('view'); }
-    catch { return null; }
+    try {
+      // /concierge/journal/new is patient-only by definition — force patient
+      // role on superusers so they don't bounce to the physician dashboard
+      // and miss the journal overlay PatientApp opens on mount.
+      if (window.location.pathname === '/concierge/journal/new') return 'patient';
+      return new URLSearchParams(window.location.search).get('view');
+    } catch { return null; }
   }, []);
 
   useEffect(() => {

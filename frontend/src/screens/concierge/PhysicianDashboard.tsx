@@ -10,12 +10,13 @@ import MeditationsSection from './MeditationsSection';
 import CoachingSection from './CoachingSection';
 import LabReviewSection from './LabReviewSection';
 import PhysicianHome from './PhysicianHome';
+import BillingSection from './BillingSection';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
 type Section =
   | 'home' | 'members' | 'conversations' | 'appointments'
-  | 'insights' | 'protocols' | 'coaching' | 'resources' | 'practice';
+  | 'insights' | 'protocols' | 'coaching' | 'resources' | 'billing';
 
 const PURPLE = '#534AB7';
 const PURPLE_SOFT = '#EEEBFA';
@@ -34,7 +35,7 @@ const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'protocols',     label: 'Protocols',     icon: '◈' },
   { id: 'coaching',      label: 'Coaching',      icon: '◎' },
   { id: 'resources',     label: 'Resources',     icon: '◐' },
-  { id: 'practice',      label: 'Practice',      icon: '◇' },
+  { id: 'billing',       label: 'Billing',       icon: '$' },
 ];
 
 const greetingFor = (d: Date): string => {
@@ -203,7 +204,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
           {section === 'protocols'     && <LabReviewSection API={API} token={token} accent={PURPLE}/>}
           {section === 'coaching'      && <CoachingSection API={API} token={token} accent={PURPLE}/>}
           {section === 'resources'     && <MeditationsSection API={API} token={token} accent={PURPLE}/>}
-          {section === 'practice'      && <PracticePlaceholder/>}
+          {section === 'billing'       && <BillingSection API={API} token={token} accent={PURPLE}/>}
           {section === 'insights'      && <InsightsPlaceholder/>}
         </main>
 
@@ -335,14 +336,6 @@ const InsightsPlaceholder: React.FC = () => (
     <div style={{fontSize:'40px', marginBottom:'10px', opacity:0.6}}>✧</div>
     <div style={{fontSize:'18px', fontWeight:800, color: INK, marginBottom:'6px'}}>Insights</div>
     <div style={{fontSize:'13px', color: INK_SOFT, maxWidth:'460px', margin:'0 auto', lineHeight:1.6}}>Population-level AI insights across your members — metabolic trends, habit adherence, retention signals. Coming in Phase 2.</div>
-  </div>
-);
-
-const PracticePlaceholder: React.FC = () => (
-  <div style={{padding:'56px 20px', textAlign:'center', background:'#FFFFFF', borderRadius:'16px', border:`0.5px solid ${BORDER}`}}>
-    <div style={{fontSize:'40px', marginBottom:'10px', opacity:0.6}}>◇</div>
-    <div style={{fontSize:'18px', fontWeight:800, color: INK, marginBottom:'6px'}}>Practice</div>
-    <div style={{fontSize:'13px', color: INK_SOFT, maxWidth:'460px', margin:'0 auto', lineHeight:1.6}}>Practice-wide reporting: billing, habits tracking, retention cohorts. Launches alongside Insights in Phase 2.</div>
   </div>
 );
 

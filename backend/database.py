@@ -309,6 +309,27 @@ class UserStyleProfile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+class ConciergeEnergyLog(Base):
+    __tablename__ = "concierge_energy_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True, nullable=False)
+    log_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD MST
+    energy_score = Column(Integer, nullable=False)         # 1=Struggling … 5=Thriving
+    note = Column(String, default="")
+    session_id = Column(Integer, nullable=True, index=True)  # FK → concierge_meditations.id when entry was logged after a meditation
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class ConciergeJournalEntry(Base):
+    __tablename__ = "concierge_journal_entries"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True, nullable=False)
+    meditation_id = Column(Integer, nullable=True, index=True)
+    entry_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD MST
+    mood_shift = Column(String, nullable=True)   # Q1: much_better | a_little_better | same | processing
+    reflection = Column(String, default="")      # Q2
+    intention = Column(String, default="")       # Q3
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:

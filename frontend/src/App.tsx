@@ -79,6 +79,11 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/privacy')           return 'privacy';
   if (path === '/terms')             return 'terms';
   if (path === '/concierge')         return 'concierge';
+  // Standalone post-meditation journal deep-link. Routed to the concierge
+  // PWA which checks window.location on mount and opens the overlay; the
+  // URL is then rewritten to /concierge?view=patient so back-nav doesn't
+  // re-fire the modal.
+  if (path === '/concierge/journal/new') return 'concierge';
   if (path === '/meditations')       return 'meditations_library';
   if (path === '/concierge-access')  return 'concierge_access';
   if (path === '/patient')           return 'patient_login';

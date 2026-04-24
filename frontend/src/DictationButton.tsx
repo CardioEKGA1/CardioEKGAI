@@ -8,19 +8,35 @@ interface Props {
   // When the browser lacks SpeechRecognition, render a disabled mic button
   // with a "not supported" tooltip instead of rendering nothing.
   fallbackWhenUnsupported?: boolean;
+  // Color theme for the recording state. Defaults to red for parity with
+  // the existing clinical-tools usage. Use 'purple' inside the patient PWA
+  // so the pulse matches the deep-purple aesthetic.
+  accent?: 'red' | 'purple';
 }
 
-// Inject pulse keyframe once per page
+// Inject pulse keyframes once per page — one per accent so each glow matches
+// the surrounding palette. The keyframe id is stable; we register both up
+// front and reference them by name from the inline style.
 if (typeof document !== 'undefined' && !document.getElementById('__soulmd_dictate_pulse')) {
   const s = document.createElement('style');
   s.id = '__soulmd_dictate_pulse';
-  s.textContent = `@keyframes soulmdDictatePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(224,80,80,0.45); } 50% { box-shadow: 0 0 0 8px rgba(224,80,80,0); } }`;
+  s.textContent = `
+    @keyframes soulmdDictatePulse        { 0%,100% { box-shadow: 0 0 0 0 rgba(224,80,80,0.45); } 50% { box-shadow: 0 0 0 8px rgba(224,80,80,0); } }
+    @keyframes soulmdDictatePulsePurple  { 0%,100% { box-shadow: 0 0 0 0 rgba(155,143,232,0.55); } 50% { box-shadow: 0 0 0 10px rgba(155,143,232,0); } }
+  `;
   document.head.appendChild(s);
 }
 
 const supportsSpeech = () => typeof window !== 'undefined' && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
-const DictationButton: React.FC<Props> = ({ onTranscript, size = 32, style, fallbackWhenUnsupported }) => {
+const DictationButton: React.FC<Props> = ({ onTranscript, size = 32, style, fallbackWhenUnsupported, accent = 'red' }) => {
+  const purple = accent === 'purple';
+  const idleBg     = purple ? 'rgba(155,143,232,0.12)' : 'rgba(122,176,240,0.1)';
+  const idleColor  = purple ? '#6b4e7c'                : '#7ab0f0';
+  const recBg      = purple ? 'rgba(155,143,232,0.18)' : 'rgba(224,80,80,0.12)';
+  const recColor   = purple ? '#6b4e7c'                : '#e05050';
+  const pulseAnim  = purple ? 'soulmdDictatePulsePurple 1.4s ease-in-out infinite'
+                            : 'soulmdDictatePulse 1.4s ease-in-out infinite';
   const [supported] = useState<boolean>(supportsSpeech());
   const [recording, setRecording] = useState(false);
   const recRef = useRef<any>(null);
@@ -97,10 +113,10 @@ const DictationButton: React.FC<Props> = ({ onTranscript, size = 32, style, fall
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-        background: recording ? 'rgba(224,80,80,0.12)' : 'rgba(122,176,240,0.1)',
-        color: recording ? '#e05050' : '#7ab0f0',
+        background: recording ? recBg : idleBg,
+        color: recording ? recColor : idleColor,
         transition: 'background 0.2s, color 0.2s',
-        animation: recording ? 'soulmdDictatePulse 1.4s ease-in-out infinite' : 'none',
+        animation: recording ? pulseAnim : 'none',
         padding: 0,
         ...style,
       }}

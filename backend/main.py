@@ -18,6 +18,7 @@ from database import (
     ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
     ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
     ConciergeOraclePull, ConciergeLabRecord, PushSubscription,
+    ConciergeEnergyLog, ConciergeJournalEntry,
     ToolTrialUse,
 )
 import hashlib
@@ -3183,18 +3184,38 @@ def concierge_billing_list(
     _: User = Depends(verify_concierge_owner),
     db: Session = Depends(get_db),
 ):
-    """Aggregate billing view for ALL patients — used by the billing list UI."""
+    """Aggregate billing view for ALL patients — used by the billing list UI.
+    Includes visit allowances + a test_account flag so the owner's own
+    test patient can be excluded from revenue/retention math client-side."""
+    # Source of truth for tier allowances. Mirrors the dict in /concierge/me.
+    allowances = {
+        "awaken": {"visits": 2, "meditations": 1},
+        "align":  {"visits": 3, "meditations": 2},
+        "ascend": {"visits": 5, "meditations": 4},
+    }
     rows = db.query(ConciergePatient).order_by(ConciergePatient.created_at.desc()).all()
-    return {"patients": [{
-        "id": p.id, "name": p.name, "email": p.email,
-        "tier": p.membership_tier,
-        "tier_label": CONCIERGE_TIER_PRICE.get(p.membership_tier, {}).get("label", p.membership_tier),
-        "status": p.subscription_status or ("active" if p.stripe_subscription_id else "none"),
-        "current_period_end": p.current_period_end.isoformat() if p.current_period_end else None,
-        "total_paid_cents": p.total_paid_cents or 0,
-        "has_customer": bool(p.stripe_customer_id),
-        "has_subscription": bool(p.stripe_subscription_id),
-    } for p in rows]}
+    out = []
+    for p in rows:
+        tier = p.membership_tier or "awaken"
+        allow = allowances.get(tier, allowances["awaken"])
+        out.append({
+            "id": p.id, "name": p.name, "email": p.email,
+            "tier": tier,
+            "tier_label": CONCIERGE_TIER_PRICE.get(tier, {}).get("label", tier),
+            "monthly_cents": CONCIERGE_TIER_PRICE.get(tier, {}).get("monthly", {}).get("cents", 0),
+            "status": p.subscription_status or ("active" if p.stripe_subscription_id else "none"),
+            "current_period_end": p.current_period_end.isoformat() if p.current_period_end else None,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "total_paid_cents": p.total_paid_cents or 0,
+            "visits_used": p.visits_used or 0,
+            "visits_allowed": allow["visits"],
+            "meditations_used": p.meditations_used or 0,
+            "meditations_allowed": allow["meditations"],
+            "has_customer": bool(p.stripe_customer_id),
+            "has_subscription": bool(p.stripe_subscription_id),
+            "test_account": bool(getattr(p, "test_account", False)),
+        })
+    return {"patients": out}
 
 @app.get("/concierge/patients/{patient_id}/billing")
 def concierge_billing_detail(
@@ -4707,6 +4728,266 @@ def patient_meditation_detail(
         "script": m.script or "", "audio_url": m.audio_url or "",
         "assigned_at": assign.assigned_at.isoformat() if assign.assigned_at else None,
     }
+
+
+# ─── Patient Energy Log + Post-meditation Journal ────────────────────────
+# Patient self-tracks energy (1-5) once per day and writes a 3-question
+# reflection after each prescribed meditation. Both surfaces feed the
+# physician dashboard so Dr. Anderson can spot mood patterns before visits.
+# Energy logs are upsert-by-day (last write of the day wins). Journal
+# entries are append-only (a patient can journal multiple meditations
+# the same day).
+
+ENERGY_MOOD_LABELS = {1: "Struggling", 2: "Low", 3: "Okay", 4: "Good", 5: "Thriving"}
+JOURNAL_MOOD_SHIFTS = {"much_better", "a_little_better", "same", "processing"}
+
+
+class EnergyLogRequest(BaseModel):
+    energy_score: int
+    note: str | None = None
+    session_id: int | None = None  # link entry to a meditation when logged after the player
+    log_date: str | None = None    # YYYY-MM-DD, defaults to today MST
+
+
+class JournalEntryRequest(BaseModel):
+    meditation_id: int | None = None
+    mood_shift: str | None = None
+    reflection: str | None = None
+    intention: str | None = None
+
+
+def _serialize_energy(e: ConciergeEnergyLog) -> dict:
+    return {
+        "id": e.id,
+        "date": e.log_date,
+        "energy_score": e.energy_score,
+        "mood_label": ENERGY_MOOD_LABELS.get(e.energy_score, ""),
+        "note": e.note or "",
+        "session_id": e.session_id,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+    }
+
+
+def _serialize_journal(j: ConciergeJournalEntry, med_title: str | None = None) -> dict:
+    return {
+        "id": j.id,
+        "date": j.entry_date,
+        "meditation_id": j.meditation_id,
+        "meditation_title": med_title or "",
+        "mood_shift": j.mood_shift or "",
+        "reflection": j.reflection or "",
+        "intention": j.intention or "",
+        "created_at": j.created_at.isoformat() if j.created_at else None,
+    }
+
+
+def _hydrate_meditation_titles(rows: list[ConciergeJournalEntry], db: Session) -> dict[int, str]:
+    mids = [r.meditation_id for r in rows if r.meditation_id]
+    if not mids:
+        return {}
+    return {m.id: m.title for m in db.query(ConciergeMeditation).filter(ConciergeMeditation.id.in_(mids)).all()}
+
+
+@app.post("/concierge/me/energy")
+def patient_energy_log_create(
+    data: EnergyLogRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    score = int(data.energy_score)
+    if score < 1 or score > 5:
+        raise HTTPException(status_code=400, detail="energy_score must be 1–5")
+    log_date = (data.log_date or "").strip() or _today_mst()
+    note = (data.note or "").strip()
+    # Upsert per (patient_id, log_date) so re-saving today's check-in updates
+    # the existing row instead of stacking duplicates.
+    existing = db.query(ConciergeEnergyLog).filter(
+        ConciergeEnergyLog.patient_id == p.id,
+        ConciergeEnergyLog.log_date == log_date,
+    ).first()
+    if existing:
+        existing.energy_score = score
+        existing.note = note
+        if data.session_id:
+            existing.session_id = data.session_id
+        existing.created_at = datetime.utcnow()
+        e = existing
+    else:
+        e = ConciergeEnergyLog(
+            patient_id=p.id, log_date=log_date, energy_score=score,
+            note=note, session_id=data.session_id,
+        )
+        db.add(e)
+    db.commit(); db.refresh(e)
+    # Flag struggling/low days to the physician (1–2). Skip pings for the
+    # owner's own test patient row so they can poke the form without paging
+    # themselves.
+    if score <= 2 and not bool(getattr(p, "test_account", False)):
+        owner = db.query(User).filter(User.email.ilike(CONCIERGE_OWNER_EMAIL)).first()
+        if owner:
+            send_push_to_user(
+                owner.id,
+                f"{p.name} flagged a low day",
+                f"Energy {score}/5 ({ENERGY_MOOD_LABELS.get(score,'')}). Tap to view.",
+                url="/concierge", db=db,
+            )
+    return _serialize_energy(e)
+
+
+@app.get("/concierge/me/energy")
+def patient_energy_log_list(
+    days: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    days = max(1, min(int(days or 30), 180))
+    rows = db.query(ConciergeEnergyLog).filter(
+        ConciergeEnergyLog.patient_id == p.id,
+    ).order_by(ConciergeEnergyLog.log_date.desc()).limit(days).all()
+    journal_rows = db.query(ConciergeJournalEntry).filter(
+        ConciergeJournalEntry.patient_id == p.id,
+    ).order_by(ConciergeJournalEntry.created_at.desc()).limit(days).all()
+    titles = _hydrate_meditation_titles(journal_rows, db)
+    return {
+        "entries":  [_serialize_energy(e) for e in rows],
+        "reflections": [_serialize_journal(j, titles.get(j.meditation_id or 0)) for j in journal_rows],
+    }
+
+
+@app.get("/concierge/me/energy/insight")
+def patient_energy_insight(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """One-paragraph pattern observation across the patient's last 30 entries.
+    Falls back to a deterministic stats summary if Claude is unavailable so
+    the panel never renders empty."""
+    p = _current_patient_for(current_user, db)
+    rows = db.query(ConciergeEnergyLog).filter(
+        ConciergeEnergyLog.patient_id == p.id,
+    ).order_by(ConciergeEnergyLog.log_date.desc()).limit(30).all()
+    if len(rows) < 3:
+        return {"insight": "Log a few more days and patterns will start to emerge here."}
+    # Build a compact, anonymized data brief — no name, no medical history.
+    items = [{
+        "date": r.log_date,
+        "score": r.energy_score,
+        "after_meditation": bool(r.session_id),
+        "note": (r.note or "")[:140],
+    } for r in rows]
+    fallback = _energy_insight_fallback(items)
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return {"insight": fallback}
+    try:
+        system_prompt = (
+            "You are a gentle, observant integrative-medicine assistant. The user is a patient "
+            "tracking daily energy 1-5 (1=Struggling, 2=Low, 3=Okay, 4=Good, 5=Thriving). "
+            "Given their last 30 entries, write ONE short paragraph (≤2 sentences) noting a single "
+            "pattern that could be useful at their next visit. Mention day-of-week trends or the "
+            "effect of meditation days when the data supports it. Do not diagnose, do not give "
+            "medical advice, do not use emojis. Address the patient directly using 'your'."
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system=system_prompt,
+            messages=[{"role": "user", "content": json.dumps(items)}],
+        )
+        text = (msg.content[0].text or "").strip()
+        return {"insight": text or fallback}
+    except Exception:
+        return {"insight": fallback}
+
+
+def _energy_insight_fallback(items: list[dict]) -> str:
+    """Deterministic pattern summary for when Claude is unavailable."""
+    if not items:
+        return "Log a few more days and patterns will start to emerge here."
+    avg = sum(i["score"] for i in items) / len(items)
+    med_scores = [i["score"] for i in items if i["after_meditation"]]
+    other_scores = [i["score"] for i in items if not i["after_meditation"]]
+    if med_scores and other_scores:
+        diff = (sum(med_scores) / len(med_scores)) - (sum(other_scores) / len(other_scores))
+        if abs(diff) >= 0.4:
+            direction = "improves" if diff > 0 else "dips"
+            return f"Your energy {direction} on meditation days by {abs(diff):.1f} points compared to the rest of the week — worth discussing at your next visit with Dr. Anderson."
+    return f"Your average energy across these {len(items)} entries is {avg:.1f}/5. Keep logging — patterns sharpen with more data."
+
+
+@app.post("/concierge/me/journal")
+def patient_journal_entry_create(
+    data: JournalEntryRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    mood = (data.mood_shift or "").strip().lower() or None
+    if mood and mood not in JOURNAL_MOOD_SHIFTS:
+        raise HTTPException(status_code=400, detail=f"mood_shift must be one of {sorted(JOURNAL_MOOD_SHIFTS)}")
+    reflection = (data.reflection or "").strip()
+    intention  = (data.intention or "").strip()
+    # Allow empty reflections — the patient may have only answered Q1 — but
+    # require at least one of the three to be filled so we don't store blanks.
+    if not (mood or reflection or intention):
+        raise HTTPException(status_code=400, detail="Add at least one reflection field before saving.")
+    j = ConciergeJournalEntry(
+        patient_id=p.id,
+        meditation_id=data.meditation_id,
+        entry_date=_today_mst(),
+        mood_shift=mood,
+        reflection=reflection,
+        intention=intention,
+    )
+    db.add(j); db.commit(); db.refresh(j)
+    return _serialize_journal(j)
+
+
+@app.get("/concierge/me/journal")
+def patient_journal_entries_list(
+    limit: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    p = _current_patient_for(current_user, db)
+    n = max(1, min(int(limit or 30), 100))
+    rows = db.query(ConciergeJournalEntry).filter(
+        ConciergeJournalEntry.patient_id == p.id,
+    ).order_by(ConciergeJournalEntry.created_at.desc()).limit(n).all()
+    titles = _hydrate_meditation_titles(rows, db)
+    return {"entries": [_serialize_journal(j, titles.get(j.meditation_id or 0)) for j in rows]}
+
+
+# Physician dashboard reads — owner-only.
+
+@app.get("/concierge/patients/{patient_id}/energy")
+def physician_patient_energy(
+    patient_id: int,
+    days: int = 30,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    n = max(1, min(int(days or 30), 365))
+    rows = db.query(ConciergeEnergyLog).filter(
+        ConciergeEnergyLog.patient_id == patient_id,
+    ).order_by(ConciergeEnergyLog.log_date.desc()).limit(n).all()
+    return {"entries": [_serialize_energy(e) for e in rows]}
+
+
+@app.get("/concierge/patients/{patient_id}/journal")
+def physician_patient_journal(
+    patient_id: int,
+    limit: int = 50,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    n = max(1, min(int(limit or 50), 200))
+    rows = db.query(ConciergeJournalEntry).filter(
+        ConciergeJournalEntry.patient_id == patient_id,
+    ).order_by(ConciergeJournalEntry.created_at.desc()).limit(n).all()
+    titles = _hydrate_meditation_titles(rows, db)
+    return {"entries": [_serialize_journal(j, titles.get(j.meditation_id or 0)) for j in rows]}
 
 
 # ─── Concierge role resolution + Oracle Card + Lab Vault ──────────────────

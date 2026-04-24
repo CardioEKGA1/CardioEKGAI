@@ -1,5 +1,6 @@
 // © 2026 SoulMD, LLC. All rights reserved.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import PatientWellnessPanel from './PatientWellnessPanel';
 
 interface Props { API: string; token: string; accent: string; }
 
@@ -380,6 +381,14 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Wellness panel — energy log trend + post-meditation reflections.
+          Lives below the intake row so the doctor sees objective patient
+          state (mood pattern, journal notes) without scrolling past the
+          intake form she relies on at the start of each visit. */}
+      <div style={{marginTop:'14px'}}>
+        <PatientWellnessPanel API={API} token={token} patientId={p.id} accent={accent}/>
       </div>
 
       {deleteConfirm && (

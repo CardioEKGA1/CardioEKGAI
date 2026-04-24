@@ -9,6 +9,7 @@ import EnergyLog from './EnergyLog';
 import MeditationPlayer from './MeditationPlayer';
 import CoachingModuleReader from './CoachingModuleReader';
 import OracleDailyCard from './OracleDailyCard';
+import PostMeditationJournal from './PostMeditationJournal';
 
 interface Props { API: string; token: string; onBack: () => void; isSuperuser?: boolean; }
 
@@ -74,6 +75,10 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
   const [myModules, setMyModules] = useState<PatientCoachingModule[]>([]);
   const [openMeditationId, setOpenMeditationId] = useState<number | null>(null);
   const [openModuleId, setOpenModuleId] = useState<number | null>(null);
+  // Post-meditation journal: opens after the patient taps Complete in the
+  // player (or directly via the Energy Log "Add reflection" button, or via
+  // the standalone /concierge/journal/new route below).
+  const [journalFor, setJournalFor] = useState<{id: number | null; title: string} | null>(null);
 
   const loadToday = useCallback(() => {
     fetch(`${API}/concierge/oracle/today`, { headers: { Authorization: `Bearer ${token}` } })
@@ -98,6 +103,19 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
   // Inject oracle animation keyframes upfront so the Home-tab CTA glow
   // works even before the oracle overlay is opened.
   useEffect(() => { ensureOracleKeyframes(); }, []);
+
+  // Standalone deep-link: hitting /concierge/journal/new opens the journal
+  // overlay directly. Used by share targets, quick-action shortcuts, and
+  // anywhere outside the player. Cleans the URL after consuming so the
+  // back button returns to the patient app instead of re-firing the modal.
+  useEffect(() => {
+    if (window.location.pathname === '/concierge/journal/new') {
+      setJournalFor({ id: null, title: '' });
+      try {
+        window.history.replaceState({}, '', '/concierge?view=patient');
+      } catch {}
+    }
+  }, []);
 
   // Fetch role + patient info on mount. Role gating already happened upstream
   // in Concierge.tsx, so we can assume role='patient' when we land here.
@@ -180,10 +198,29 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
 
       {/* Prescribed content readers */}
       {openMeditationId && (
-        <MeditationPlayer API={API} token={token} medId={openMeditationId} onClose={() => { setOpenMeditationId(null); loadAssigned(); }}/>
+        <MeditationPlayer
+          API={API} token={token} medId={openMeditationId}
+          onClose={() => { setOpenMeditationId(null); loadAssigned(); }}
+          onComplete={(id, title) => {
+            setOpenMeditationId(null);
+            setJournalFor({ id, title });
+            loadAssigned();
+          }}
+        />
       )}
       {openModuleId && (
         <CoachingModuleReader API={API} token={token} moduleId={openModuleId} onClose={() => { setOpenModuleId(null); loadAssigned(); }}/>
+      )}
+
+      {/* Post-meditation journal overlay — fires after Complete, from the
+          Energy Log "Add reflection" CTA, or from /concierge/journal/new. */}
+      {journalFor && (
+        <PostMeditationJournal
+          API={API} token={token}
+          meditationId={journalFor.id}
+          meditationTitle={journalFor.title}
+          onClose={() => setJournalFor(null)}
+        />
       )}
     </div>
   );
