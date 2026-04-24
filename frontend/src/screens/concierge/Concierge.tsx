@@ -116,22 +116,6 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
     ['Lab result review + async message', '$75'],
   ];
 
-  const requestMembership = () => {
-    const subject = encodeURIComponent('Interested in SoulMD Concierge membership');
-    const body = encodeURIComponent(
-      `Hi Dr. Anderson,\n\n` +
-      `I'm interested in joining SoulMD Concierge. A bit about me:\n\n` +
-      `Name: \n` +
-      `Age: \n` +
-      `What drew me to this practice: \n` +
-      `What I'd most like support around: \n` +
-      `Preferred tier (Awaken / Align / Ascend): \n\n` +
-      `My email on file: ${email}\n\n` +
-      `Thank you — I look forward to hearing from you.`
-    );
-    window.location.href = `mailto:anderson@soulmd.us?subject=${subject}&body=${body}`;
-  };
-
   return (
     <div style={{minHeight:'100vh', background:'linear-gradient(135deg,#E0F4FA 0%,#F6BFD3 100%)', fontFamily:'system-ui,-apple-system,BlinkMacSystemFont,sans-serif', paddingBottom:'40px', position:'relative'}}>
       {/* Cho Ku Rei watermark layer */}
@@ -202,20 +186,18 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
           </div>
         </div>
 
-        {/* CTA block */}
-        <div style={{background:'linear-gradient(135deg, rgba(42,191,191,0.12), rgba(232,144,176,0.12))', border:'1px solid rgba(42,191,191,0.25)', borderRadius:'20px', padding:'22px 20px', textAlign:'center', marginBottom:'14px'}}>
-          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'20px', fontWeight:600, color:INK, marginBottom:'6px'}}>
-            Requests are reviewed personally by Dr. Anderson.
+        {/* Invitation-only block */}
+        <div style={{background:'linear-gradient(135deg, rgba(245,241,255,0.75), rgba(246,191,211,0.18))', border:'1px solid rgba(107,78,124,0.18)', borderRadius:'20px', padding:'26px 22px', textAlign:'center', marginBottom:'14px', backdropFilter:'blur(10px)'}}>
+          <div style={{display:'inline-block', fontSize:'10px', letterSpacing:'3px', textTransform:'uppercase', color:DEEPP, fontWeight:800, padding:'6px 14px', border:`1px solid ${DEEPP}33`, borderRadius:'999px', background:'rgba(255,255,255,0.6)', marginBottom:'16px'}}>
+            By Invitation Only
           </div>
-          <div style={{fontSize:'12px', color:DEEPP, opacity:0.85, marginBottom:'16px', lineHeight:1.6}}>
-            Tap below to send your intake. We're taking a small cohort during beta; you'll hear back within 2 business days with next steps and tier guidance.
+          <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'19px', fontWeight:500, color:INK, lineHeight:1.55, maxWidth:'500px', margin:'0 auto'}}>
+            This practice accepts new members by invitation only. If you received an invitation, contact{' '}
+            <a href="mailto:anderson@soulmd.us?subject=Concierge%20invitation" style={{color:TEAL, textDecoration:'none', fontWeight:700, fontStyle:'italic'}}>anderson@soulmd.us</a>
+            {' '}to begin your journey.
           </div>
-          <button onClick={requestMembership}
-            style={{background:'linear-gradient(135deg,#2ABFBF,#6b4e7c)', color:'white', border:'none', borderRadius:'14px', padding:'14px 32px', fontSize:'14px', fontWeight:800, cursor:'pointer', boxShadow:'0 10px 24px rgba(42,191,191,0.35)', fontFamily:'inherit'}}>
-            Request membership →
-          </button>
-          <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'14px'}}>
-            Signed in as <b style={{color:INK}}>{email}</b> · <a href="mailto:anderson@soulmd.us?subject=Concierge%20question" style={{color:TEAL, textDecoration:'none', fontWeight:700}}>Ask a question</a>
+          <div style={{fontSize:'11px', color:DEEPP, opacity:0.6, marginTop:'18px', letterSpacing:'0.3px'}}>
+            Signed in as <b style={{color:INK, opacity:0.85}}>{email}</b>
           </div>
         </div>
 
