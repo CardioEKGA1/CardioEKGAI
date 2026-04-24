@@ -67,14 +67,30 @@ const PalliativeMDTool: React.FC<Props> = ({ API, token, onBack }) => {
 
   const updateField = (k: string, v: string) => setTemplate(t => ({ ...t, [k]: v }));
 
+  // Either input surface is sufficient: the free-text box alone, the
+  // structured fields alone, or both together. Collect the non-empty
+  // structured fields first so we can also use them as a fallback "text"
+  // when the user only filled the template.
+  const filledFields = TEMPLATE_FIELDS
+    .map(f => ({ f, v: (template[f.key] || '').trim() }))
+    .filter(x => x.v);
+  const hasText     = text.trim().length > 0;
+  const hasFields   = filledFields.length > 0;
+  const canAnalyze  = hasText || hasFields;
+
   const analyze = async () => {
-    if (!text.trim()) { setError('Describe the case first (type or dictate).'); return; }
-    setLoading(true); setError(''); setResult(null);
-    const body: any = { conversation_type: convType, text };
-    for (const f of TEMPLATE_FIELDS) {
-      const v = (template[f.key] || '').trim();
-      if (v) body[f.key] = v;
+    if (!canAnalyze) {
+      setError('Describe the case in the text box OR fill at least one structured field.');
+      return;
     }
+    setLoading(true); setError(''); setResult(null);
+    // If the user only filled fields, synthesize a compact text description
+    // from them so the backend prompt still gets a narrative to anchor on.
+    const synthesizedText = hasText
+      ? text
+      : filledFields.map(({ f, v }) => `${f.label}: ${v}`).join('. ') + '.';
+    const body: any = { conversation_type: convType, text: synthesizedText };
+    for (const { f, v } of filledFields) body[f.key] = v;
     try {
       const res = await fetch(`${API}/tools/palliativemd/analyze`, {
         method: 'POST',
@@ -103,7 +119,7 @@ const PalliativeMDTool: React.FC<Props> = ({ API, token, onBack }) => {
           <textarea
             value={text}
             onChange={e=>setText(e.target.value)}
-            placeholder="e.g. 78 y/o with metastatic pancreatic ca, hospice discussed but family wants 'everything done'. Patient has capacity, says she's tired. Need to align family on patient's wishes tomorrow morning."
+            placeholder="Describe the patient situation (optional if using fields below) — e.g. 78 y/o with metastatic pancreatic ca, hospice discussed but family wants 'everything done'. Patient has capacity, says she's tired."
             style={{...INPUT, minHeight:'160px', resize:'vertical', lineHeight:'1.6', flex:1}}
           />
           <DictationButton onTranscript={t => setText(prev => (prev ? prev.trimEnd() + ' ' : '') + t)}/>
@@ -139,7 +155,7 @@ const PalliativeMDTool: React.FC<Props> = ({ API, token, onBack }) => {
           </>
         )}
 
-        <button onClick={analyze} disabled={loading || !text.trim()} style={{...BTN_PRIMARY, width:'100%', marginTop:'14px', opacity: (loading || !text.trim()) ? 0.6 : 1}}>
+        <button onClick={analyze} disabled={loading || !canAnalyze} style={{...BTN_PRIMARY, width:'100%', marginTop:'14px', opacity: (loading || !canAnalyze) ? 0.6 : 1}}>
           {loading ? 'Generating guidance…' : 'Get conversation guidance'}
         </button>
       </div>

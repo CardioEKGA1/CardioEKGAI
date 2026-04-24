@@ -284,7 +284,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
 
       {/* Hint */}
       <div style={{marginTop:'14px', textAlign:'center', minHeight:'22px', color: INK_SOFT, fontSize:'12.5px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.4px', position:'relative', zIndex:2}}>
-        {phase === 'deck' && !lockedToday && (loading ? 'Drawing your card…' : `${flower.name} · Tap the card that calls to you`)}
+        {phase === 'deck' && !lockedToday && (loading ? 'Drawing your card…' : 'Tap the card that calls to you')}
         {phase === 'deck' &&  lockedToday && 'Your message for today is above — tap to reopen'}
         {phase === 'picking' && 'The Universe is listening…'}
       </div>
@@ -406,22 +406,12 @@ const CardBack: React.FC<{flower: FlowerCell}> = ({ flower }) => (
       borderRadius:'6px',
       pointerEvents:'none',
     }}/>
-    {/* Flower sprite fills top 82% */}
+    {/* Flower sprite fills the card back — no text label beneath */}
     <div style={{
-      height:'82%',
-      margin:'8px 8px 0',
+      position:'absolute', inset:'8px',
       borderRadius:'6px',
       ...spriteBgPosition(flower),
     }}/>
-    {/* Flower name — fixed 36px height, 12px label */}
-    <div style={{
-      height:'36px', flexShrink:0,
-      display:'flex', alignItems:'center', justifyContent:'center',
-      fontSize:'12px', letterSpacing:'2.5px', textTransform:'uppercase',
-      color: GOLD, fontWeight:700, fontFamily: SERIF,
-    }}>
-      {flower.name}
-    </div>
     {/* Corner sparkles */}
     <span style={{position:'absolute', top:'6px',    left:'8px',  fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
     <span style={{position:'absolute', top:'6px',    right:'8px', fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
