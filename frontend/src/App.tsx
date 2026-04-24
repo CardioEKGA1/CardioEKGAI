@@ -27,6 +27,7 @@ import Concierge from './screens/concierge/Concierge';
 import PatientLogin from './screens/PatientLogin';
 import PatientTerms from './screens/PatientTerms';
 import PatientIntake from './screens/PatientIntake';
+import ConciergeMedicineLanding from './screens/ConciergeMedicineLanding';
 import TrialSignupModal from './TrialSignupModal';
 
 export interface EkgResult {
@@ -58,6 +59,7 @@ type Screen =
   | 'concierge'
   | 'meditations_library' | 'concierge_access'
   | 'patient_login' | 'patient_terms' | 'patient_intake'
+  | 'concierge_medicine'
   | 'dev_login';
 
 const API = 'https://ekgscan.com';
@@ -82,6 +84,7 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/patient')           return 'patient_login';
   if (path === '/patient/terms')     return 'patient_terms';
   if (path === '/patient/intake')    return 'patient_intake';
+  if (path === '/concierge-medicine') return 'concierge_medicine';
   if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -111,6 +114,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'patient_login')       return '/patient';
   if (s === 'patient_terms')       return '/patient/terms';
   if (s === 'patient_intake')      return '/patient/intake';
+  if (s === 'concierge_medicine')  return '/concierge-medicine';
   if (s === 'dev_login')           return '/dev-login';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
@@ -312,6 +316,7 @@ const App: React.FC = () => {
       patient_login:       'SoulMD Concierge · Sign in',
       patient_terms:       'Before We Begin · SoulMD Concierge',
       patient_intake:      'Tell Us About You · SoulMD Concierge',
+      concierge_medicine:  'Concierge Medicine · SoulMD',
       dev_login:           `Dev Login · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
@@ -337,13 +342,17 @@ const App: React.FC = () => {
     }
   }, [screen, user, token, navigate]);
 
-  // /patient — onboarding gate. When the user has a session on /patient,
-  // ask the backend where they are in onboarding and route accordingly:
-  //   terms not accepted  → /patient/terms
-  //   terms but no intake → /patient/intake
-  //   both done           → /concierge?view=patient
-  // The effect only runs on patient_login itself; /patient/terms and
-  // /patient/intake route themselves directly to avoid a refetch per step.
+  // /patient — post-login routing gate. Concierge is invitation-only, so
+  // only users who already have a concierge_patients row (or are
+  // superusers) can enter the patient PWA. Everyone else is a regular
+  // SoulMD user who happened to sign in here → send them to the clinical
+  // dashboard instead.
+  //
+  //   not enrolled           → /dashboard
+  //   superuser              → /concierge?view=patient (skip onboarding)
+  //   enrolled, no terms     → /patient/terms
+  //   enrolled, no intake    → /patient/intake
+  //   enrolled, fully done   → /concierge?view=patient
   useEffect(() => {
     if (screen !== 'patient_login' || !user || !token) return;
     let cancelled = false;
@@ -353,6 +362,8 @@ const App: React.FC = () => {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (cancelled || !data) return;
+        if (!data.enrolled)              { navigate('dashboard'); return; }
+        if (data.is_superuser)           { window.location.href = '/concierge?view=patient'; return; }
         if (!data.terms_accepted)        navigate('patient_terms');
         else if (!data.intake_completed) navigate('patient_intake');
         else                             window.location.href = '/concierge?view=patient';
@@ -368,6 +379,17 @@ const App: React.FC = () => {
       navigate('patient_login');
     }
   }, [screen, token, navigate]);
+
+  // /concierge-medicine — superuser-only while we iterate. Signed-out
+  // visitors are bounced to sign in; signed-in non-superusers to the
+  // clinical dashboard. The page is production-quality so we can flip
+  // the gate off to go public later without touching design.
+  useEffect(() => {
+    if (screen !== 'concierge_medicine') return;
+    if (!token) { navigate('auth'); return; }
+    if (!user) return; // wait for auth bootstrap to resolve
+    if (!user.is_superuser) navigate('dashboard');
+  }, [screen, user, token, navigate]);
 
   if (isAdminRoute) {
     return (
@@ -398,7 +420,8 @@ const App: React.FC = () => {
         if (map[slug]) navigate(map[slug]);
       }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}
         onNavigateMeditations={()=>navigate('meditations_library')}
-        onNavigateConciergeAccess={()=>navigate('concierge_access')}/>}
+        onNavigateConciergeAccess={()=>navigate('concierge_access')}
+        onNavigateConciergeMedicine={()=>navigate('concierge_medicine')}/>}
       {/* Tool screens are accessible WITHOUT auth — the 8 trial tools run
           one free call per browser via the server-side trial gate. labread
           and cliniscore still allow 5/day for everyone. Tools themselves
@@ -463,6 +486,9 @@ const App: React.FC = () => {
           onComplete={() => { window.location.href = '/concierge?view=patient'; }}
           onSignInRequired={() => navigate('patient_login')}
         />
+      )}
+      {screen==='concierge_medicine' && user && user.is_superuser && (
+        <ConciergeMedicineLanding onBack={() => navigate(isSoulMD ? 'dashboard' : 'landing')}/>
       )}
       {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
