@@ -328,13 +328,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
     <div style={{padding:'20px 16px', maxWidth:'1200px', margin:'0 auto'}}>
 
       <nav style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'20px', flexWrap:'wrap', gap:'12px'}}>
-        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-          <SoulMDLogo size={40}/>
-          <div>
-            <div style={{fontSize:'20px', fontWeight:'800', lineHeight:'1.1'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
-            <div style={{fontSize:'9px', color:'#8aa0c0', letterSpacing:'4px'}}>AI CLINICAL SUITE</div>
-          </div>
-        </div>
+        <SoulMDLogo size={32}/>
         <div style={{display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap'}}>
           <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', fontSize:'11px', color:'#6a8ab0', gap:'3px'}}>
             <span style={{fontWeight:'600', color:'#1a2a4a', fontSize:'12px', maxWidth:'220px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{user.email}</span>

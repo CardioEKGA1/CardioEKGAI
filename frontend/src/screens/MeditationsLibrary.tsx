@@ -135,7 +135,7 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
       <header style={{padding:'16px clamp(14px,3vw,28px)', display:'flex', alignItems:'center', gap:'12px', borderBottom:`0.5px solid ${BORDER}`, background:'rgba(255,255,255,0.75)', backdropFilter:'blur(10px)'}}>
         <button onClick={onBack} title="Back"
           style={{background:'transparent', border:`0.5px solid ${BORDER}`, borderRadius:'10px', padding:'7px 10px', fontSize:'13px', color: INK_SOFT, cursor:'pointer'}}>←</button>
-        <SoulMDLogo size={30}/>
+        <SoulMDLogo size={28} showText={false}/>
         <div style={{flex:1}}>
           <div style={{fontSize:'16px', fontWeight:800, color: INK}}>Meditations Library</div>
           <div style={{fontSize:'11px', color: INK_SOFT}}>{meds.length.toLocaleString()} scripts across {Object.keys(categoryCounts).length} categories</div>

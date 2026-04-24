@@ -121,13 +121,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
             height:'100vh', zIndex:50, flexShrink:0,
           }}>
           <div style={{padding:'22px 22px 12px'}}>
-            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-              <SoulMDLogo size={34}/>
-              <div>
-                <div style={{fontSize:'15px', fontWeight:800, letterSpacing:'-0.2px', color: INK}}>SoulMD</div>
-                <div style={{fontSize:'10px', color: INK_SOFT, letterSpacing:'1.6px', textTransform:'uppercase', marginTop:'1px'}}>Concierge Medicine</div>
-              </div>
-            </div>
+            <SoulMDLogo size={36} subtitle="CONCIERGE MEDICINE"/>
           </div>
 
           <nav style={{padding:'6px 10px', flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:'2px'}}>
@@ -230,7 +224,7 @@ const TopBar: React.FC<{greeting:string; date:Date; sectionLabel:string; onBack:
   return (
     <header style={{padding:`${isMobile ? '12px' : '16px'} clamp(14px,3vw,28px)`, display:'flex', alignItems:'center', gap: isMobile ? '10px' : '14px', borderBottom:`0.5px solid ${BORDER}`, background:'rgba(255,255,255,0.85)', backdropFilter:'blur(12px)', position:'sticky', top:0, zIndex:30}}>
       {isMobile ? (
-        <SoulMDLogo size={28}/>
+        <SoulMDLogo size={28} showText={false}/>
       ) : (
         <button onClick={onBack} title="Back to SoulMD"
           style={{background:'transparent', border:`0.5px solid ${BORDER}`, borderRadius:'10px', padding:'8px 10px', fontSize:'13px', color: INK_SOFT, cursor:'pointer', flexShrink:0}}>←</button>

@@ -17,11 +17,7 @@ export const ToolShell: React.FC<ShellProps> = ({ name, subtitle, badge, icon, o
   <div style={{padding:'20px 16px', maxWidth:'880px', margin:'0 auto'}}>
     <nav style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px', flexWrap:'wrap'}}>
       <button onClick={onBack} style={{background:'rgba(255,255,255,0.7)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'8px 12px', fontSize:'12px', fontWeight:'600', color:'#4a7ad0', cursor:'pointer'}}>← Back</button>
-      <SoulMDLogo size={32}/>
-      <div>
-        <div style={{fontSize:'14px', fontWeight:'800', lineHeight:'1.1'}}><span style={{color:'#1a2a4a'}}>Soul</span><span style={{color:'#7ab0f0'}}>MD</span></div>
-        <div style={{fontSize:'8px', color:'#8aa0c0', letterSpacing:'3px'}}>AI CLINICAL SUITE</div>
-      </div>
+      <SoulMDLogo size={28}/>
       <div style={{fontSize:'12px', color:'#c0d4f0', marginLeft:'4px'}}>/</div>
       {icon && <span style={{display:'inline-flex', alignItems:'center'}}>{icon}</span>}
       <div style={{fontSize:'14px', color:'#1a2a4a', fontWeight:'800'}}>{name}</div>
