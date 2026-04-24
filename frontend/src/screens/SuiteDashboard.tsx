@@ -50,7 +50,7 @@ const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','
 // Tools the superuser sees but regular users don't (admin-scoped content).
 // concierge is intentionally NOT here — everyone should be able to discover
 // the concierge practice from the tool grid.
-const SUPERUSER_ONLY_TOOLS = new Set(['meditations']);
+const SUPERUSER_ONLY_TOOLS = new Set(['meditations', 'concierge']);
 
 // The 8 tools with the 1-use-free-trial model. labread + cliniscore are
 // already 5/day free for everyone so they stay out of the trial system.
