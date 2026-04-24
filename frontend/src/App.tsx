@@ -25,6 +25,8 @@ import LabReadTool from './screens/tools/LabReadTool';
 import CliniScoreTool from './screens/tools/CliniScoreTool';
 import Concierge from './screens/concierge/Concierge';
 import PatientLogin from './screens/PatientLogin';
+import PatientTerms from './screens/PatientTerms';
+import PatientIntake from './screens/PatientIntake';
 import TrialSignupModal from './TrialSignupModal';
 
 export interface EkgResult {
@@ -55,7 +57,7 @@ type Screen =
   | 'tool_labread' | 'tool_cliniscore'
   | 'concierge'
   | 'meditations_library' | 'concierge_access'
-  | 'patient_login'
+  | 'patient_login' | 'patient_terms' | 'patient_intake'
   | 'dev_login';
 
 const API = 'https://ekgscan.com';
@@ -78,6 +80,8 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/meditations')       return 'meditations_library';
   if (path === '/concierge-access')  return 'concierge_access';
   if (path === '/patient')           return 'patient_login';
+  if (path === '/patient/terms')     return 'patient_terms';
+  if (path === '/patient/intake')    return 'patient_intake';
   if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -105,6 +109,8 @@ const screenToPath = (s: Screen): string => {
   if (s === 'meditations_library') return '/meditations';
   if (s === 'concierge_access')    return '/concierge-access';
   if (s === 'patient_login')       return '/patient';
+  if (s === 'patient_terms')       return '/patient/terms';
+  if (s === 'patient_intake')      return '/patient/intake';
   if (s === 'dev_login')           return '/dev-login';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
@@ -304,6 +310,8 @@ const App: React.FC = () => {
       meditations_library: `Meditations Library · ${brand}`,
       concierge_access:    `Concierge Portal · ${brand}`,
       patient_login:       'SoulMD Concierge · Sign in',
+      patient_terms:       'Before We Begin · SoulMD Concierge',
+      patient_intake:      'Tell Us About You · SoulMD Concierge',
       dev_login:           `Dev Login · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
@@ -329,15 +337,37 @@ const App: React.FC = () => {
     }
   }, [screen, user, token, navigate]);
 
-  // /patient — if the user already has a session, send them straight to the
-  // patient PWA. We wait until the /auth/me bootstrap has resolved a real
-  // `user` before redirecting so a stale token doesn't bounce a not-yet-
-  // authenticated visitor away from the sign-in form.
+  // /patient — onboarding gate. When the user has a session on /patient,
+  // ask the backend where they are in onboarding and route accordingly:
+  //   terms not accepted  → /patient/terms
+  //   terms but no intake → /patient/intake
+  //   both done           → /concierge?view=patient
+  // The effect only runs on patient_login itself; /patient/terms and
+  // /patient/intake route themselves directly to avoid a refetch per step.
   useEffect(() => {
-    if (screen === 'patient_login' && user) {
-      window.location.href = '/concierge?view=patient';
+    if (screen !== 'patient_login' || !user || !token) return;
+    let cancelled = false;
+    fetch(`${API}/concierge/patient/onboarding-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        if (!data.terms_accepted)        navigate('patient_terms');
+        else if (!data.intake_completed) navigate('patient_intake');
+        else                             window.location.href = '/concierge?view=patient';
+      })
+      .catch(() => { /* network blip — leave them on the page; they can retry */ });
+    return () => { cancelled = true; };
+  }, [screen, user, token, navigate]);
+
+  // /patient/terms and /patient/intake both require an authed session. If
+  // someone lands on them without a token, kick back to the sign-in page.
+  useEffect(() => {
+    if ((screen === 'patient_terms' || screen === 'patient_intake') && !token) {
+      navigate('patient_login');
     }
-  }, [screen, user]);
+  }, [screen, token, navigate]);
 
   if (isAdminRoute) {
     return (
@@ -418,6 +448,22 @@ const App: React.FC = () => {
       )}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
       {screen==='patient_login' && !user && <PatientLogin API={API}/>}
+      {screen==='patient_terms' && token && (
+        <PatientTerms
+          API={API}
+          token={token}
+          onComplete={() => navigate('patient_intake')}
+          onSignInRequired={() => navigate('patient_login')}
+        />
+      )}
+      {screen==='patient_intake' && token && (
+        <PatientIntake
+          API={API}
+          token={token}
+          onComplete={() => { window.location.href = '/concierge?view=patient'; }}
+          onSignInRequired={() => navigate('patient_login')}
+        />
+      )}
       {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}

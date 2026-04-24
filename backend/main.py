@@ -2663,9 +2663,12 @@ def _patient_dict(p: ConciergePatient) -> dict:
         "dob": p.dob,
         "phone": p.phone,
         "membership_tier": p.membership_tier,
+        "subscription_status": p.subscription_status or "none",
         "intake_data": p.intake_data or {},
         "doctor_notes": p.doctor_notes or "",
         "last_contact_at": p.last_contact_at.isoformat() if p.last_contact_at else None,
+        "terms_accepted_at": p.terms_accepted_at.isoformat() if getattr(p, "terms_accepted_at", None) else None,
+        "intake_completed_at": p.intake_completed_at.isoformat() if getattr(p, "intake_completed_at", None) else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -4151,6 +4154,147 @@ def _current_patient_for(user: User, db: Session) -> ConciergePatient:
     if not p:
         raise HTTPException(status_code=404, detail="Not found")
     return p
+
+def _get_or_create_patient_row(user: User, db: Session) -> ConciergePatient:
+    """Like _current_patient_for but auto-creates a pending row when the
+    authenticated user hits the /patient onboarding flow for the first time.
+    Owner/superuser accounts get test_account=True (matches the
+    /concierge/me?view=patient provisioning path)."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _lookup_concierge_patient_for_user(user, db)
+    if p:
+        return p
+    default_name = (user.email or "New Patient").split("@")[0].replace(".", " ").replace("_", " ").title()
+    p = ConciergePatient(
+        name=default_name,
+        email=user.email or "",
+        membership_tier="awaken",
+        subscription_status="pending",
+        test_account=_is_concierge_owner(user),
+        user_id=user.id,
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
+
+# ───── Patient onboarding (/patient/terms, /patient/intake) ─────
+
+class PatientIntakeRequest(BaseModel):
+    full_name: str
+    date_of_birth: str | None = None
+    phone: str | None = None
+    reason_for_visit: str | None = None
+    health_goals: str | None = None
+    support_areas: list[str] = []
+    preferred_tier: str | None = None
+    referral_source: str | None = None
+    notes: str | None = None
+
+@app.get("/concierge/patient/onboarding-status")
+def patient_onboarding_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    return {
+        "terms_accepted": p.terms_accepted_at is not None,
+        "intake_completed": p.intake_completed_at is not None,
+    }
+
+@app.post("/concierge/patient/accept-terms")
+def patient_accept_terms(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    if not p.terms_accepted_at:
+        p.terms_accepted_at = datetime.utcnow()
+        p.updated_at = datetime.utcnow()
+        db.commit()
+    return {
+        "ok": True,
+        "terms_accepted_at": p.terms_accepted_at.isoformat() if p.terms_accepted_at else None,
+    }
+
+@app.post("/concierge/patient/intake")
+def patient_submit_intake(
+    data: PatientIntakeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if not (data.full_name or "").strip():
+        raise HTTPException(status_code=400, detail="Full name is required.")
+    p = _get_or_create_patient_row(current_user, db)
+    # Update canonical patient fields from intake. Keep existing values where
+    # the intake is empty — a patient revisiting the form shouldn't blank
+    # out data the owner has already curated.
+    p.name = (data.full_name or "").strip() or p.name
+    if data.date_of_birth:
+        p.dob = data.date_of_birth
+    if (data.phone or "").strip():
+        p.phone = data.phone.strip()
+    intake = dict(p.intake_data or {})
+    intake.update({
+        "reason_for_visit": (data.reason_for_visit or "").strip(),
+        "health_goals": (data.health_goals or "").strip(),
+        "support_areas": data.support_areas or [],
+        "preferred_tier": (data.preferred_tier or "").strip(),
+        "referral_source": (data.referral_source or "").strip(),
+        "notes": (data.notes or "").strip(),
+    })
+    p.intake_data = intake
+    if (data.preferred_tier or "") in ("awaken", "align", "ascend"):
+        p.membership_tier = data.preferred_tier
+    p.intake_completed_at = datetime.utcnow()
+    # Terms may or may not have been explicitly accepted in the UI yet — if
+    # the user reaches intake, they already agreed (the form is gated on it),
+    # so record an implicit acceptance here as a safety net.
+    if not p.terms_accepted_at:
+        p.terms_accepted_at = datetime.utcnow()
+    p.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(p)
+    # Best-effort notification to Dr. Anderson. Failures are logged but
+    # don't block the patient's onboarding.
+    try:
+        summary_rows = [
+            ("Name", p.name),
+            ("Email", p.email),
+            ("Date of birth", p.dob or ""),
+            ("Phone", p.phone or ""),
+            ("What brought them to SoulMD", intake.get("reason_for_visit", "")),
+            ("Main health goals", intake.get("health_goals", "")),
+            ("Support areas", ", ".join(intake.get("support_areas", []) or [])),
+            ("Preferred tier", intake.get("preferred_tier", "") or "(not specified)"),
+            ("How they heard about us", intake.get("referral_source", "")),
+            ("Anything else", intake.get("notes", "")),
+        ]
+        rows_html = "".join(
+            f"<tr><td style='padding:6px 10px;color:#6B6889;font-size:12px;letter-spacing:0.3px;text-transform:uppercase;vertical-align:top;white-space:nowrap'>{label}</td>"
+            f"<td style='padding:6px 10px;color:#1F1B3A;font-size:14px;line-height:1.55'>{(value or '—').replace(chr(10), '<br/>')}</td></tr>"
+            for label, value in summary_rows
+        )
+        html = (
+            "<div style='font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;background:#F5F1FF;padding:24px'>"
+            f"<div style='max-width:560px;margin:0 auto;background:#fff;border-radius:16px;padding:24px;border:1px solid rgba(83,74,183,0.12)'>"
+            f"<div style='font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:#534AB7;font-weight:800'>SoulMD Concierge · New intake</div>"
+            f"<div style='font-size:22px;font-weight:700;color:#1F1B3A;margin:6px 0 18px'>A new patient completed their intake</div>"
+            f"<table style='width:100%;border-collapse:collapse'>{rows_html}</table>"
+            f"<div style='margin-top:18px;font-size:12px;color:#6B6889'>Patient ID: {p.id} &middot; pending your review</div>"
+            f"</div></div>"
+        )
+        send_email(CONCIERGE_OWNER_EMAIL, f"[SoulMD Concierge] New patient intake: {p.name}", html)
+    except Exception as e:
+        print(f"concierge intake notify failed: {type(e).__name__}: {e}")
+    return {"ok": True, "patient_id": p.id}
 
 # ───── Bookings ─────
 
