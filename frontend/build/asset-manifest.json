@@ -1,17 +1,17 @@
 {
   "files": {
     "main.css": "/static/css/main.e3399d3d.css",
-    "main.js": "/static/js/main.d37cd438.js",
+    "main.js": "/static/js/main.f78ad422.js",
     "static/js/453.2604c12d.chunk.js": "/static/js/453.2604c12d.chunk.js",
     "static/media/flowers.png": "/static/media/flowers.f11939480dcb6a77d699.png",
     "static/media/soulmd-logo-clean.svg": "/static/media/soulmd-logo-clean.df7050da64db382e9e50bead685f55d1.svg",
     "index.html": "/index.html",
     "main.e3399d3d.css.map": "/static/css/main.e3399d3d.css.map",
-    "main.d37cd438.js.map": "/static/js/main.d37cd438.js.map",
+    "main.f78ad422.js.map": "/static/js/main.f78ad422.js.map",
     "453.2604c12d.chunk.js.map": "/static/js/453.2604c12d.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.e3399d3d.css",
-    "static/js/main.d37cd438.js"
+    "static/js/main.f78ad422.js"
   ]
 }
