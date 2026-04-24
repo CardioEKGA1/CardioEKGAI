@@ -5,6 +5,9 @@ interface Props {
   onTranscript: (chunk: string) => void;
   size?: number;
   style?: React.CSSProperties;
+  // When the browser lacks SpeechRecognition, render a disabled mic button
+  // with a "not supported" tooltip instead of rendering nothing.
+  fallbackWhenUnsupported?: boolean;
 }
 
 // Inject pulse keyframe once per page
@@ -17,7 +20,7 @@ if (typeof document !== 'undefined' && !document.getElementById('__soulmd_dictat
 
 const supportsSpeech = () => typeof window !== 'undefined' && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
-const DictationButton: React.FC<Props> = ({ onTranscript, size = 32, style }) => {
+const DictationButton: React.FC<Props> = ({ onTranscript, size = 32, style, fallbackWhenUnsupported }) => {
   const [supported] = useState<boolean>(supportsSpeech());
   const [recording, setRecording] = useState(false);
   const recRef = useRef<any>(null);
@@ -52,7 +55,31 @@ const DictationButton: React.FC<Props> = ({ onTranscript, size = 32, style }) =>
     setRecording(false);
   };
 
-  if (!supported) return null;
+  if (!supported) {
+    if (!fallbackWhenUnsupported) return null;
+    return (
+      <button
+        type="button"
+        disabled
+        title="Voice input not supported on this browser"
+        aria-label="Voice input not supported on this browser"
+        style={{
+          width: size, height: size, borderRadius: '50%', border: 'none',
+          cursor: 'not-allowed', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, background: 'rgba(180,180,200,0.12)', color: '#b0b0c0', padding: 0,
+          ...style,
+        }}
+      >
+        <svg width={Math.round(size * 0.55)} height={Math.round(size * 0.55)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="9" y="2" width="6" height="12" rx="3"/>
+          <path d="M5 10v2a7 7 0 0 0 14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="8" y1="22" x2="16" y2="22"/>
+          <line x1="3" y1="3" x2="21" y2="21" stroke="#c04040" strokeWidth="2.2"/>
+        </svg>
+      </button>
+    );
+  }
 
   return (
     <button

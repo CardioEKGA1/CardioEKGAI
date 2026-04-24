@@ -9,8 +9,8 @@ interface Props { API: string; token: string; onBack: () => void; }
 
 const RxCheckTool: React.FC<Props> = ({ API, token, onBack }) => {
   const [rows, setRows] = useState<Medication[]>([
-    { name:'', dose:'', dose_unit:'mg', frequency:'Once daily', route:'Oral' },
-    { name:'', dose:'', dose_unit:'mg', frequency:'Once daily', route:'Oral' },
+    { name:'', dose:'', dose_unit:'mg', frequency:'Once daily', route:'Oral (PO)' },
+    { name:'', dose:'', dose_unit:'mg', frequency:'Once daily', route:'Oral (PO)' },
   ]);
   const [extra, setExtra] = useState('');
   const [loading, setLoading] = useState(false);
