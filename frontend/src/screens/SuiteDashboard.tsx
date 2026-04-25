@@ -6,6 +6,7 @@ import DictationButton from '../DictationButton';
 import ComplianceDisclaimer from '../ComplianceDisclaimer';
 import { User } from '../App';
 import { readTrialsLocal, writeTrialsLocal } from '../trialHelpers';
+import { LockedPreviewCard } from './SoulMDLanding';
 
 interface Props {
   API: string;
@@ -560,6 +561,27 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
               </div>
             );
           })}
+          {/* Locked discovery tiles — only for non-superusers and only when
+              no active search is filtering the grid (they have no slug to
+              match). Superusers see the existing accessible concierge +
+              meditations tiles via SUPERUSER_ONLY_TOOLS, so suppress the
+              previews for them to avoid showing both. */}
+          {!isSuper && !q && (
+            <>
+              <LockedPreviewCard
+                icon="🕯️"
+                name="Guided Meditations"
+                desc="Personalized guided meditations curated by Dr. Anderson"
+                label="By Invitation Only"
+              />
+              <LockedPreviewCard
+                icon="✦"
+                name="Concierge Medicine"
+                desc="Where science meets the soul — Dr. Anderson's integrative practice. Direct access, deeply personal care."
+                label="By Invitation Only"
+              />
+            </>
+          )}
         </div>
       )}
 
