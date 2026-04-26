@@ -90,6 +90,16 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
   const [category, setCategory] = useState<string>('all');
   const [openId, setOpenId] = useState<number | null>(null);
   const [favorites, setFavorites] = useState<Set<number>>(() => loadFavorites());
+  // Inline edit state. editingId === m.id swaps that single card into an
+  // editor — no modal — that spans the full grid row so there's room to
+  // actually rewrite a script. Save PATCHes /concierge/meditations/{id}
+  // and merges the response back into `meds` so the change is visible
+  // without a refetch.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState<string>('');
+  const [editScript, setEditScript] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string>('');
 
   useEffect(() => {
     setLoading(true);
@@ -127,6 +137,43 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
       return next;
     });
   }, []);
+
+  const startEdit = useCallback((m: LibraryMeditation) => {
+    setEditingId(m.id);
+    setEditTitle(m.title || '');
+    setEditScript(m.script || '');
+    setSaveErr('');
+    setOpenId(null); // close the read modal if it's somehow up
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditTitle('');
+    setEditScript('');
+    setSaveErr('');
+  }, []);
+
+  const saveEdit = useCallback(async (id: number) => {
+    if (saving) return;
+    setSaving(true); setSaveErr('');
+    try {
+      const res = await fetch(`${API}/concierge/meditations/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: editTitle.trim(), script: editScript }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || `Save failed (${res.status})`);
+      setMeds(prev => prev.map(x => x.id === id ? { ...x, ...d } : x));
+      setEditingId(null);
+      setEditTitle('');
+      setEditScript('');
+    } catch (e: any) {
+      setSaveErr(e.message || 'Save failed.');
+    } finally {
+      setSaving(false);
+    }
+  }, [API, token, editTitle, editScript, saving]);
 
   const open = filtered.find(m => m.id === openId) || null;
 
@@ -166,23 +213,110 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
               Showing {filtered.length} of {meds.length}{favorites.size > 0 && ` · ${favorites.size} favorited`}
             </div>
             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:'12px'}}>
-              {filtered.slice(0, 300).map(m => (
-                <button key={m.id} onClick={() => setOpenId(m.id)}
-                  style={{textAlign:'left', background:'#FFFFFF', border:`0.5px solid ${BORDER}`, borderRadius:'14px', padding:'14px', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', gap:'6px', position:'relative'}}>
-                  <span onClick={(e) => { e.stopPropagation(); toggleFav(m.id); }}
-                    style={{position:'absolute', top:'10px', right:'12px', fontSize:'18px', color: favorites.has(m.id) ? '#E06A6A' : INK_SOFT, cursor:'pointer'}}>
-                    {favorites.has(m.id) ? '♥' : '♡'}
-                  </span>
-                  <div style={{fontSize:'9px', letterSpacing:'2px', textTransform:'uppercase', color: PURPLE, fontWeight:800}}>
-                    {CATEGORY_LABELS[m.category] || m.category}
-                  </div>
-                  <div style={{fontSize:'14px', fontWeight:700, color: INK, lineHeight:1.3, paddingRight:'24px'}}>{m.title}</div>
-                  {m.duration_min && <div style={{fontSize:'11px', color: INK_SOFT}}>{m.duration_min} min · {m.difficulty || 'All levels'}</div>}
-                  <div style={{fontSize:'12px', color: INK_SOFT, lineHeight:1.5, display:'-webkit-box', WebkitBoxOrient:'vertical', WebkitLineClamp:3, overflow:'hidden'}}>
-                    {m.script || m.description || ''}
-                  </div>
-                </button>
-              ))}
+              {filtered.slice(0, 300).map(m => {
+                if (editingId === m.id) {
+                  // Inline editor — spans the full grid row so there's room
+                  // to actually rewrite a script without a popup overlay.
+                  return (
+                    <div key={m.id} style={{
+                      gridColumn: '1 / -1',
+                      background:'#FFFFFF',
+                      border:`1px solid ${PURPLE}`,
+                      borderRadius:'14px',
+                      padding:'18px',
+                      display:'flex', flexDirection:'column', gap:'12px',
+                      boxShadow:'0 8px 24px rgba(83,74,183,0.14)',
+                    }}>
+                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px'}}>
+                        <div style={{fontSize:'9px', letterSpacing:'2px', textTransform:'uppercase', color: PURPLE, fontWeight:800}}>
+                          Editing · {CATEGORY_LABELS[m.category] || humanizeCategory(m.category)}
+                        </div>
+                        {m.duration_min && (
+                          <div style={{fontSize:'11px', color: INK_SOFT}}>{m.duration_min} min · {m.difficulty || 'All levels'}</div>
+                        )}
+                      </div>
+                      <input
+                        value={editTitle}
+                        onChange={e => setEditTitle(e.target.value)}
+                        placeholder="Title"
+                        style={{
+                          width:'100%',
+                          fontSize:'18px', fontWeight:700, color: INK,
+                          border:'none', borderBottom:`1px solid ${BORDER}`,
+                          padding:'6px 0',
+                          background:'transparent', outline:'none',
+                          fontFamily:'inherit',
+                          boxSizing:'border-box',
+                        }}
+                      />
+                      <textarea
+                        value={editScript}
+                        onChange={e => setEditScript(e.target.value)}
+                        placeholder="Meditation script…"
+                        style={{
+                          width:'100%', minHeight:'360px',
+                          padding:'14px',
+                          borderRadius:'10px',
+                          border:`1px solid ${BORDER}`,
+                          background:'#FAFAFE',
+                          fontSize:'14px', color: INK, lineHeight:1.7,
+                          outline:'none', resize:'vertical',
+                          fontFamily:'inherit',
+                          boxSizing:'border-box',
+                        }}
+                      />
+                      {saveErr && (
+                        <div style={{fontSize:'12px', color:'#a02020', background:'rgba(224,106,106,0.08)', border:'1px solid rgba(224,106,106,0.3)', borderRadius:'8px', padding:'8px 12px'}}>
+                          {saveErr}
+                        </div>
+                      )}
+                      <div style={{display:'flex', gap:'10px', justifyContent:'flex-end'}}>
+                        <button
+                          onClick={cancelEdit}
+                          disabled={saving}
+                          style={{background:'transparent', border:`0.5px solid ${BORDER}`, borderRadius:'10px', padding:'10px 18px', fontSize:'13px', fontWeight:600, color: INK_SOFT, cursor: saving ? 'default' : 'pointer', fontFamily:'inherit'}}>
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => saveEdit(m.id)}
+                          disabled={saving || !editTitle.trim()}
+                          style={{background:'linear-gradient(135deg,#7ab0f0 0%,#9b8fe8 55%,#534AB7 100%)', border:'none', borderRadius:'10px', padding:'10px 22px', fontSize:'13px', fontWeight:700, color:'white', cursor: (saving || !editTitle.trim()) ? 'default' : 'pointer', fontFamily:'inherit', opacity: (saving || !editTitle.trim()) ? 0.6 : 1}}>
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <button key={m.id} onClick={() => setOpenId(m.id)}
+                    style={{textAlign:'left', background:'#FFFFFF', border:`0.5px solid ${BORDER}`, borderRadius:'14px', padding:'14px', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', gap:'6px', position:'relative'}}>
+                    <div style={{position:'absolute', top:'10px', right:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Edit meditation"
+                        title="Edit"
+                        onClick={(e) => { e.stopPropagation(); startEdit(m); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); startEdit(m); } }}
+                        style={{fontSize:'10px', fontWeight:700, letterSpacing:'0.6px', textTransform:'uppercase', color: PURPLE, padding:'4px 10px', borderRadius:'999px', background:'rgba(83,74,183,0.08)', border:`0.5px solid ${BORDER}`, cursor:'pointer'}}>
+                        ✎ Edit
+                      </span>
+                      <span onClick={(e) => { e.stopPropagation(); toggleFav(m.id); }}
+                        style={{fontSize:'18px', color: favorites.has(m.id) ? '#E06A6A' : INK_SOFT, cursor:'pointer', lineHeight:1}}>
+                        {favorites.has(m.id) ? '♥' : '♡'}
+                      </span>
+                    </div>
+                    <div style={{fontSize:'9px', letterSpacing:'2px', textTransform:'uppercase', color: PURPLE, fontWeight:800, paddingRight:'120px'}}>
+                      {CATEGORY_LABELS[m.category] || humanizeCategory(m.category)}
+                    </div>
+                    <div style={{fontSize:'14px', fontWeight:700, color: INK, lineHeight:1.3, paddingRight:'24px'}}>{m.title}</div>
+                    {m.duration_min && <div style={{fontSize:'11px', color: INK_SOFT}}>{m.duration_min} min · {m.difficulty || 'All levels'}</div>}
+                    <div style={{fontSize:'12px', color: INK_SOFT, lineHeight:1.5, display:'-webkit-box', WebkitBoxOrient:'vertical', WebkitLineClamp:3, overflow:'hidden'}}>
+                      {m.script || m.description || ''}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
             {filtered.length > 300 && (
               <div style={{textAlign:'center', color: INK_SOFT, fontSize:'12px', marginTop:'20px'}}>
