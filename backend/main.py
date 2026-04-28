@@ -2782,7 +2782,7 @@ def admin_marketing_generate(
     tone     = (data.tone or "").strip()     or "Professional"
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5",
             max_tokens=4000,
             system=_MARKETING_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": _marketing_user_prompt(tool, audience, goal, tone)}],
