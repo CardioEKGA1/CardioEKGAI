@@ -71,7 +71,7 @@ const ConciergeAccess: React.FC<Props> = ({ API, token, onBack, onNavigateDashbo
         </div>
       </header>
 
-      <SuperuserTabNav active="concierge" onDashboard={onNavigateDashboard} onMeditations={onNavigateMeditations} onConcierge={() => {}}/>
+      <SuperuserTabNav active="concierge" onDashboard={onNavigateDashboard} onMeditations={onNavigateMeditations} onConcierge={() => {}} onMarketing={() => { window.location.href = '/admin/marketing'; }}/>
 
       <main style={{padding:'clamp(16px,3vw,28px)', maxWidth:'1000px', margin:'0 auto'}}>
         {err && <div style={{padding:'14px 16px', background:'rgba(224,106,106,0.1)', color:'#a02020', borderRadius:'10px', fontSize:'13px', marginBottom:'14px'}}>{err}</div>}

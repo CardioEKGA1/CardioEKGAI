@@ -28,6 +28,7 @@ import PatientLogin from './screens/PatientLogin';
 import PatientTerms from './screens/PatientTerms';
 import PatientIntake from './screens/PatientIntake';
 import ConciergeMedicineLanding from './screens/ConciergeMedicineLanding';
+import MarketingAgent from './screens/MarketingAgent';
 import TrialSignupModal from './TrialSignupModal';
 
 export interface EkgResult {
@@ -60,6 +61,7 @@ type Screen =
   | 'meditations_library' | 'concierge_access'
   | 'patient_login' | 'patient_terms' | 'patient_intake'
   | 'concierge_medicine'
+  | 'marketing_admin'
   | 'dev_login';
 
 const API = 'https://ekgscan.com';
@@ -90,6 +92,11 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/patient/terms')     return 'patient_terms';
   if (path === '/patient/intake')    return 'patient_intake';
   if (path === '/concierge-medicine') return 'concierge_medicine';
+  // Marketing Agent — superuser-only campaign generator. Lives at
+  // /admin/marketing but uses the regular JWT bearer (NOT the x-admin-token
+  // gate Admin.tsx uses). Carved out of isAdminRoute below so the App
+  // shell renders MarketingAgent instead of the admin console.
+  if (path === '/admin/marketing')   return 'marketing_admin';
   if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -120,6 +127,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'patient_terms')       return '/patient/terms';
   if (s === 'patient_intake')      return '/patient/intake';
   if (s === 'concierge_medicine')  return '/concierge-medicine';
+  if (s === 'marketing_admin')     return '/admin/marketing';
   if (s === 'dev_login')           return '/dev-login';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
@@ -134,7 +142,13 @@ const STICKY_DEEPLINKS: Screen[] = ['privacy', 'terms'];
 const isStickyDeepLink = (s: Screen) => STICKY_DEEPLINKS.includes(s);
 
 const App: React.FC = () => {
-  const [isAdminRoute] = useState(() => window.location.pathname.startsWith('/admin'));
+  // Admin-token-gated console catches every /admin/* path EXCEPT
+  // /admin/marketing, which uses the regular JWT bearer (superuser-only)
+  // and is rendered through the normal Screen pipeline.
+  const [isAdminRoute] = useState(() => {
+    const p = window.location.pathname;
+    return p.startsWith('/admin') && p !== '/admin/marketing';
+  });
   const [isSoulMD] = useState(() => {
     const h = window.location.host.toLowerCase();
     return h === 'soulmd.us' || h === 'www.soulmd.us' || h.endsWith('.soulmd.us');
@@ -322,6 +336,7 @@ const App: React.FC = () => {
       patient_terms:       'Before We Begin · SoulMD Concierge',
       patient_intake:      'Tell Us About You · SoulMD Concierge',
       concierge_medicine:  'Concierge Medicine · SoulMD',
+      marketing_admin:     `Marketing Agent · ${brand}`,
       dev_login:           `Dev Login · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
@@ -393,6 +408,15 @@ const App: React.FC = () => {
     if (screen !== 'concierge_medicine') return;
     if (!token) { navigate('auth'); return; }
     if (!user) return; // wait for auth bootstrap to resolve
+    if (!user.is_superuser) navigate('dashboard');
+  }, [screen, user, token, navigate]);
+
+  // /admin/marketing — Marketing Agent (Claude-powered campaign generator).
+  // Superuser-only; shares the gating shape with /concierge-medicine.
+  useEffect(() => {
+    if (screen !== 'marketing_admin') return;
+    if (!token) { navigate('auth'); return; }
+    if (!user) return;
     if (!user.is_superuser) navigate('dashboard');
   }, [screen, user, token, navigate]);
 
@@ -494,6 +518,16 @@ const App: React.FC = () => {
       )}
       {screen==='concierge_medicine' && user && user.is_superuser && (
         <ConciergeMedicineLanding onBack={() => navigate(isSoulMD ? 'dashboard' : 'landing')}/>
+      )}
+      {screen==='marketing_admin' && user && user.is_superuser && (
+        <MarketingAgent
+          API={API}
+          token={token}
+          onBack={() => navigate('dashboard')}
+          onNavigateDashboard={() => navigate('dashboard')}
+          onNavigateMeditations={() => navigate('meditations_library')}
+          onNavigateConciergeAccess={() => navigate('concierge_access')}
+        />
       )}
       {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}

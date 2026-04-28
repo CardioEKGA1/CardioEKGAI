@@ -2706,6 +2706,93 @@ def _patient_dict(p: ConciergePatient) -> dict:
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
 
+# ─── Marketing Agent (superuser-only campaign generator) ─────────────────
+# Powers the /admin/marketing tool. The frontend posts a tool/goal/audience/
+# tone payload; we hand it to Claude with a marketing-expert system prompt
+# and parse back the structured campaign JSON. Server-side so the API key
+# never reaches the browser.
+
+class MarketingGenerateRequest(BaseModel):
+    tool: str
+    goal: str
+    audience: str
+    tone: str
+
+
+_MARKETING_SYSTEM_PROMPT = (
+    "You are a medical SaaS marketing expert for SoulMD (soulmd.us) — a clinical AI "
+    "platform built by Dr. Neysi Anderson, board-certified Internal Medicine physician "
+    "in Salt Lake City, UT. SoulMD offers 10 AI clinical tools for physicians: EKGScan, "
+    "NephroAI, RxCheck, AntibioticAI, XrayRead, CerebralAI, ClinicalNote AI, PalliativeMD, "
+    "LabRead, CliniScore. Pricing: Standard tools $9.99/mo, Premium $24.99/mo, Full Suite "
+    "$111.11/mo. All tools have 1 free use, no signup required. The target audience is "
+    "licensed clinicians (MDs, DOs, NPs, PAs). Generate compelling, platform-native "
+    "marketing content that converts."
+)
+
+
+def _marketing_user_prompt(tool: str, audience: str, goal: str, tone: str) -> str:
+    return (
+        f"Generate a complete marketing campaign for {tool} targeting {audience} "
+        f"with goal: {goal}. Tone: {tone}.\n\n"
+        "Return a JSON object with exactly this structure:\n"
+        "{\n"
+        '  "campaign_title": "...",\n'
+        '  "linkedin": {\n'
+        '    "post_a": "...(300-500 chars, professional, max 2 hashtags)...",\n'
+        '    "post_b": "...(A/B variant, different angle)..."\n'
+        "  },\n"
+        '  "twitter": {\n'
+        '    "thread_a": ["tweet1 (280 chars max)", "tweet2", "tweet3", "tweet4", "tweet5"],\n'
+        '    "thread_b": ["tweet1", "tweet2", "tweet3", "tweet4", "tweet5"]\n'
+        "  },\n"
+        '  "instagram": {\n'
+        '    "caption_a": "...(engaging caption, relevant emojis, 5-8 hashtags at end)...",\n'
+        '    "caption_b": "...(A/B variant)...",\n'
+        '    "visual_prompt": "...(Canva/DALL-E image description)..."\n'
+        "  },\n"
+        '  "email": {\n'
+        '    "subject_a": "...",\n'
+        '    "subject_b": "...(A/B variant)...",\n'
+        '    "preview_text": "...",\n'
+        f'    "body": "...(200-300 words, professional medical tone, ends with CTA: Try {tool} Free → soulmd.us)..."\n'
+        "  },\n"
+        '  "posting_schedule": {\n'
+        '    "linkedin": "Best time: Tuesday/Wednesday 8-10am",\n'
+        '    "twitter": "Weekdays 12pm or 5-6pm",\n'
+        '    "instagram": "Tuesday/Friday 11am-1pm",\n'
+        '    "email": "Tuesday/Thursday 9-11am"\n'
+        "  }\n"
+        "}\n"
+        "Return ONLY valid JSON. No preamble, no markdown fences."
+    )
+
+
+@app.post("/admin/marketing/generate")
+def admin_marketing_generate(
+    data: MarketingGenerateRequest,
+    _: User = Depends(verify_concierge_owner),  # superuser OR practice owner
+):
+    """Generate a multi-channel marketing campaign for one of the SoulMD tools.
+    Gated by the same is_superuser check that protects the concierge surface;
+    the browser never sees the Anthropic key."""
+    tool     = (data.tool or "").strip()     or "EKGScan"
+    goal     = (data.goal or "").strip()     or "Get first subscribers"
+    audience = (data.audience or "").strip() or "Clinicians"
+    tone     = (data.tone or "").strip()     or "Professional"
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4000,
+            system=_MARKETING_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": _marketing_user_prompt(tool, audience, goal, tone)}],
+        )
+        text = (response.content[0].text or "").strip()
+        return _extract_json(text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "Generation failed", "detail": str(e)})
+
+
 @app.get("/concierge/ping")
 def concierge_ping(_: User = Depends(verify_concierge_owner)):
     """Minimal endpoint used by the frontend to verify concierge access without

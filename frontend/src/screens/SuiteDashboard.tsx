@@ -325,6 +325,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         onDashboard={() => {}}
         onMeditations={onNavigateMeditations}
         onConcierge={onNavigateConciergeAccess}
+        onMarketing={() => { window.location.href = '/admin/marketing'; }}
       />
     )}
     <div style={{padding:'20px 16px', maxWidth:'1200px', margin:'0 auto'}}>
