@@ -330,6 +330,17 @@ class ConciergeJournalEntry(Base):
     intention = Column(String, default="")       # Q3
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+class PageVisit(Base):
+    __tablename__ = "page_visits"
+    id = Column(Integer, primary_key=True, index=True)
+    ip_address = Column(String, index=True)
+    page = Column(String, index=True)         # e.g. "/", "/dashboard", "/scan"
+    user_agent = Column(String, nullable=True)
+    referrer = Column(String, nullable=True)
+    country = Column(String, nullable=True)   # ip-api.com lookup, "Unknown" on failure
+    region = Column(String, nullable=True)    # ip-api.com regionName
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:

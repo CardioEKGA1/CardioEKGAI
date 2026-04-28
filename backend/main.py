@@ -19,6 +19,7 @@ from database import (
     ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
     ConciergeOraclePull, ConciergeLabRecord, PushSubscription,
     ConciergeEnergyLog, ConciergeJournalEntry,
+    PageVisit,
     ToolTrialUse,
 )
 import hashlib
@@ -223,6 +224,179 @@ async def _ekgscan_to_soulmd(request, call_next):
                     target += f"?{qs}"
                 return _RedirectResponse(target, status_code=301)
     return await call_next(request)
+
+
+# ─── Page-visit logging ────────────────────────────────────────────────────
+# Logs frontend HTML loads (real visitors hitting public pages) to the
+# page_visits table for the /admin Visitors tab. Skipped:
+#   • Anything matching an API path prefix below
+#   • The doctor's superuser session (JWT carries is_superuser)
+#   • IPs in the EXCLUDED_IPS env var (comma-separated; her home/office)
+#   • Non-document fetches (XHR, JSON Accept, image/asset MIME)
+# All work is wrapped in try/except so a logging hiccup never blocks the
+# real request, and the geo lookup runs as fire-and-forget so the visitor
+# never waits on ip-api.com.
+
+_API_PATH_PREFIXES = (
+    "/admin", "/webhook", "/auth", "/stripe", "/trial", "/tools",
+    "/cases", "/concierge", "/internal", "/billing",
+    "/api", "/health", "/ping", "/config", "/static",
+    "/service-worker.js", "/favicon", "/manifest", "/robots.txt",
+    "/apple-touch-icon", "/og-image", "/logo",
+)
+
+
+def _excluded_ips_set() -> set[str]:
+    raw = os.getenv("EXCLUDED_IPS", "") or ""
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+def _client_ip(request) -> str:
+    # Honor Railway's edge proxy. X-Forwarded-For is comma-separated; the
+    # client IP is the leftmost entry.
+    xff = (request.headers.get("x-forwarded-for") or "").strip()
+    if xff:
+        return xff.split(",")[0].strip()
+    real = (request.headers.get("x-real-ip") or "").strip()
+    if real:
+        return real
+    return getattr(getattr(request, "client", None), "host", "") or ""
+
+
+def _is_loggable_path(path: str) -> bool:
+    if not path:
+        return False
+    for pre in _API_PATH_PREFIXES:
+        if path == pre or path.startswith(pre + "/") or path.startswith(pre + "?"):
+            return False
+        if pre.startswith("/") and path == pre:
+            return False
+    # Skip files with extensions that aren't HTML (assets that slip the
+    # prefix list — e.g. /something.png that's been hash-renamed by CRA).
+    last = path.rsplit("/", 1)[-1]
+    if "." in last:
+        ext = last.rsplit(".", 1)[-1].lower()
+        if ext not in ("html", "htm"):
+            return False
+    return True
+
+
+def _is_html_navigation(request) -> bool:
+    accept = (request.headers.get("accept") or "").lower()
+    sec_fetch_dest = (request.headers.get("sec-fetch-dest") or "").lower()
+    if sec_fetch_dest == "document":
+        return True
+    if "text/html" in accept:
+        return True
+    return False
+
+
+def _is_superuser_request(request) -> bool:
+    """Best-effort decode of the bearer token to skip Dr. Anderson's own
+    page loads. Failing closed (i.e. logging the visit) is fine — we'd
+    rather over-log than miss real traffic."""
+    auth = (request.headers.get("authorization") or "").strip()
+    if not auth.lower().startswith("bearer "):
+        return False
+    raw = auth.split(" ", 1)[1].strip()
+    try:
+        payload = decode_token(raw)
+        if not payload:
+            return False
+        email = (payload.get("sub") or "").strip().lower()
+        if not email:
+            return False
+        # Cheap DB lookup — page-load frequency is low. If the DB hiccups,
+        # treat as not-superuser so a real visitor never gets dropped.
+        from database import SessionLocal as _S
+        with _S() as s:
+            u = s.query(User).filter(User.email == email).first()
+            return bool(u and getattr(u, "is_superuser", False))
+    except Exception:
+        return False
+
+
+def _geo_lookup_sync(ip: str) -> tuple[str, str]:
+    """Blocking ip-api.com call. Run inside asyncio.to_thread / a background
+    task so it never adds latency to the actual HTTP response. Returns
+    (country, region); ('Unknown','') on any failure."""
+    if not ip or ip.startswith("127.") or ip.startswith("10.") or ip.startswith("192.168.") or ip == "::1":
+        return ("Local", "")
+    try:
+        import urllib.request as _ur
+        import urllib.error as _ue
+        req = _ur.Request(
+            f"http://ip-api.com/json/{ip}?fields=status,country,regionName",
+            headers={"User-Agent": "soulmd-visitor-tracker/1.0"},
+        )
+        with _ur.urlopen(req, timeout=2.0) as r:
+            data = json.loads(r.read().decode("utf-8") or "{}")
+        if (data.get("status") or "").lower() != "success":
+            return ("Unknown", "")
+        return ((data.get("country") or "Unknown"), (data.get("regionName") or ""))
+    except Exception:
+        return ("Unknown", "")
+
+
+def _persist_visit(visit_id: int, ip: str):
+    """Background task: fill in country + region for an already-inserted
+    page_visits row. Uses a fresh SessionLocal so it's independent of the
+    request lifecycle."""
+    try:
+        country, region = _geo_lookup_sync(ip)
+        from database import SessionLocal as _S
+        with _S() as s:
+            row = s.query(PageVisit).filter(PageVisit.id == visit_id).first()
+            if row:
+                row.country = country or "Unknown"
+                row.region = region or None
+                s.commit()
+    except Exception:
+        pass  # Never let a geo-lookup failure break anything.
+
+
+@app.middleware("http")
+async def _log_page_visit(request, call_next):
+    response = await call_next(request)
+    try:
+        if request.method != "GET":
+            return response
+        path = (request.url.path or "/").rstrip()
+        if not _is_loggable_path(path):
+            return response
+        if not _is_html_navigation(request):
+            return response
+        # Only log successful 2xx renders. 3xx/4xx pages aren't real visits.
+        status = getattr(response, "status_code", 200)
+        if status < 200 or status >= 400:
+            return response
+        ip = _client_ip(request)
+        if ip in _excluded_ips_set():
+            return response
+        if _is_superuser_request(request):
+            return response
+        ua = (request.headers.get("user-agent") or "")[:500]
+        ref = (request.headers.get("referer") or request.headers.get("referrer") or "")[:500] or None
+        # Insert synchronously (cheap), then fire-and-forget the geo lookup.
+        from database import SessionLocal as _S
+        new_id: int | None = None
+        try:
+            with _S() as s:
+                pv = PageVisit(ip_address=ip[:64], page=path[:200], user_agent=ua, referrer=ref, country=None)
+                s.add(pv)
+                s.commit()
+                new_id = pv.id
+        except Exception:
+            new_id = None
+        if new_id and ip:
+            try:
+                import asyncio as _a
+                _a.create_task(_a.to_thread(_persist_visit, new_id, ip))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return response
 
 # Stripe webhook health: last successful signature-verified webhook we processed.
 # In-memory (per-process) — resets on restart, which the admin endpoint reports honestly.
@@ -2609,6 +2783,127 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         "all_green": all(r["env_set"] and r["stripe_ok"] and r["amount_matches"] and r["stripe_active"] for r in checks),
         "checks": checks,
     }
+
+# ─── Visitors tab (admin) ────────────────────────────────────────────────
+
+def _mask_ip(ip: str) -> str:
+    """Mask the last octet of IPv4 (192.168.1.234 → 192.168.1.xxx). IPv6
+    keeps everything after the third colon-group masked. Empty string
+    passes through so the UI can render a placeholder."""
+    if not ip:
+        return ""
+    if ":" in ip:  # IPv6
+        parts = ip.split(":")
+        if len(parts) > 3:
+            return ":".join(parts[:3]) + ":xxxx"
+        return ip
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return ".".join(parts[:3]) + ".xxx"
+    return ip
+
+
+@app.get("/admin/visitors/stats")
+def admin_visitors_stats(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    """Aggregates for the Visitors tab. Single endpoint covers stat cards,
+    line chart, top pages/referrers, and recent feed so the tab paints
+    in one round trip."""
+    from sqlalchemy import func as _f
+    now = datetime.utcnow()
+    day_ago   = now - timedelta(days=1)
+    week_ago  = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    total_today = db.query(_f.count(PageVisit.id)).filter(PageVisit.created_at >= day_ago).scalar() or 0
+    total_week  = db.query(_f.count(PageVisit.id)).filter(PageVisit.created_at >= week_ago).scalar() or 0
+    total_month = db.query(_f.count(PageVisit.id)).filter(PageVisit.created_at >= month_ago).scalar() or 0
+    unique_today = db.query(_f.count(_f.distinct(PageVisit.ip_address))).filter(PageVisit.created_at >= day_ago).scalar() or 0
+    unique_week  = db.query(_f.count(_f.distinct(PageVisit.ip_address))).filter(PageVisit.created_at >= week_ago).scalar() or 0
+
+    # Top pages (last 30 days).
+    top_pages_rows = (db.query(PageVisit.page, _f.count(PageVisit.id).label("c"))
+                        .filter(PageVisit.created_at >= month_ago)
+                        .group_by(PageVisit.page)
+                        .order_by(_f.count(PageVisit.id).desc())
+                        .limit(10).all())
+    top_pages = [{"page": p, "count": int(c)} for p, c in top_pages_rows]
+
+    # Top referrers (last 30 days). NULL/empty collapse into "Direct".
+    top_ref_rows = (db.query(PageVisit.referrer, _f.count(PageVisit.id).label("c"))
+                      .filter(PageVisit.created_at >= month_ago)
+                      .group_by(PageVisit.referrer)
+                      .order_by(_f.count(PageVisit.id).desc())
+                      .limit(20).all())
+    direct_count = 0
+    grouped: list[tuple[str, int]] = []
+    for ref, c in top_ref_rows:
+        r = (ref or "").strip()
+        if not r:
+            direct_count += int(c)
+        else:
+            grouped.append((r, int(c)))
+    top_referrers: list[dict] = []
+    if direct_count > 0:
+        top_referrers.append({"referrer": "Direct", "count": direct_count})
+    for r, c in grouped:
+        top_referrers.append({"referrer": r, "count": c})
+    top_referrers.sort(key=lambda x: x["count"], reverse=True)
+    top_referrers = top_referrers[:10]
+
+    # By-day series for the last 30 days. Bucket in Python so the query
+    # works identically on Postgres + SQLite (avoiding date_trunc dialect
+    # differences).
+    day_rows = (db.query(PageVisit.created_at)
+                  .filter(PageVisit.created_at >= now - timedelta(days=30))
+                  .all())
+    bucket: dict[str, int] = {}
+    for (ts,) in day_rows:
+        if not ts:
+            continue
+        key = ts.strftime("%Y-%m-%d")
+        bucket[key] = bucket.get(key, 0) + 1
+    visits_by_day: list[dict] = []
+    for i in range(29, -1, -1):
+        d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        visits_by_day.append({"date": d, "count": bucket.get(d, 0)})
+
+    # Recent visits — most recent 50.
+    recent_rows = (db.query(PageVisit)
+                     .order_by(PageVisit.created_at.desc())
+                     .limit(50).all())
+    recent_visits = [{
+        "ip": _mask_ip(r.ip_address or ""),
+        "page": r.page or "",
+        "referrer": (r.referrer or "Direct"),
+        "country": (r.country or "Unknown"),
+        "region": r.region or "",
+        "user_agent": (r.user_agent or "")[:160],
+        "time": r.created_at.isoformat() if r.created_at else None,
+    } for r in recent_rows]
+
+    return {
+        "total_visits_today":     int(total_today),
+        "total_visits_week":      int(total_week),
+        "total_visits_month":     int(total_month),
+        "total_unique_ips_today": int(unique_today),
+        "total_unique_ips_week":  int(unique_week),
+        "top_pages":              top_pages,
+        "top_referrers":          top_referrers,
+        "visits_by_day":          visits_by_day,
+        "recent_visits":          recent_visits,
+        "excluded_ips_count":     len(_excluded_ips_set()),
+    }
+
+
+@app.delete("/admin/visitors/clear")
+def admin_visitors_clear(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    """Drop every page_visits row older than 90 days. Returns the deleted
+    count so the UI can show a confirmation."""
+    cutoff = datetime.utcnow() - timedelta(days=90)
+    n = db.query(PageVisit).filter(PageVisit.created_at < cutoff).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": int(n or 0), "cutoff": cutoff.isoformat()}
+
 
 @app.get("/admin/moderation")
 def admin_moderation(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):

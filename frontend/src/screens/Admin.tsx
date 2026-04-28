@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 interface Props { API: string; }
-type Tab = 'users' | 'analytics' | 'health' | 'moderation';
+type Tab = 'users' | 'analytics' | 'visitors' | 'health' | 'moderation';
 
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)',borderRadius:'20px',padding:'20px',boxShadow:'0 4px 20px rgba(100,130,200,0.1)',marginBottom:'16px'};
 const LABEL: React.CSSProperties = {fontSize:'11px',fontWeight:'700',color:'#8aa0c0',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:'8px'};
@@ -89,13 +89,14 @@ const Admin: React.FC<Props> = ({ API }) => {
       </div>
 
       <div style={{display:'flex',gap:'8px',marginBottom:'20px',flexWrap:'wrap'}}>
-        {(['users','analytics','health','moderation'] as Tab[]).map(t => (
+        {(['users','analytics','visitors','health','moderation'] as Tab[]).map(t => (
           <button key={t} onClick={()=>setTab(t)} style={{background:tab===t?'linear-gradient(135deg,#7ab0f0,#9b8fe8)':'rgba(255,255,255,0.7)',border:'1px solid rgba(122,176,240,0.3)',borderRadius:'10px',padding:'8px 16px',fontSize:'13px',fontWeight:'600',color:tab===t?'white':'#4a7ad0',cursor:'pointer',textTransform:'capitalize'}}>{t}</button>
         ))}
       </div>
 
       {tab === 'users' && <UsersTab API={API} headers={authHeaders} onUnauthorized={logout}/>}
       {tab === 'analytics' && <AnalyticsTab API={API} headers={authHeaders} onUnauthorized={logout}/>}
+      {tab === 'visitors' && <VisitorsTab API={API} headers={authHeaders} onUnauthorized={logout}/>}
       {tab === 'health' && <HealthTab API={API} headers={authHeaders} onUnauthorized={logout}/>}
       {tab === 'moderation' && <ModerationTab API={API} headers={authHeaders} onUnauthorized={logout}/>}
 
@@ -607,6 +608,299 @@ const ModerationTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => 
         <div style={LABEL}>Failed payment attempts</div>
         <div style={{fontSize:'13px',color:'#8aa0c0',lineHeight:'1.6'}}>{data.failed_payments.note}</div>
       </div>
+    </div>
+  );
+};
+
+// ───── Visitors tab ─────────────────────────────────────────────────────
+// Live page-load tracker. Stat cards + 30-day SVG line chart + top pages,
+// top referrers, and a recent feed that auto-refreshes every 60s. Hand-
+// rolled SVG chart instead of recharts (not in the dep tree, and the rest
+// of the app uses inline SVG for charts too).
+
+const NAVY      = '#1a2a4a';
+const NAVY_DEEP = '#0f1a30';
+const GOLD      = '#C9A84C';
+const GOLD_SOFT = 'rgba(201,168,76,0.14)';
+
+interface VisitsStats {
+  total_visits_today: number;
+  total_visits_week: number;
+  total_visits_month: number;
+  total_unique_ips_today: number;
+  total_unique_ips_week: number;
+  top_pages: { page: string; count: number }[];
+  top_referrers: { referrer: string; count: number }[];
+  visits_by_day: { date: string; count: number }[];
+  recent_visits: {
+    ip: string; page: string; referrer: string; country: string;
+    region?: string; user_agent?: string; time: string | null;
+  }[];
+  excluded_ips_count: number;
+}
+
+const COUNTRY_FLAGS: Record<string, string> = {
+  'United States':'🇺🇸','Canada':'🇨🇦','United Kingdom':'🇬🇧','Australia':'🇦🇺',
+  'Germany':'🇩🇪','France':'🇫🇷','Spain':'🇪🇸','Italy':'🇮🇹','Netherlands':'🇳🇱',
+  'Brazil':'🇧🇷','Mexico':'🇲🇽','Argentina':'🇦🇷','India':'🇮🇳','Japan':'🇯🇵',
+  'South Korea':'🇰🇷','China':'🇨🇳','Singapore':'🇸🇬','Israel':'🇮🇱','Ireland':'🇮🇪',
+  'Sweden':'🇸🇪','Norway':'🇳🇴','Denmark':'🇩🇰','Finland':'🇫🇮','Poland':'🇵🇱',
+  'Local':'💻','Unknown':'🌐',
+};
+
+const timeAgo = (iso: string | null): string => {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.floor(hr / 24);
+  return `${d}d ago`;
+};
+
+const VisitorsTab: React.FC<TabProps> = ({ API, headers, onUnauthorized }) => {
+  const [data, setData] = useState<VisitsStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [clearing, setClearing] = useState(false);
+  const [clearMsg, setClearMsg] = useState('');
+  const af = useAuthedFetch(onUnauthorized);
+
+  const load = useCallback(async () => {
+    setErr('');
+    try {
+      const res = await af(`${API}/admin/visitors/stats`, { headers });
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const d = await res.json();
+      setData(d);
+    } catch (e: any) { setErr(e.message || 'Load failed'); }
+    finally { setLoading(false); }
+  }, [API, headers, af]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh the recent feed + stats every 60s. Light touch.
+  useEffect(() => {
+    const id = window.setInterval(() => { load(); }, 60_000);
+    return () => window.clearInterval(id);
+  }, [load]);
+
+  const clearOld = async () => {
+    if (clearing) return;
+    if (!window.confirm('Delete all page-visit rows older than 90 days?')) return;
+    setClearing(true); setClearMsg('');
+    try {
+      const res = await af(`${API}/admin/visitors/clear`, { method:'DELETE', headers });
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const d = await res.json();
+      setClearMsg(`Deleted ${d.deleted} old row${d.deleted === 1 ? '' : 's'}.`);
+      load();
+      window.setTimeout(() => setClearMsg(''), 4000);
+    } catch (e: any) { setClearMsg(e.message || 'Clear failed.'); }
+    finally { setClearing(false); }
+  };
+
+  if (loading && !data) return <div style={{...CARD, textAlign:'center', color:'#8aa0c0'}}>Loading visitors…</div>;
+  if (err) return <div style={{...CARD, background:'#fde8e8', color:'#c04040', fontSize:'13px'}}>{err}</div>;
+  if (!data) return null;
+
+  const totalTopPages = data.top_pages.reduce((s, p) => s + p.count, 0) || 1;
+
+  return (
+    <div>
+      {/* Stat cards */}
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:'12px', marginBottom:'16px'}}>
+        <StatCard label="Visits today"     value={data.total_visits_today.toLocaleString()} accent="navy"/>
+        <StatCard label="Visits this week" value={data.total_visits_week.toLocaleString()}  accent="navy"/>
+        <StatCard label="Visits this month"value={data.total_visits_month.toLocaleString()} accent="gold"/>
+        <StatCard label="Unique IPs today" value={data.total_unique_ips_today.toLocaleString()} sub={`${data.total_unique_ips_week} this week`} accent="navy"/>
+      </div>
+
+      {/* Line chart */}
+      <div style={{...CARD}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'10px'}}>
+          <div style={{fontSize:'14px', fontWeight:800, color: NAVY}}>Visits over time</div>
+          <div style={{fontSize:'11px', color:'#8aa0c0'}}>last 30 days</div>
+        </div>
+        <VisitsLineChart series={data.visits_by_day}/>
+      </div>
+
+      {/* Top pages + referrers */}
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'12px'}}>
+        <div style={{...CARD}}>
+          <div style={{fontSize:'14px', fontWeight:800, color: NAVY, marginBottom:'10px'}}>Top pages</div>
+          {data.top_pages.length === 0 ? (
+            <div style={{fontSize:'12px', color:'#8aa0c0', fontStyle:'italic'}}>No traffic yet.</div>
+          ) : (
+            <div>
+              <RowHead cols={['Page','Visits','% of total']}/>
+              {data.top_pages.map(p => (
+                <Row3 key={p.page}
+                  cols={[
+                    <span style={{fontFamily:'ui-monospace, monospace', fontSize:'12px', color: NAVY}}>{p.page}</span>,
+                    <span style={{fontWeight:700, color: NAVY}}>{p.count.toLocaleString()}</span>,
+                    <span style={{color:'#8aa0c0'}}>{((p.count / totalTopPages) * 100).toFixed(1)}%</span>,
+                  ]}/>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{...CARD}}>
+          <div style={{fontSize:'14px', fontWeight:800, color: NAVY, marginBottom:'10px'}}>Top referrers</div>
+          {data.top_referrers.length === 0 ? (
+            <div style={{fontSize:'12px', color:'#8aa0c0', fontStyle:'italic'}}>No referrer data yet.</div>
+          ) : (
+            <div>
+              <RowHead cols={['Referrer','Count']}/>
+              {data.top_referrers.map(r => (
+                <Row2 key={r.referrer}
+                  cols={[
+                    <span style={{fontSize:'12px', color: NAVY, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'inline-block', maxWidth:'100%'}}>
+                      {r.referrer === 'Direct' ? <span style={{color: GOLD, fontWeight:700}}>● Direct</span> : r.referrer}
+                    </span>,
+                    <span style={{fontWeight:700, color: NAVY}}>{r.count.toLocaleString()}</span>,
+                  ]}/>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Recent feed */}
+      <div style={{...CARD, marginTop:'12px'}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'10px'}}>
+          <div style={{fontSize:'14px', fontWeight:800, color: NAVY}}>Recent visits</div>
+          <div style={{fontSize:'11px', color:'#8aa0c0'}}>auto-refreshes every 60s</div>
+        </div>
+        {data.recent_visits.length === 0 ? (
+          <div style={{fontSize:'12px', color:'#8aa0c0', fontStyle:'italic', padding:'14px 0'}}>No recent visits.</div>
+        ) : (
+          <div style={{maxHeight:'420px', overflowY:'auto', display:'flex', flexDirection:'column', gap:'4px'}}>
+            {data.recent_visits.map((v, i) => (
+              <div key={i} style={{display:'grid', gridTemplateColumns:'72px 130px 1fr 1fr 80px', gap:'10px', alignItems:'center', padding:'8px 10px', background:'#FAFAFE', borderRadius:'8px', border:'0.5px solid rgba(83,74,183,0.08)'}}>
+                <span style={{fontSize:'14px'}} title={v.country}>
+                  {COUNTRY_FLAGS[v.country] || '🌐'} <span style={{fontSize:'10px', color:'#8aa0c0', fontWeight:700, marginLeft:'2px'}}>{(v.country || '').slice(0,2).toUpperCase()}</span>
+                </span>
+                <span style={{fontFamily:'ui-monospace, monospace', fontSize:'11px', color:'#6a8ab0'}}>{v.ip}</span>
+                <span style={{fontFamily:'ui-monospace, monospace', fontSize:'12px', color: NAVY, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={v.page}>{v.page}</span>
+                <span style={{fontSize:'11px', color:'#8aa0c0', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={v.referrer}>
+                  {v.referrer === 'Direct' ? <span style={{color: GOLD, fontWeight:700}}>● Direct</span> : v.referrer}
+                </span>
+                <span style={{fontSize:'10px', color:'#8aa0c0', textAlign:'right', whiteSpace:'nowrap'}}>{timeAgo(v.time)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Excluded IPs notice + admin */}
+      <div style={{...CARD, marginTop:'12px', background:`linear-gradient(135deg, ${NAVY_DEEP}, ${NAVY})`, color:'white', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap'}}>
+        <div style={{fontSize:'12px', lineHeight:1.6, flex:1, minWidth:'240px'}}>
+          <div style={{fontSize:'10px', letterSpacing:'1.5px', textTransform:'uppercase', color: GOLD, fontWeight:800, marginBottom:'4px'}}>
+            Privacy · {data.excluded_ips_count} IP{data.excluded_ips_count === 1 ? '' : 's'} excluded
+          </div>
+          Your IP and superuser sessions are excluded from tracking. To exclude additional IPs, add them to <code style={{background: GOLD_SOFT, padding:'1px 5px', borderRadius:'4px', color: GOLD}}>EXCLUDED_IPS</code> in Railway variables (comma-separated).
+        </div>
+        <button onClick={clearOld} disabled={clearing}
+          style={{background: GOLD, color: NAVY_DEEP, border:'none', borderRadius:'10px', padding:'8px 14px', fontSize:'12px', fontWeight:800, cursor: clearing ? 'wait' : 'pointer', letterSpacing:'0.4px', textTransform:'uppercase', opacity: clearing ? 0.6 : 1}}>
+          {clearing ? 'Clearing…' : 'Clear visits > 90 days'}
+        </button>
+      </div>
+      {clearMsg && (
+        <div style={{...CARD, marginTop:'10px', background:'rgba(112,184,112,0.10)', color:'#1f6633', fontSize:'12px', padding:'10px 14px'}}>{clearMsg}</div>
+      )}
+    </div>
+  );
+};
+
+const StatCard: React.FC<{label: string; value: string; sub?: string; accent: 'navy' | 'gold'}> = ({ label, value, sub, accent }) => (
+  <div style={{...CARD, padding:'16px', position:'relative', overflow:'hidden'}}>
+    <div style={{fontSize:'10px', letterSpacing:'1.4px', textTransform:'uppercase', color:'#8aa0c0', fontWeight:800}}>{label}</div>
+    <div style={{fontSize:'26px', fontWeight:900, color: NAVY, marginTop:'6px', letterSpacing:'-0.4px', lineHeight:1.1}}>{value}</div>
+    {sub && <div style={{fontSize:'11px', color:'#8aa0c0', marginTop:'4px'}}>{sub}</div>}
+    <div aria-hidden style={{position:'absolute', bottom:0, left:0, right:0, height:'3px', background: accent === 'gold' ? `linear-gradient(90deg, ${GOLD}, #f8c870)` : 'linear-gradient(90deg,#7ab0f0,#9b8fe8)'}}/>
+  </div>
+);
+
+const RowHead: React.FC<{cols: string[]}> = ({ cols }) => (
+  <div style={{display:'grid', gridTemplateColumns: cols.length === 3 ? '1fr 80px 80px' : '1fr 80px', gap:'10px', padding:'8px 10px', borderBottom:'0.5px solid rgba(83,74,183,0.12)', fontSize:'10px', fontWeight:800, color:'#8aa0c0', textTransform:'uppercase', letterSpacing:'0.5px'}}>
+    {cols.map(c => <div key={c} style={{textAlign: c === 'Page' || c === 'Referrer' ? 'left' : 'right'}}>{c}</div>)}
+  </div>
+);
+const Row3: React.FC<{cols: React.ReactNode[]}> = ({ cols }) => (
+  <div style={{display:'grid', gridTemplateColumns:'1fr 80px 80px', gap:'10px', padding:'8px 10px', borderBottom:'0.5px solid rgba(83,74,183,0.06)', alignItems:'center', fontSize:'12px'}}>
+    <div style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{cols[0]}</div>
+    <div style={{textAlign:'right'}}>{cols[1]}</div>
+    <div style={{textAlign:'right'}}>{cols[2]}</div>
+  </div>
+);
+const Row2: React.FC<{cols: React.ReactNode[]}> = ({ cols }) => (
+  <div style={{display:'grid', gridTemplateColumns:'1fr 80px', gap:'10px', padding:'8px 10px', borderBottom:'0.5px solid rgba(83,74,183,0.06)', alignItems:'center', fontSize:'12px'}}>
+    <div style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{cols[0]}</div>
+    <div style={{textAlign:'right'}}>{cols[1]}</div>
+  </div>
+);
+
+// SVG line chart — last 30 days. Hand-rolled because recharts isn't in the
+// dep tree and the rest of the codebase uses inline SVG for charts. Gold
+// line + soft filled area underneath.
+const VisitsLineChart: React.FC<{series: {date: string; count: number}[]}> = ({ series }) => {
+  const W = 720;          // viewBox width
+  const H = 180;          // viewBox height
+  const PADL = 36, PADR = 12, PADT = 14, PADB = 26;
+  const max = Math.max(1, ...series.map(s => s.count));
+  const innerW = W - PADL - PADR;
+  const innerH = H - PADT - PADB;
+  const x = (i: number) => PADL + (series.length <= 1 ? innerW / 2 : (i / (series.length - 1)) * innerW);
+  const y = (v: number) => PADT + innerH - (v / max) * innerH;
+
+  const linePath = series.map((s, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(s.count).toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L${x(series.length - 1).toFixed(1)},${(PADT + innerH).toFixed(1)} L${x(0).toFixed(1)},${(PADT + innerH).toFixed(1)} Z`;
+
+  // Y-axis ticks: 0, max/2, max
+  const ticks = [0, Math.round(max / 2), max];
+  // X-axis labels: every 5 days
+  const xLabels = series.map((s, i) => ({ s, i })).filter(({i}) => i % 5 === 0 || i === series.length - 1);
+
+  return (
+    <div style={{width:'100%', overflowX:'auto'}}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{width:'100%', height:'200px', display:'block'}} aria-label="Visits over the last 30 days">
+        {/* Grid lines */}
+        {ticks.map(t => (
+          <line key={t} x1={PADL} x2={W - PADR} y1={y(t)} y2={y(t)} stroke="rgba(83,74,183,0.10)" strokeDasharray="3 4"/>
+        ))}
+        {ticks.map(t => (
+          <text key={`yl-${t}`} x={PADL - 6} y={y(t) + 3} textAnchor="end" fontSize="10" fill="#8aa0c0" fontFamily="ui-sans-serif, system-ui">{t.toLocaleString()}</text>
+        ))}
+        {/* Area */}
+        <defs>
+          <linearGradient id="visits-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stopColor={GOLD} stopOpacity="0.32"/>
+            <stop offset="100%" stopColor={GOLD} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#visits-area)"/>
+        {/* Line */}
+        <path d={linePath} fill="none" stroke={GOLD} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+        {/* Dots on each point with a tooltip via <title> */}
+        {series.map((s, i) => (
+          <g key={s.date}>
+            <circle cx={x(i)} cy={y(s.count)} r="2.5" fill={GOLD}>
+              <title>{s.date}: {s.count} visit{s.count === 1 ? '' : 's'}</title>
+            </circle>
+          </g>
+        ))}
+        {/* X labels */}
+        {xLabels.map(({s, i}) => (
+          <text key={`xl-${s.date}`} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="#8aa0c0" fontFamily="ui-sans-serif, system-ui">
+            {s.date.slice(5)}
+          </text>
+        ))}
+      </svg>
     </div>
   );
 };
