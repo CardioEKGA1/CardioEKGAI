@@ -6,7 +6,6 @@ import DictationButton from '../DictationButton';
 import ComplianceDisclaimer from '../ComplianceDisclaimer';
 import { User } from '../App';
 import { readTrialsLocal, writeTrialsLocal } from '../trialHelpers';
-import { LockedPreviewCard } from './SoulMDLanding';
 
 interface Props {
   API: string;
@@ -562,27 +561,13 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
               </div>
             );
           })}
-          {/* Locked discovery tiles — only for non-superusers and only when
-              no active search is filtering the grid (they have no slug to
-              match). Superusers see the existing accessible concierge +
-              meditations tiles via SUPERUSER_ONLY_TOOLS, so suppress the
-              previews for them to avoid showing both. */}
-          {!isSuper && !q && (
-            <>
-              <LockedPreviewCard
-                icon="🕯️"
-                name="Guided Meditations"
-                desc="Personalized guided meditations curated by Dr. Anderson"
-                label="By Invitation Only"
-              />
-              <LockedPreviewCard
-                icon="✦"
-                name="Concierge Medicine"
-                desc="Where science meets the soul — Dr. Anderson's integrative practice. Direct access, deeply personal care."
-                label="By Invitation Only"
-              />
-            </>
-          )}
+          {/* Discovery tiles for Guided Meditations + Concierge Medicine
+              are intentionally NOT rendered for non-superusers. Both
+              surfaces live at /meditations and /concierge-medicine —
+              direct-URL only. The dashboard stays focused on tools the
+              viewer can actually use. Superusers continue to see the
+              accessible concierge + meditations entries from
+              SUPERUSER_ONLY_TOOLS above. */}
         </div>
       )}
 

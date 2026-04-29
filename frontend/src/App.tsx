@@ -27,9 +27,10 @@ import Concierge from './screens/concierge/Concierge';
 import PatientLogin from './screens/PatientLogin';
 import PatientTerms from './screens/PatientTerms';
 import PatientIntake from './screens/PatientIntake';
-import ConciergeMedicineLanding from './screens/ConciergeMedicineLanding';
 import MarketingAgent from './screens/MarketingAgent';
 import MeditateApp from './screens/meditate/MeditateApp';
+import MeditationsLandingPage from './screens/public/MeditationsLandingPage';
+import ConciergeLandingPage from './screens/public/ConciergeLandingPage';
 import TrialSignupModal from './TrialSignupModal';
 
 export interface EkgResult {
@@ -61,7 +62,8 @@ type Screen =
   | 'concierge'
   | 'meditations_library' | 'concierge_access'
   | 'patient_login' | 'patient_terms' | 'patient_intake'
-  | 'concierge_medicine'
+  | 'concierge_medicine'    // public landing at /concierge-medicine
+  | 'meditations_public'    // public landing at /meditations
   | 'marketing_admin'
   | 'meditate'
   | 'dev_login';
@@ -88,7 +90,10 @@ const pathToScreen = (path: string): Screen | null => {
   // URL is then rewritten to /concierge?view=patient so back-nav doesn't
   // re-fire the modal.
   if (path === '/concierge/journal/new') return 'concierge';
-  if (path === '/meditations')       return 'meditations_library';
+  // /meditations is now the PUBLIC landing (no auth). The superuser
+  // library lives at /meditations/library.
+  if (path === '/meditations')         return 'meditations_public';
+  if (path === '/meditations/library') return 'meditations_library';
   if (path === '/concierge-access')  return 'concierge_access';
   if (path === '/patient')           return 'patient_login';
   if (path === '/patient/terms')     return 'patient_terms';
@@ -124,7 +129,8 @@ const screenToPath = (s: Screen): string => {
   if (s === 'privacy')   return '/privacy';
   if (s === 'terms')     return '/terms';
   if (s === 'concierge') return '/concierge';
-  if (s === 'meditations_library') return '/meditations';
+  if (s === 'meditations_library') return '/meditations/library';
+  if (s === 'meditations_public')  return '/meditations';
   if (s === 'concierge_access')    return '/concierge-access';
   if (s === 'patient_login')       return '/patient';
   if (s === 'patient_terms')       return '/patient/terms';
@@ -339,7 +345,8 @@ const App: React.FC = () => {
       patient_login:       'SoulMD Concierge · Sign in',
       patient_terms:       'Before We Begin · SoulMD Concierge',
       patient_intake:      'Tell Us About You · SoulMD Concierge',
-      concierge_medicine:  'Concierge Medicine · SoulMD',
+      concierge_medicine:  'Concierge Medicine · Dr. Anderson · SoulMD',
+      meditations_public:  'Guided Meditations · SoulMD',
       marketing_admin:     `Marketing Agent · ${brand}`,
       meditate:            'SoulMD Meditate',
       dev_login:           `Dev Login · ${brand}`,
@@ -405,16 +412,9 @@ const App: React.FC = () => {
     }
   }, [screen, token, navigate]);
 
-  // /concierge-medicine — superuser-only while we iterate. Signed-out
-  // visitors are bounced to sign in; signed-in non-superusers to the
-  // clinical dashboard. The page is production-quality so we can flip
-  // the gate off to go public later without touching design.
-  useEffect(() => {
-    if (screen !== 'concierge_medicine') return;
-    if (!token) { navigate('auth'); return; }
-    if (!user) return; // wait for auth bootstrap to resolve
-    if (!user.is_superuser) navigate('dashboard');
-  }, [screen, user, token, navigate]);
+  // /concierge-medicine — public landing (no auth gate). The previous
+  // superuser-only ConciergeMedicineLanding has been replaced by a
+  // ConciergeLandingPage that anyone can reach via direct URL.
 
   // /admin/marketing — Marketing Agent (Claude-powered campaign generator).
   // Superuser-only; shares the gating shape with /concierge-medicine.
@@ -530,8 +530,11 @@ const App: React.FC = () => {
           onSignInRequired={() => navigate('patient_login')}
         />
       )}
-      {screen==='concierge_medicine' && user && user.is_superuser && (
-        <ConciergeMedicineLanding onBack={() => navigate(isSoulMD ? 'dashboard' : 'landing')}/>
+      {screen==='concierge_medicine' && (
+        <ConciergeLandingPage API={API} onHome={() => navigate('landing')}/>
+      )}
+      {screen==='meditations_public' && (
+        <MeditationsLandingPage API={API} onHome={() => navigate('landing')}/>
       )}
       {screen==='marketing_admin' && user && user.is_superuser && (
         <MarketingAgent

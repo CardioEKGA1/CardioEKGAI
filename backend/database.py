@@ -378,6 +378,32 @@ class MeditateDiaryEntry(Base):
     mood_after = Column(Integer, nullable=True)                 # 1-5
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+# Public landing-page submissions. Both tables are written from
+# unauthenticated POSTs (no token required) so the marketing pages
+# don't sit behind a login wall. Status field is just a manual queue
+# Dr. Anderson can update through the admin console / Postgres later;
+# default 'pending'.
+
+class MeditateAccessRequest(Base):
+    __tablename__ = "meditate_access_requests"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, index=True, nullable=False)
+    reason = Column(String, default="")
+    status = Column(String, default="pending", index=True)  # pending | invited | declined
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class ConciergeInquiry(Base):
+    __tablename__ = "concierge_inquiries"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, index=True, nullable=False)
+    phone = Column(String, nullable=True)
+    tier_interest = Column(String, nullable=True)  # awaken | align | ascend | unsure
+    message = Column(String, default="")
+    status = Column(String, default="pending", index=True)  # pending | responded | enrolled | declined
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:

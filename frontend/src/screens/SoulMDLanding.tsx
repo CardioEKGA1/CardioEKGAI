@@ -7,21 +7,6 @@ interface Props { onSignIn: () => void; onSignUp: () => void; onPrivacy?: () => 
 
 interface LandingTool { slug: string; name: string; icon: React.ReactNode; desc: string; price: string; }
 
-// Locked discovery tiles — invitation-only surfaces (Guided Meditations,
-// Concierge Medicine). Rendered after TOOLS as preview cards so visitors
-// see the full SoulMD universe without exposing a click-through. Lives on
-// the landing AND the authed dashboard (non-superuser only); superusers
-// keep their existing accessible tiles (separate `concierge`/`meditations`
-// entries in SuiteDashboard's TOOLS list).
-const LOCKED_PREVIEWS: { slug: string; name: string; icon: React.ReactNode; desc: string; label: string }[] = [
-  { slug: 'guided_meditations', name: 'Guided Meditations', icon: '🕯️',
-    desc: 'Personalized guided meditations curated by Dr. Anderson',
-    label: 'By Invitation Only' },
-  { slug: 'concierge_medicine', name: 'Concierge Medicine', icon: '✦',
-    desc: "Where science meets the soul — Dr. Anderson's integrative practice. Direct access, deeply personal care.",
-    label: 'By Invitation Only' },
-];
-
 const TOOLS: LandingTool[] = [
   { slug: 'ekgscan',      name: 'EKGScan',         icon: '🫀', desc: '12-lead EKG interpretation in seconds',                                  price: '$9.99 / mo · $89.99 / yr' },
   { slug: 'rxcheck',      name: 'RxCheck',         icon: '💊', desc: 'Full medication interaction safety check',                               price: '$9.99 / mo · $89.99 / yr' },
@@ -93,9 +78,6 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
             <div style={{fontSize:'11px', color:'#4a7ad0', fontWeight:'700', marginTop:'4px'}}>{t.price}</div>
           </div>
         ))}
-        {LOCKED_PREVIEWS.map(p => (
-          <LockedPreviewCard key={p.slug} icon={p.icon} name={p.name} desc={p.desc} label={p.label}/>
-        ))}
       </div>
     </section>
 
@@ -159,39 +141,9 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
   </div>
 );
 
-// Locked / invitation-only tile. Visually echoes the standard tool card
-// but with a lock chip and a soft dashed border so it reads as preview
-// rather than a paywall the visitor can act on. No click handler — the
-// card has nowhere to go yet. Exported so SuiteDashboard can render the
-// same component for non-superusers.
-export const LockedPreviewCard: React.FC<{icon: React.ReactNode; name: string; desc: string; label: string}> = ({ icon, name, desc, label }) => (
-  <div style={{
-    ...CARD,
-    padding: '20px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    border: '1px dashed rgba(122,176,240,0.45)',
-    background: 'linear-gradient(135deg, rgba(255,255,255,0.85), rgba(240,246,255,0.85))',
-    position: 'relative',
-  }}>
-    <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
-      <div style={{fontSize:'32px', filter:'grayscale(0.35)'}}>{icon}</div>
-      <span aria-label="Locked" title="By Invitation Only" style={{fontSize:'15px', opacity:0.7}}>🔒</span>
-    </div>
-    <div style={{fontSize:'16px', fontWeight:'800', color:'#1a2a4a'}}>{name}</div>
-    <div style={{fontSize:'13px', color:'#6a8ab0', lineHeight:'1.55', flex:1}}>{desc}</div>
-    <div style={{
-      fontSize:'10px', fontWeight:'800', letterSpacing:'0.6px', textTransform:'uppercase',
-      color:'#8a7040',
-      background:'linear-gradient(135deg,rgba(232,168,64,0.18),rgba(155,143,232,0.14))',
-      padding:'5px 12px', borderRadius:'999px',
-      alignSelf:'flex-start',
-      border:'0.5px solid rgba(232,168,64,0.35)',
-      marginTop:'4px',
-    }}>{label}</div>
-  </div>
-);
+// LockedPreviewCard removed — Guided Meditations + Concierge Medicine
+// are now direct-URL-only public landing pages (/meditations,
+// /concierge-medicine), not dashboard tiles.
 
 const PriceCard: React.FC<{title: string; subtitle: string; monthly: string; yearly: string; cta: string; onCta: () => void; highlighted?: boolean}> = ({title, subtitle, monthly, yearly, cta, onCta, highlighted}) => (
   <div style={{...CARD, padding:'24px', display:'flex', flexDirection:'column', gap:'10px', border: highlighted ? '2px solid rgba(122,176,240,0.5)' : CARD.border, background: highlighted ? 'linear-gradient(135deg,rgba(122,176,240,0.18),rgba(155,143,232,0.18))' : CARD.background}}>

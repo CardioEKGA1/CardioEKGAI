@@ -21,6 +21,7 @@ from database import (
     ConciergeEnergyLog, ConciergeJournalEntry,
     PageVisit,
     MeditateOracleMessage, MeditateOraclePull, MeditateDiaryEntry,
+    MeditateAccessRequest, ConciergeInquiry,
     ToolTrialUse,
 )
 import hashlib
@@ -6558,6 +6559,123 @@ def meditate_diary_detail(
 # BetterStack, etc.). No DB call, no auth, <1ms response. Use this instead
 # of /health for external probes so we don't burn DB connections on every
 # 5-minute check.
+
+# ───── Public landing-page submissions (no auth) ──────────────────────────
+# Both forms email anderson@soulmd.us via SendGrid for immediate triage,
+# and persist to their own tables so nothing slips through if email
+# delivery hiccups. Email failure never blocks the submission — the row
+# saves first, the notification is best-effort.
+
+class _MeditationsAccessRequest(BaseModel):
+    name: str
+    email: str
+    reason: str | None = None
+
+class _ConciergeInquiryRequest(BaseModel):
+    name: str
+    email: str
+    phone: str | None = None
+    tier_interest: str | None = None
+    message: str | None = None
+
+
+def _send_anderson_notification(subject: str, body_html: str) -> bool:
+    """Tiny convenience wrapper around SendGrid for the practice owner's
+    inbox. Returns True iff the message hit the SendGrid API. Caller
+    should swallow the result — failures are logged, never raised."""
+    if not SENDGRID_API_KEY:
+        print(f"SendGrid disabled — skipping notification: {subject}")
+        return False
+    try:
+        msg = Mail(
+            from_email=FROM_EMAIL,
+            to_emails=CONCIERGE_OWNER_EMAIL,
+            subject=subject,
+            html_content=body_html,
+        )
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
+        sg.send(msg)
+        return True
+    except Exception as e:
+        print(f"SendGrid notification failed ({subject}): {e}")
+        return False
+
+
+def _esc(s: str | None) -> str:
+    """Bare-bones HTML escape — bodies are private to anderson@ but the
+    inputs are public, so no XSS in the inbox preview."""
+    if not s:
+        return ""
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+              .replace("\"", "&quot;").replace("'", "&#39;").replace("\n", "<br>"))
+
+
+@app.post("/meditations/request-access")
+def public_meditations_request(
+    data: _MeditationsAccessRequest,
+    db: Session = Depends(get_db),
+):
+    name   = (data.name or "").strip()
+    email  = (data.email or "").strip()
+    reason = (data.reason or "").strip()
+    if not name or "@" not in email:
+        raise HTTPException(status_code=400, detail="Name and a valid email are required.")
+    row = MeditateAccessRequest(name=name, email=email, reason=reason)
+    db.add(row); db.commit(); db.refresh(row)
+    _send_anderson_notification(
+        subject=f"New Meditation Access Request — {name}",
+        body_html=(
+            f'<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a2a4a">'
+            f'  <h2 style="margin:0 0 16px;font-size:18px;color:#1a2a4a">New Meditation Access Request</h2>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Name:</b> {_esc(name)}</p>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Email:</b> <a href="mailto:{_esc(email)}" style="color:#534AB7">{_esc(email)}</a></p>'
+            f'  <p style="margin:14px 0 6px;font-size:13px;font-weight:700">Reason:</p>'
+            f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(reason) or "<em style=\"color:#888\">(none provided)</em>"}</div>'
+            f'  <p style="margin:18px 0 0;font-size:11px;color:#8aa0c0">Received {datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")} · request id #{row.id}</p>'
+            f'</div>'
+        ),
+    )
+    return {"ok": True, "id": row.id}
+
+
+@app.post("/concierge-medicine/inquire")
+def public_concierge_inquiry(
+    data: _ConciergeInquiryRequest,
+    db: Session = Depends(get_db),
+):
+    name = (data.name or "").strip()
+    email = (data.email or "").strip()
+    phone = (data.phone or "").strip()
+    tier = (data.tier_interest or "").strip().lower() or None
+    message = (data.message or "").strip()
+    if not name or "@" not in email:
+        raise HTTPException(status_code=400, detail="Name and a valid email are required.")
+    if tier and tier not in {"awaken", "align", "ascend", "unsure"}:
+        tier = "unsure"
+    row = ConciergeInquiry(
+        name=name, email=email, phone=phone or None,
+        tier_interest=tier, message=message,
+    )
+    db.add(row); db.commit(); db.refresh(row)
+    tier_label = {"awaken":"Awaken","align":"Align","ascend":"Ascend","unsure":"Not sure yet"}.get(tier or "", "—")
+    _send_anderson_notification(
+        subject=f"New Concierge Inquiry — {name} ({tier_label})",
+        body_html=(
+            f'<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a2a4a">'
+            f'  <h2 style="margin:0 0 16px;font-size:18px;color:#1a2a4a">New Concierge Membership Inquiry</h2>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Name:</b> {_esc(name)}</p>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Email:</b> <a href="mailto:{_esc(email)}" style="color:#534AB7">{_esc(email)}</a></p>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Phone:</b> {_esc(phone) or "<em style=\"color:#888\">—</em>"}</p>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Tier interest:</b> {tier_label}</p>'
+            f'  <p style="margin:14px 0 6px;font-size:13px;font-weight:700">Message:</p>'
+            f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(message) or "<em style=\"color:#888\">(none provided)</em>"}</div>'
+            f'  <p style="margin:18px 0 0;font-size:11px;color:#8aa0c0">Received {datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")} · inquiry id #{row.id}</p>'
+            f'</div>'
+        ),
+    )
+    return {"ok": True, "id": row.id}
+
 
 @app.get("/ping")
 def ping():
