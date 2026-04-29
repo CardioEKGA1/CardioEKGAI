@@ -376,6 +376,56 @@ class MeditateDiaryEntry(Base):
     general_reflection = Column(String, default="")
     mood_before = Column(Integer, nullable=True)                # 1-5
     mood_after = Column(Integer, nullable=True)                 # 1-5
+    # 3 optional gratitude lines saved per entry. Pre-existing rows
+    # back-fill as NULL via the boot-time ALTER TABLE migration.
+    gratitude_1 = Column(String, nullable=True)
+    gratitude_2 = Column(String, nullable=True)
+    gratitude_3 = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ─── /meditate engagement layer ───────────────────────────────────────
+# Tracks intentions, favorites, play history, and AI insights so the
+# home screen can show streaks + resume + personal monthly observations.
+# All keyed by users.id (the PWA always operates against the signed-in
+# user, never directly off concierge_patients).
+
+class MeditateIntention(Base):
+    __tablename__ = "meditate_intentions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    intention_text = Column(String, nullable=False)
+    date = Column(String, index=True, nullable=False)  # YYYY-MM-DD MST — one row per user/day
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class MeditateOracleFavorite(Base):
+    __tablename__ = "meditate_oracle_favorites"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    oracle_pull_id = Column(Integer, index=True, nullable=False)  # meditate_oracle_pulls.id
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class MeditateMedFavorite(Base):
+    __tablename__ = "meditate_med_favorites"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    meditation_id = Column(Integer, index=True, nullable=False)   # concierge_meditations.id
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class MeditatePlayHistory(Base):
+    __tablename__ = "meditate_play_history"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    meditation_id = Column(Integer, index=True, nullable=False)
+    played_at = Column(DateTime, default=datetime.utcnow, index=True)
+    completed = Column(Boolean, default=False, index=True)        # set True when Mark Complete fires
+
+class MeditateAiInsight(Base):
+    __tablename__ = "meditate_ai_insights"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    insight_text = Column(String, nullable=False)
+    month = Column(String, index=True, nullable=False)  # YYYY-MM — one row per user/month
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 # Public landing-page submissions. Both tables are written from
@@ -470,6 +520,11 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditations_source   ON concierge_meditations(source)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditations_category ON concierge_meditations(category)"))
+        # Gratitude lines added on the meditate diary entry. Pre-existing
+        # rows back-fill as NULL (the form treats blank as "skipped").
+        conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_1 VARCHAR"))
+        conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_2 VARCHAR"))
+        conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_3 VARCHAR"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 

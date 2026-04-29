@@ -33,6 +33,10 @@ const DiaryEntryForm: React.FC<Props> = ({ API, token, meditationId, meditationT
   const [emotions, setEmotions] = useState<string>('');
   const [visions, setVisions] = useState<string>('');
   const [reflection, setReflection] = useState<string>('');
+  const [g1, setG1] = useState<string>('');
+  const [g2, setG2] = useState<string>('');
+  const [g3, setG3] = useState<string>('');
+  const [voiceMode, setVoiceMode] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string>('');
   const [confirmed, setConfirmed] = useState(false);
@@ -51,7 +55,7 @@ const DiaryEntryForm: React.FC<Props> = ({ API, token, meditationId, meditationT
   const save = async () => {
     if (saving) return;
     setErr('');
-    if (!body.trim() && !emotions.trim() && !visions.trim() && !reflection.trim() && !moodBefore && !moodAfter) {
+    if (!body.trim() && !emotions.trim() && !visions.trim() && !reflection.trim() && !moodBefore && !moodAfter && !g1.trim() && !g2.trim() && !g3.trim()) {
       setErr('Add at least one field before saving.');
       return;
     }
@@ -63,12 +67,15 @@ const DiaryEntryForm: React.FC<Props> = ({ API, token, meditationId, meditationT
         body: JSON.stringify({
           meditation_id: meditationId,
           meditation_title: meditationTitle || undefined,
-          body_sensations: body.trim() || undefined,
-          emotions_felt: emotions.trim() || undefined,
-          visions_or_insights: visions.trim() || undefined,
+          body_sensations: voiceMode ? undefined : (body.trim() || undefined),
+          emotions_felt:   voiceMode ? undefined : (emotions.trim() || undefined),
+          visions_or_insights: voiceMode ? undefined : (visions.trim() || undefined),
           general_reflection: reflection.trim() || undefined,
           mood_before: moodBefore,
           mood_after: moodAfter,
+          gratitude_1: g1.trim() || undefined,
+          gratitude_2: g2.trim() || undefined,
+          gratitude_3: g3.trim() || undefined,
         }),
       });
       const d = await res.json();
@@ -187,26 +194,67 @@ const DiaryEntryForm: React.FC<Props> = ({ API, token, meditationId, meditationT
           <MoodScale value={moodAfter} onChange={setMoodAfter}/>
         </Card>
 
-        <DictateField
-          label="What did you feel in your body?"
-          placeholder="Warmth, tightness, breath, current — anything physical that arose."
-          value={body} onChange={setBody}
-        />
-        <DictateField
-          label="What emotions moved through you?"
-          placeholder="Even subtle waves count — name what you can."
-          value={emotions} onChange={setEmotions}
-        />
-        <DictateField
-          label="Any visions, symbols, or insights?"
-          placeholder="Images, words, or knowings that surfaced."
-          value={visions} onChange={setVisions}
-        />
-        <DictateField
-          label="General reflection or message received"
-          placeholder="What does today's practice want you to remember?"
-          value={reflection} onChange={setReflection}
-        />
+        {/* Voice Mode toggle — collapses the 4 prose fields into one
+            big dictation area saved to general_reflection. */}
+        <div style={{
+          display:'flex', justifyContent:'space-between', alignItems:'center',
+          padding:'10px 14px', marginBottom:'12px',
+          background:'rgba(255,255,255,0.78)', border: T.cardBorder, borderRadius:'14px',
+        }}>
+          <div style={{fontSize:'12px', color: T.navy, fontWeight:700, letterSpacing:'0.3px'}}>
+            🎤 Voice Mode
+          </div>
+          <button onClick={() => setVoiceMode(v => !v)}
+            style={{
+              padding:'6px 14px', borderRadius:'999px',
+              background: voiceMode ? `linear-gradient(135deg, ${T.purple}, ${T.navy})` : 'rgba(255,255,255,0.6)',
+              color: voiceMode ? 'white' : T.inkSoft,
+              border: voiceMode ? 'none' : T.cardBorder,
+              fontSize:'11px', fontWeight: voiceMode ? 800 : 700,
+              cursor:'pointer', fontFamily:'inherit', letterSpacing:'0.4px',
+            }}>
+            {voiceMode ? 'On ✓' : 'Off'}
+          </button>
+        </div>
+
+        {voiceMode ? (
+          <DictateField
+            label="🎤 Tap to speak your experience"
+            placeholder="The mic dictates everything you say into one continuous reflection."
+            value={reflection} onChange={setReflection}
+          />
+        ) : (
+          <>
+            <DictateField
+              label="What did you feel in your body?"
+              placeholder="Warmth, tightness, breath, current — anything physical that arose."
+              value={body} onChange={setBody}
+            />
+            <DictateField
+              label="What emotions moved through you?"
+              placeholder="Even subtle waves count — name what you can."
+              value={emotions} onChange={setEmotions}
+            />
+            <DictateField
+              label="Any visions, symbols, or insights?"
+              placeholder="Images, words, or knowings that surfaced."
+              value={visions} onChange={setVisions}
+            />
+            <DictateField
+              label="General reflection or message received"
+              placeholder="What does today's practice want you to remember?"
+              value={reflection} onChange={setReflection}
+            />
+          </>
+        )}
+
+        {/* Gratitude prompts — always shown, always optional. */}
+        <Card>
+          <Label>Three things I am grateful for today:</Label>
+          <input value={g1} onChange={e => setG1(e.target.value)} placeholder="1." style={gratitudeInputStyle}/>
+          <input value={g2} onChange={e => setG2(e.target.value)} placeholder="2." style={{...gratitudeInputStyle, marginTop:'8px'}}/>
+          <input value={g3} onChange={e => setG3(e.target.value)} placeholder="3." style={{...gratitudeInputStyle, marginTop:'8px'}}/>
+        </Card>
 
         {err && (
           <div style={{padding:'10px 14px', background:'rgba(224,80,80,0.08)', border:'1px solid rgba(224,80,80,0.3)', borderRadius:'12px', color:'#a02020', fontSize:'12px', marginBottom:'12px'}}>
@@ -302,5 +350,14 @@ const DictateField: React.FC<{label: string; placeholder: string; value: string;
     </div>
   </div>
 );
+
+const gratitudeInputStyle: React.CSSProperties = {
+  width:'100%', padding:'10px 12px',
+  borderRadius:'10px', border:'1px solid rgba(180,210,230,0.6)',
+  background:'rgba(255,255,255,0.6)',
+  color: T.ink, fontSize:'13.5px',
+  fontFamily: T.serif, fontStyle:'italic',
+  outline:'none', boxSizing:'border-box',
+};
 
 export default DiaryEntryForm;

@@ -49,6 +49,93 @@ const fmtClock = (sec: number): string => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
+// Ambient sound options. All four are synthesized with the Web Audio
+// API on the fly — no audio files shipped, no CDN dependency. Rain +
+// Ocean are filtered white noise; Singing Bowls is a sustained sine
+// chord with slow attack/decay; Silence is a no-op.
+type AmbientId = 'silence' | 'rain' | 'bowls' | 'ocean';
+const AMBIENT_OPTIONS: { id: AmbientId; icon: string; label: string }[] = [
+  { id: 'silence', icon: '🔇', label: 'Silence' },
+  { id: 'rain',    icon: '🌧',  label: 'Rain' },
+  { id: 'bowls',   icon: '🎵', label: 'Singing Bowls' },
+  { id: 'ocean',   icon: '🌊', label: 'Ocean' },
+];
+
+interface AmbientHandle { stop: () => void; ctx: AudioContext; }
+
+function startAmbient(kind: AmbientId): AmbientHandle | null {
+  if (kind === 'silence') return null;
+  const Ctx: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!Ctx) return null;
+  const ctx: AudioContext = new Ctx();
+  const masterGain = ctx.createGain();
+  masterGain.gain.value = 0.18;
+  masterGain.connect(ctx.destination);
+
+  const stoppers: Array<() => void> = [];
+
+  if (kind === 'rain') {
+    // White noise → low-pass filter for that wet, hissy texture.
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 480;
+    src.connect(hp); hp.connect(lp); lp.connect(masterGain);
+    src.start();
+    stoppers.push(() => { try { src.stop(); } catch {} });
+  } else if (kind === 'ocean') {
+    // Brown-ish noise + slow LFO on the lowpass cutoff = surf.
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 6, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < data.length; i++) {
+      const w = Math.random() * 2 - 1;
+      last = (last + 0.02 * w) / 1.02;
+      data[i] = last * 3;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.1;
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = 280;
+    lfo.connect(lfoGain); lfoGain.connect(lp.frequency);
+    src.connect(lp); lp.connect(masterGain);
+    src.start(); lfo.start();
+    stoppers.push(() => { try { src.stop(); } catch {} try { lfo.stop(); } catch {} });
+  } else if (kind === 'bowls') {
+    // Three sine partials with slow attack/decay — feels like a bowl.
+    const partials = [196, 261.63, 392]; // G3, C4, G4
+    partials.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      const now = ctx.currentTime;
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.12, now + 4 + i);
+      // Gentle tremolo so it breathes.
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.15 + i * 0.07;
+      const lfoG = ctx.createGain(); lfoG.gain.value = 0.04;
+      lfo.connect(lfoG); lfoG.connect(g.gain);
+      osc.connect(g); g.connect(masterGain);
+      osc.start(); lfo.start();
+      stoppers.push(() => { try { osc.stop(); } catch {} try { lfo.stop(); } catch {} });
+    });
+  }
+
+  return {
+    ctx,
+    stop: () => {
+      stoppers.forEach(s => s());
+      try { ctx.close(); } catch {}
+    },
+  };
+}
+
 const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose, onComplete }) => {
   const [med, setMed] = useState<MeditationDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +151,10 @@ const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose, onCompl
   // form prefill on Mark Complete.
   const [notes, setNotes] = useState<string>('');
 
+  // Ambient sound — synthesized via Web Audio when running flips on.
+  const [ambient, setAmbient] = useState<AmbientId>('silence');
+  const ambientRef = useRef<AmbientHandle | null>(null);
+
   useEffect(() => {
     let alive = true;
     setLoading(true); setErr('');
@@ -78,6 +169,13 @@ const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose, onCompl
       })
       .catch(e => { if (alive) setErr(`Could not load meditation: ${e.message || e}`); })
       .finally(() => { if (alive) setLoading(false); });
+    // Record an "opened" play history row (completed=false) so the
+    // Resume card on the home tab knows where the user left off.
+    fetch(`${API}/meditate/meditations/play`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+      body: JSON.stringify({ meditation_id: medId, completed: false }),
+    }).catch(() => {});
     return () => { alive = false; };
   }, [API, token, medId]);
 
@@ -100,6 +198,20 @@ const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose, onCompl
     if (remaining === 0 && running) setRunning(false);
   }, [remaining, running]);
 
+  // Drive the ambient sound off `running` + `ambient`. Browser autoplay
+  // rules require a user gesture to start audio — Begin/Pause is that
+  // gesture so this works without prompting.
+  useEffect(() => {
+    if (running && ambient !== 'silence') {
+      ambientRef.current = startAmbient(ambient);
+    }
+    return () => {
+      if (ambientRef.current) { ambientRef.current.stop(); ambientRef.current = null; }
+    };
+  }, [running, ambient]);
+  // Tear down on unmount too.
+  useEffect(() => () => { if (ambientRef.current) { ambientRef.current.stop(); ambientRef.current = null; } }, []);
+
   const startPause = useCallback(() => setRunning(r => !r), []);
   const reset = useCallback(() => {
     setRunning(false);
@@ -109,8 +221,15 @@ const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose, onCompl
   const complete = useCallback(() => {
     if (!med) return;
     setRunning(false);
+    // Record completion so it counts toward streaks + total minutes.
+    // Fire-and-forget — UX never waits on this write.
+    fetch(`${API}/meditate/meditations/play`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
+      body: JSON.stringify({ meditation_id: med.id, completed: true }),
+    }).catch(() => {});
     onComplete(med.id, med.title);
-  }, [med, onComplete]);
+  }, [API, token, med, onComplete]);
 
   const paragraphs = useMemo(
     () => (med?.script || '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean),
@@ -161,6 +280,38 @@ const MeditationPlayer: React.FC<Props> = ({ API, token, medId, onClose, onCompl
                   {med.duration_min} minutes · {med.difficulty || 'all levels'}
                 </div>
               )}
+            </div>
+
+            {/* Ambient sound picker — synthesized via Web Audio when
+                Begin is tapped (browser autoplay rules require a user
+                gesture, which Begin/Pause provides). */}
+            <div style={{
+              background:'rgba(255,255,255,0.78)', border: T.cardBorder, borderRadius:'14px',
+              padding:'10px 12px', marginBottom:'10px',
+              boxShadow:'0 4px 14px rgba(83,74,183,0.06)',
+            }}>
+              <div style={{fontSize:'10px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.inkSoft, fontWeight:800, marginBottom:'8px'}}>
+                Ambient Sound
+              </div>
+              <div style={{display:'flex', gap:'6px', flexWrap:'wrap'}}>
+                {AMBIENT_OPTIONS.map(o => {
+                  const active = ambient === o.id;
+                  return (
+                    <button key={o.id} onClick={() => setAmbient(o.id)}
+                      style={{
+                        flex:'1 1 calc(25% - 6px)', minWidth:'88px',
+                        padding:'8px 10px', borderRadius:'10px',
+                        background: active ? `linear-gradient(135deg, ${T.purple}, ${T.navy})` : 'rgba(255,255,255,0.6)',
+                        color: active ? 'white' : T.ink,
+                        border: active ? 'none' : T.cardBorder,
+                        fontSize:'11px', fontWeight: active ? 800 : 600,
+                        cursor:'pointer', fontFamily:'inherit',
+                      }}>
+                      <span style={{marginRight:'4px'}}>{o.icon}</span>{o.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Timer */}

@@ -73,9 +73,18 @@ const LibraryScreen: React.FC<Props> = ({ API, token, onOpenMeditation }) => {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
+  // 'favorites' is a synthetic category — handled separately from the
+  // real category filter, calls /meditate/meditations/favorites.
   const [category, setCategory] = useState<string>('all');
   const [searchInput, setSearchInput] = useState<string>('');
   const [search, setSearch] = useState<string>('');
+
+  // Bookmark state — fetched once; toggled per card.
+  const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
+
+  // Recently played + recommendations rows.
+  const [recent, setRecent] = useState<Meditation[]>([]);
+  const [recommended, setRecommended] = useState<Meditation[]>([]);
 
   // Debounce the search input — typing is faster than the backend can
   // round-trip 60 rows.
@@ -86,6 +95,19 @@ const LibraryScreen: React.FC<Props> = ({ API, token, onOpenMeditation }) => {
 
   const load = useCallback(() => {
     setLoading(true); setErr('');
+    if (category === 'favorites') {
+      // Favorites use a dedicated endpoint that returns full row data.
+      fetch(`${API}/meditate/meditations/favorites`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`${r.status}`)))
+        .then(d => {
+          setMeds(d.meditations || []);
+          setTotal((d.meditations || []).length);
+          setFavoriteIds(new Set<number>(d.favorite_ids || []));
+        })
+        .catch((e) => setErr(`Could not load favorites: ${e.message || e}`))
+        .finally(() => setLoading(false));
+      return;
+    }
     const qs = new URLSearchParams();
     if (category && category !== 'all') qs.set('category', category);
     if (search) qs.set('search', search);
@@ -103,10 +125,78 @@ const LibraryScreen: React.FC<Props> = ({ API, token, onOpenMeditation }) => {
 
   useEffect(() => { load(); }, [load]);
 
+  // Fire-and-forget mount loads for favorite ids + recent + recommended.
+  useEffect(() => {
+    fetch(`${API}/meditate/meditations/favorites`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.favorite_ids) setFavoriteIds(new Set<number>(d.favorite_ids)); })
+      .catch(() => {});
+    fetch(`${API}/meditate/meditations/recent?limit=5`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setRecent(d?.meditations || []))
+      .catch(() => {});
+    fetch(`${API}/meditate/meditations/recommended`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setRecommended(d?.meditations || []))
+      .catch(() => {});
+  }, [API, token]);
+
+  const toggleFavorite = useCallback(async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`${API}/meditate/meditations/${id}/favorite`, {
+        method:'POST', headers:{ Authorization:`Bearer ${token}` },
+      });
+      const d = await res.json();
+      if (!res.ok) return;
+      setFavoriteIds(prev => {
+        const next = new Set(prev);
+        if (d.favorited) next.add(id); else next.delete(id);
+        return next;
+      });
+      // If we're on the favorites filter, drop the card from view.
+      if (category === 'favorites' && !d.favorited) {
+        setMeds(prev => prev.filter(m => m.id !== id));
+      }
+    } catch {}
+  }, [API, token, category]);
+
   const allCount = useMemo(() => categories.reduce((s, c) => s + c.count, 0), [categories]);
 
   return (
     <div style={{padding:'4px 4px 24px'}}>
+      {/* RECENTLY PLAYED — horizontal scroll above search; hidden when
+          there's no play history yet. */}
+      {recent.length > 0 && (
+        <div style={{marginBottom:'14px'}}>
+          <div style={{fontSize:'10px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.inkSoft, fontWeight:800, marginBottom:'8px', padding:'0 4px'}}>
+            Recently Played
+          </div>
+          <div style={{display:'flex', gap:'10px', overflowX:'auto', paddingBottom:'4px', WebkitOverflowScrolling:'touch'}}>
+            {recent.map(m => (
+              <button key={m.id} onClick={() => onOpenMeditation(m.id)}
+                style={{
+                  flexShrink:0, width:'200px', textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+                  background: T.cardBg, border: T.cardBorder, borderRadius:'14px',
+                  padding:'12px',
+                  display:'flex', flexDirection:'column', gap:'6px',
+                  boxShadow:'0 4px 12px rgba(83,74,183,0.06)',
+                }}>
+                <span style={{fontSize:'9px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.purple, fontWeight:800}}>
+                  {labelFor(m.category)}
+                </span>
+                <div style={{fontFamily: T.serif, fontSize:'14px', fontWeight:600, color: T.navy, lineHeight:1.3, minHeight:'36px', overflow:'hidden', display:'-webkit-box', WebkitBoxOrient:'vertical', WebkitLineClamp:2}}>
+                  {m.title}
+                </div>
+                <div style={{fontSize:'10px', color: T.inkSoft, fontWeight:700}}>
+                  ▶ {m.duration_min || 10} min
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <div style={{marginBottom:'12px'}}>
         <input
@@ -123,8 +213,10 @@ const LibraryScreen: React.FC<Props> = ({ API, token, onOpenMeditation }) => {
         />
       </div>
 
-      {/* Category pills — horizontal scroll. */}
+      {/* Category pills — horizontal scroll. Favorites pill comes first
+          so the bookmark UX is one tap away. */}
       <div style={{display:'flex', gap:'6px', overflowX:'auto', paddingBottom:'8px', marginBottom:'10px', WebkitOverflowScrolling:'touch'}}>
+        <Pill active={category === 'favorites'} label={`♥ Favorites${favoriteIds.size ? ` · ${favoriteIds.size}` : ''}`} onClick={() => setCategory('favorites')}/>
         <Pill active={category === 'all'} label={`All${allCount ? ` · ${allCount}` : ''}`} onClick={() => setCategory('all')}/>
         {categories.slice(0, 30).map(c => (
           <Pill key={c.slug}
@@ -144,6 +236,38 @@ const LibraryScreen: React.FC<Props> = ({ API, token, onOpenMeditation }) => {
         )}
       </div>
 
+      {/* RECOMMENDED FOR YOU — Claude-picked categories. Hidden when no
+          recommendations are available yet. */}
+      {category === 'all' && !search && recommended.length > 0 && (
+        <div style={{marginBottom:'18px'}}>
+          <div style={{fontSize:'10px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.gold, fontWeight:800, marginBottom:'8px', padding:'0 4px'}}>
+            Recommended for You ✦
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'10px'}}>
+            {recommended.map(m => (
+              <button key={m.id} onClick={() => onOpenMeditation(m.id)}
+                style={{
+                  textAlign:'left', cursor:'pointer', fontFamily:'inherit',
+                  background:'rgba(255,255,255,0.85)', border:`0.5px solid ${T.gold}55`, borderRadius:'14px',
+                  padding:'12px',
+                  display:'flex', flexDirection:'column', gap:'6px',
+                  boxShadow:'0 4px 12px rgba(201,168,76,0.12)',
+                }}>
+                <span style={{fontSize:'9px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.purple, fontWeight:800}}>
+                  {labelFor(m.category)}
+                </span>
+                <div style={{fontFamily: T.serif, fontSize:'14px', fontWeight:600, color: T.navy, lineHeight:1.3, minHeight:'36px'}}>
+                  {m.title}
+                </div>
+                <div style={{fontSize:'10px', color: T.gold, fontWeight:800, letterSpacing:'0.4px'}}>
+                  ▶ {m.duration_min || 10} min
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'12px'}}>
         {meds.map(m => (
           <button key={m.id} onClick={() => onOpenMeditation(m.id)}
@@ -153,8 +277,19 @@ const LibraryScreen: React.FC<Props> = ({ API, token, onOpenMeditation }) => {
               padding:'14px',
               display:'flex', flexDirection:'column', gap:'8px',
               boxShadow:'0 6px 16px rgba(83,74,183,0.10)',
+              position:'relative',
             }}>
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            {/* Bookmark heart — top-right, click stops propagation. */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={favoriteIds.has(m.id) ? 'Remove favorite' : 'Add favorite'}
+              onClick={(e) => toggleFavorite(m.id, e)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleFavorite(m.id, e as any); }}
+              style={{position:'absolute', top:'10px', right:'12px', fontSize:'16px', color: favoriteIds.has(m.id) ? T.gold : T.inkSoft, cursor:'pointer', lineHeight:1, padding:'2px 4px'}}>
+              {favoriteIds.has(m.id) ? '♥' : '♡'}
+            </span>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', paddingRight:'24px'}}>
               <span style={{fontSize:'9px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.purple, fontWeight:800}}>
                 {labelFor(m.category)}
               </span>

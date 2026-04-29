@@ -15,7 +15,7 @@
 //
 // Backend wired to /meditate/oracle/today + /meditate/oracle/pull +
 // /meditate/oracle/reflect (already built).
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import DictationButton from '../../DictationButton';
 import { MEDITATE_TOKENS as T } from './MeditateApp';
@@ -24,6 +24,9 @@ import {
   type OraclePhase,
 } from '../../components/shared/OracleCardFan';
 import { FlowerSprite } from '../../components/shared/FlowerSprite';
+import OracleHistory from './OracleHistory';
+import html2canvas from 'html2canvas';
+import flowersImg from '../../assets/flowers.png';
 
 // Same daily-flower trick the concierge oracle uses: pick one flower
 // (0-9) per day so all 7 deck cards show the same illustration before
@@ -71,27 +74,82 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
   // — we just don't render it on the deck cards' fronts.
   const deckFlowerIndex = useMemo(() => dayOfYear() % 10, []);
 
-  // Load today's pull. If one exists, jump straight to the revealed
-  // state (center card, flipped) so the same message stays visible all
-  // day — matches the concierge oracle's "one card per day" rhythm.
+  // Favorites — fetched once; toggled via /meditate/oracle/{id}/favorite.
+  const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
+  // Hidden DOM node we hand to html2canvas when the share button fires.
+  const shareCardRef = useRef<HTMLDivElement | null>(null);
+  const [sharing, setSharing] = useState(false);
+
+  // Load today's pull + favorites in parallel. If a today's pull
+  // exists, jump straight to the revealed state.
   useEffect(() => {
     let alive = true;
-    fetch(`${API}/meditate/oracle/today`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!alive || !d) return;
-        if (d.pulled && d.card) {
-          setCard(d.card);
-          setPickedIndex(CENTER_INDEX);
-          setFlipped(true);
-          setPhase('revealed');
-          setReflection(d.card.reflection || '');
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (alive) setLoading(false); });
+    Promise.all([
+      fetch(`${API}/meditate/oracle/today`,     { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/meditate/oracle/favorites`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null),
+    ]).then(([d, fav]) => {
+      if (!alive) return;
+      if (d?.pulled && d.card) {
+        setCard(d.card);
+        setPickedIndex(CENTER_INDEX);
+        setFlipped(true);
+        setPhase('revealed');
+        setReflection(d.card.reflection || '');
+      }
+      if (fav?.favorite_pull_ids) setFavoriteIds(new Set<number>(fav.favorite_pull_ids));
+    }).catch(() => {}).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [API, token]);
+
+  const cardFavorited = !!(card && favoriteIds.has(card.id));
+
+  const toggleFavorite = useCallback(async () => {
+    if (!card) return;
+    try {
+      const res = await fetch(`${API}/meditate/oracle/${card.id}/favorite`, {
+        method:'POST', headers:{ Authorization:`Bearer ${token}` },
+      });
+      const d = await res.json();
+      if (!res.ok) return;
+      setFavoriteIds(prev => {
+        const next = new Set(prev);
+        if (d.favorited) next.add(card.id); else next.delete(card.id);
+        return next;
+      });
+    } catch {}
+  }, [API, token, card]);
+
+  const shareCard = useCallback(async () => {
+    if (!card || !shareCardRef.current || sharing) return;
+    setSharing(true);
+    try {
+      const canvas = await html2canvas(shareCardRef.current, {
+        backgroundColor: null,
+        scale: 2,
+        logging: false,
+        useCORS: true,
+      });
+      const blob: Blob | null = await new Promise(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
+      if (!blob) throw new Error('canvas → blob failed');
+      const file = new File([blob], 'soulmd-oracle.png', { type: 'image/png' });
+      // Prefer native share with file (mobile); fall back to download.
+      const navAny = navigator as any;
+      if (navAny.canShare && navAny.canShare({ files: [file] }) && navAny.share) {
+        await navAny.share({ files: [file], title: 'A message from the Universe', text: 'From SoulMD Meditate.' });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'soulmd-oracle.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } catch (e) {
+      // Quietly swallow — the doc can copy/text the message instead.
+      console.warn('share card failed', e);
+    } finally {
+      setSharing(false);
+    }
+  }, [card, sharing]);
 
   const pickCard = useCallback(async (i: number) => {
     if (phase !== 'deck' || pulling || card) return;
@@ -243,6 +301,38 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
             transition={{ duration: 1.0, delay: 1.2, ease: EASE }}
             style={{marginTop:'22px', position:'relative', zIndex:2}}>
 
+            {/* Heart + Share row — small floating actions on the
+                revealed card area, before the reflection prompt. */}
+            <div style={{display:'flex', justifyContent:'center', gap:'10px', marginBottom:'14px'}}>
+              <button onClick={toggleFavorite}
+                aria-label={cardFavorited ? 'Remove favorite' : 'Add favorite'}
+                title={cardFavorited ? 'Favorited' : 'Favorite this message'}
+                style={{
+                  background:'rgba(255,255,255,0.85)',
+                  border:`0.5px solid ${cardFavorited ? '#E06A6A' : T.border}`,
+                  borderRadius:'999px', padding:'8px 16px',
+                  fontSize:'14px', cursor:'pointer', fontFamily:'inherit',
+                  color: cardFavorited ? '#E06A6A' : T.inkSoft, fontWeight:700,
+                  display:'inline-flex', alignItems:'center', gap:'6px',
+                }}>
+                {cardFavorited ? '♥ Favorited' : '♡ Favorite'}
+              </button>
+              <button onClick={shareCard} disabled={sharing}
+                aria-label="Share this oracle message"
+                title="Share"
+                style={{
+                  background:'rgba(255,255,255,0.85)',
+                  border:`0.5px solid ${T.border}`,
+                  borderRadius:'999px', padding:'8px 16px',
+                  fontSize:'13px', cursor: sharing ? 'wait' : 'pointer', fontFamily:'inherit',
+                  color: T.purple, fontWeight:700,
+                  display:'inline-flex', alignItems:'center', gap:'6px',
+                  opacity: sharing ? 0.7 : 1,
+                }}>
+                {sharing ? 'Preparing…' : '↗ Share'}
+              </button>
+            </div>
+
             {/* Reflection card */}
             <div style={{
               background: T.cardBg, border: T.cardBorder, borderRadius:'18px',
@@ -310,6 +400,61 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Past messages — same data, separate scroll context. */}
+      <OracleHistory API={API} token={token}/>
+
+      {/* Hidden share card — html2canvas snapshots this DOM node when
+          the doctor taps Share. Positioned far off-screen so the user
+          never sees it; rendered at a generous 760×760 so the export
+          looks good in social previews. */}
+      {card && (
+        <div ref={shareCardRef}
+          aria-hidden
+          style={{
+            position:'fixed', left:'-9999px', top:0,
+            width:'760px', height:'760px',
+            padding:'56px',
+            boxSizing:'border-box',
+            background: `linear-gradient(135deg, #F5F1FF 0%, #E8E4FB 100%)`,
+            display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+            color: T.navy, fontFamily:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif',
+          }}>
+          {/* Faint Cho Ku Rei watermark — hand-traced as a span so we
+              don't pull in the SVG component (html2canvas is happier
+              with simple DOM). */}
+          <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none', opacity:0.05, fontSize:'520px', color: T.gold, lineHeight:1}}>✦</div>
+
+          <div style={{
+            width:'320px', height:'320px',
+            backgroundImage:`url(${flowersImg})`,
+            backgroundSize:`${1000 * (320/200)}px ${400 * (320/200)}px`,
+            backgroundPosition:`-${(card.flower_index % 5) * 320}px -${Math.floor(card.flower_index / 5) * 320}px`,
+            backgroundRepeat:'no-repeat',
+            // Crop the bottom 16% (label) the same way FlowerSprite does.
+            clipPath:'inset(0 0 16% 0)',
+            WebkitClipPath:'inset(0 0 16% 0)' as any,
+            marginBottom:'30px',
+            position:'relative', zIndex:2,
+          }}/>
+          <div style={{
+            fontFamily: T.serif, fontStyle:'italic',
+            fontSize:'26px', lineHeight:1.5,
+            color: T.navy, textAlign:'center', maxWidth:'620px',
+            position:'relative', zIndex:2,
+          }}>
+            “{card.message_text}”
+          </div>
+          <div style={{
+            marginTop:'32px',
+            fontSize:'13px', letterSpacing:'4px', textTransform:'uppercase',
+            color: T.gold, fontWeight:800,
+            position:'relative', zIndex:2,
+          }}>
+            ✦ SoulMD Meditate ✦
+          </div>
+        </div>
+      )}
     </div>
   );
 };

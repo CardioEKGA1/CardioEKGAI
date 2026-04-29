@@ -14,6 +14,7 @@ import LibraryScreen from './LibraryScreen';
 import MeditationPlayer from './MeditationPlayer';
 import DiaryScreen from './DiaryScreen';
 import DiaryEntryForm from './DiaryEntryForm';
+import HomeHeader from './HomeHeader';
 
 interface Props { API: string; token: string; onBack: () => void; }
 
@@ -92,7 +93,10 @@ const MeditateApp: React.FC<Props> = ({ API, token, onBack }) => {
         {/* Tab body */}
         <div style={{marginTop:'8px'}}>
           {tab === 'oracle' && (
-            <OracleScreen API={API} token={token} onBeginMeditation={goLibrary}/>
+            <>
+              <HomeHeader API={API} token={token} onOpenMeditation={(id) => setOpenMeditationId(id)}/>
+              <OracleScreen API={API} token={token} onBeginMeditation={goLibrary}/>
+            </>
           )}
           {tab === 'library' && (
             <LibraryScreen API={API} token={token} onOpenMeditation={(id) => setOpenMeditationId(id)}/>

@@ -22,6 +22,8 @@ from database import (
     PageVisit,
     MeditateOracleMessage, MeditateOraclePull, MeditateDiaryEntry,
     MeditateAccessRequest, ConciergeInquiry, HipaaAuditLog,
+    MeditateIntention, MeditateOracleFavorite, MeditateMedFavorite,
+    MeditatePlayHistory, MeditateAiInsight,
     ToolTrialUse,
 )
 import hashlib
@@ -6596,6 +6598,9 @@ class _MeditateDiaryCreateRequest(BaseModel):
     general_reflection: str | None = None
     mood_before: int | None = None
     mood_after: int | None = None
+    gratitude_1: str | None = None
+    gratitude_2: str | None = None
+    gratitude_3: str | None = None
 
 
 def _serialize_meditate_pull(p: MeditateOraclePull, message_text: str) -> dict:
@@ -6622,6 +6627,9 @@ def _serialize_meditate_diary(d: MeditateDiaryEntry) -> dict:
         "general_reflection": d.general_reflection or "",
         "mood_before": d.mood_before,
         "mood_after": d.mood_after,
+        "gratitude_1": getattr(d, "gratitude_1", None) or "",
+        "gratitude_2": getattr(d, "gratitude_2", None) or "",
+        "gratitude_3": getattr(d, "gratitude_3", None) or "",
         "created_at": d.created_at.isoformat() if d.created_at else None,
     }
 
@@ -6799,7 +6807,10 @@ def meditate_diary_create(
     gr = (data.general_reflection or "").strip()
     mb = data.mood_before if data.mood_before in (1, 2, 3, 4, 5) else None
     ma = data.mood_after  if data.mood_after  in (1, 2, 3, 4, 5) else None
-    if not (bs or em or vi or gr or mb or ma):
+    g1 = (data.gratitude_1 or "").strip() or None
+    g2 = (data.gratitude_2 or "").strip() or None
+    g3 = (data.gratitude_3 or "").strip() or None
+    if not (bs or em or vi or gr or mb or ma or g1 or g2 or g3):
         raise HTTPException(status_code=400, detail="Add at least one field before saving.")
     title = (data.meditation_title or "").strip()
     if data.meditation_id and not title:
@@ -6814,6 +6825,7 @@ def meditate_diary_create(
         body_sensations=bs, emotions_felt=em,
         visions_or_insights=vi, general_reflection=gr,
         mood_before=mb, mood_after=ma,
+        gratitude_1=g1, gratitude_2=g2, gratitude_3=g3,
     )
     db.add(entry); db.commit(); db.refresh(entry)
     return _serialize_meditate_diary(entry)
@@ -6858,6 +6870,474 @@ def meditate_diary_detail(
     if not e:
         raise HTTPException(status_code=404, detail="Entry not found")
     return _serialize_meditate_diary(e)
+
+
+# ───── /meditate engagement layer (intentions, stats, favorites, etc.) ────
+
+class _MeditateIntentionRequest(BaseModel):
+    intention_text: str
+
+
+class _MeditateRecordPlayRequest(BaseModel):
+    meditation_id: int
+    completed: bool = False
+
+
+@app.get("/meditate/stats")
+def meditate_stats(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Streak + lifetime totals shown in the home-tab stats pills.
+    Streak = consecutive days ending today (or yesterday if no
+    completion today) where the user marked at least one meditation
+    complete. Total minutes is summed off the source meditation row's
+    duration_min so a single play counts as that meditation's full
+    length — the player doesn't track partial completion."""
+    plays = db.query(MeditatePlayHistory).filter(
+        MeditatePlayHistory.user_id == current_user.id,
+        MeditatePlayHistory.completed == True,  # noqa: E712
+    ).order_by(MeditatePlayHistory.played_at.desc()).all()
+
+    total_sessions = len(plays)
+    minutes = 0
+    if plays:
+        med_ids = list({p.meditation_id for p in plays})
+        meds = {m.id: (m.duration_min or 0) for m in db.query(ConciergeMeditation).filter(ConciergeMeditation.id.in_(med_ids)).all()}
+        minutes = sum(meds.get(p.meditation_id, 0) for p in plays)
+
+    # Streak.
+    today = datetime.strptime(_today_mst(), "%Y-%m-%d").date()
+    play_dates = {p.played_at.date() for p in plays if p.played_at}
+    cursor = today
+    if cursor not in play_dates:
+        cursor = cursor - timedelta(days=1)
+    streak = 0
+    while cursor in play_dates:
+        streak += 1
+        cursor = cursor - timedelta(days=1)
+
+    return {
+        "streak": streak,
+        "total_sessions": total_sessions,
+        "total_minutes": minutes,
+    }
+
+
+@app.post("/meditate/intention")
+def meditate_intention_save(
+    data: _MeditateIntentionRequest,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    text = (data.intention_text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Intention is required.")
+    today = _today_mst()
+    existing = db.query(MeditateIntention).filter(
+        MeditateIntention.user_id == current_user.id,
+        MeditateIntention.date == today,
+    ).order_by(MeditateIntention.id.desc()).first()
+    if existing:
+        existing.intention_text = text
+        existing.created_at = datetime.utcnow()
+        row = existing
+    else:
+        row = MeditateIntention(user_id=current_user.id, intention_text=text, date=today)
+        db.add(row)
+    db.commit(); db.refresh(row)
+    return {"id": row.id, "date": row.date, "intention_text": row.intention_text}
+
+
+@app.get("/meditate/intention/today")
+def meditate_intention_today(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    today = _today_mst()
+    row = db.query(MeditateIntention).filter(
+        MeditateIntention.user_id == current_user.id,
+        MeditateIntention.date == today,
+    ).order_by(MeditateIntention.id.desc()).first()
+    if not row:
+        return {"intention_text": "", "date": today}
+    return {"id": row.id, "date": row.date, "intention_text": row.intention_text}
+
+
+@app.get("/meditate/oracle/history")
+def meditate_oracle_history(
+    limit: int = 30,
+    favorites_only: bool = False,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Past oracle pulls for the user, newest first. With
+    favorites_only=true, returns only the pulls the user has hearted."""
+    n = max(1, min(int(limit or 30), 200))
+    if favorites_only:
+        fav_ids = [f.oracle_pull_id for f in db.query(MeditateOracleFavorite).filter(
+            MeditateOracleFavorite.user_id == current_user.id,
+        ).all()]
+        if not fav_ids:
+            return {"pulls": [], "favorite_ids": []}
+        pulls = db.query(MeditateOraclePull).filter(
+            MeditateOraclePull.id.in_(fav_ids),
+        ).order_by(MeditateOraclePull.created_at.desc()).limit(n).all()
+    else:
+        pulls = db.query(MeditateOraclePull).filter(
+            MeditateOraclePull.user_id == current_user.id,
+        ).order_by(MeditateOraclePull.created_at.desc()).limit(n).all()
+
+    msg_ids = list({p.message_id for p in pulls})
+    msg_map = {m.id: m.message_text for m in db.query(MeditateOracleMessage).filter(MeditateOracleMessage.id.in_(msg_ids)).all()} if msg_ids else {}
+    fav_ids = {f.oracle_pull_id for f in db.query(MeditateOracleFavorite).filter(
+        MeditateOracleFavorite.user_id == current_user.id,
+    ).all()}
+    out = []
+    for p in pulls:
+        item = _serialize_meditate_pull(p, msg_map.get(p.message_id, ""))
+        item["favorited"] = p.id in fav_ids
+        out.append(item)
+    return {"pulls": out, "favorite_ids": sorted(fav_ids)}
+
+
+@app.post("/meditate/oracle/{pull_id}/favorite")
+def meditate_oracle_favorite_toggle(
+    pull_id: int,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Toggle heart on an oracle pull. Returns the new state."""
+    pull = db.query(MeditateOraclePull).filter(
+        MeditateOraclePull.id == pull_id,
+        MeditateOraclePull.user_id == current_user.id,
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="Oracle pull not found")
+    existing = db.query(MeditateOracleFavorite).filter(
+        MeditateOracleFavorite.user_id == current_user.id,
+        MeditateOracleFavorite.oracle_pull_id == pull_id,
+    ).first()
+    if existing:
+        db.delete(existing); db.commit()
+        return {"oracle_pull_id": pull_id, "favorited": False}
+    db.add(MeditateOracleFavorite(user_id=current_user.id, oracle_pull_id=pull_id))
+    db.commit()
+    return {"oracle_pull_id": pull_id, "favorited": True}
+
+
+@app.get("/meditate/oracle/favorites")
+def meditate_oracle_favorites(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Just the favorite pull IDs — clients usually fetch these alongside
+    the history list to render heart state without a second round-trip."""
+    rows = db.query(MeditateOracleFavorite).filter(
+        MeditateOracleFavorite.user_id == current_user.id,
+    ).order_by(MeditateOracleFavorite.created_at.desc()).all()
+    return {"favorite_pull_ids": [r.oracle_pull_id for r in rows]}
+
+
+@app.post("/meditate/meditations/{meditation_id}/favorite")
+def meditate_meditation_favorite_toggle(
+    meditation_id: int,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Toggle bookmark on a meditation. Returns new state."""
+    src = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == meditation_id).first()
+    if not src:
+        raise HTTPException(status_code=404, detail="Meditation not found")
+    existing = db.query(MeditateMedFavorite).filter(
+        MeditateMedFavorite.user_id == current_user.id,
+        MeditateMedFavorite.meditation_id == meditation_id,
+    ).first()
+    if existing:
+        db.delete(existing); db.commit()
+        return {"meditation_id": meditation_id, "favorited": False}
+    db.add(MeditateMedFavorite(user_id=current_user.id, meditation_id=meditation_id))
+    db.commit()
+    return {"meditation_id": meditation_id, "favorited": True}
+
+
+@app.get("/meditate/meditations/favorites")
+def meditate_meditation_favorites_list(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(MeditateMedFavorite).filter(
+        MeditateMedFavorite.user_id == current_user.id,
+    ).order_by(MeditateMedFavorite.created_at.desc()).all()
+    ids = [r.meditation_id for r in rows]
+    meds = {m.id: m for m in db.query(ConciergeMeditation).filter(ConciergeMeditation.id.in_(ids)).all()} if ids else {}
+    out = []
+    for r in rows:
+        m = meds.get(r.meditation_id)
+        if not m:
+            continue
+        out.append({
+            "id": m.id,
+            "title": m.title,
+            "category": m.category or "uncategorized",
+            "duration_min": m.duration_min or 0,
+            "description": m.description or "",
+            "difficulty": m.difficulty or None,
+            "script_preview": (m.script or "")[:280],
+            "favorited_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return {"meditations": out, "favorite_ids": ids}
+
+
+@app.post("/meditate/meditations/play")
+def meditate_record_play(
+    data: _MeditateRecordPlayRequest,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Append a play-history row. Called when MeditationPlayer opens
+    (completed=False) and again when Mark Complete fires (completed=
+    True). Two rows is fine — the streak math only counts completed
+    rows, and last-played reads the most recent regardless."""
+    src = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == data.meditation_id).first()
+    if not src:
+        raise HTTPException(status_code=404, detail="Meditation not found")
+    row = MeditatePlayHistory(
+        user_id=current_user.id,
+        meditation_id=data.meditation_id,
+        completed=bool(data.completed),
+    )
+    db.add(row); db.commit(); db.refresh(row)
+    return {"id": row.id, "meditation_id": row.meditation_id, "completed": row.completed}
+
+
+@app.get("/meditate/meditations/recent")
+def meditate_meditations_recent(
+    limit: int = 5,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Last N distinct meditations the user has played, newest first."""
+    n = max(1, min(int(limit or 5), 20))
+    plays = db.query(MeditatePlayHistory).filter(
+        MeditatePlayHistory.user_id == current_user.id,
+    ).order_by(MeditatePlayHistory.played_at.desc()).limit(n * 6).all()
+    seen: set[int] = set()
+    ordered_ids: list[int] = []
+    for p in plays:
+        if p.meditation_id in seen:
+            continue
+        seen.add(p.meditation_id)
+        ordered_ids.append(p.meditation_id)
+        if len(ordered_ids) >= n:
+            break
+    if not ordered_ids:
+        return {"meditations": []}
+    meds = {m.id: m for m in db.query(ConciergeMeditation).filter(ConciergeMeditation.id.in_(ordered_ids)).all()}
+    out = []
+    for mid in ordered_ids:
+        m = meds.get(mid)
+        if not m:
+            continue
+        out.append({
+            "id": m.id,
+            "title": m.title,
+            "category": m.category or "uncategorized",
+            "duration_min": m.duration_min or 0,
+        })
+    return {"meditations": out}
+
+
+@app.get("/meditate/meditations/last-played")
+def meditate_meditations_last_played(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Single last-played meditation for the home-tab Resume card.
+    Returns 204-equivalent (`{meditation: null}`) when there's no
+    history — the UI hides the section in that case."""
+    last = db.query(MeditatePlayHistory).filter(
+        MeditatePlayHistory.user_id == current_user.id,
+    ).order_by(MeditatePlayHistory.played_at.desc()).first()
+    if not last:
+        return {"meditation": None}
+    m = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == last.meditation_id).first()
+    if not m:
+        return {"meditation": None}
+    return {"meditation": {
+        "id": m.id, "title": m.title,
+        "category": m.category or "uncategorized",
+        "duration_min": m.duration_min or 0,
+        "played_at": last.played_at.isoformat() if last.played_at else None,
+    }}
+
+
+@app.post("/meditate/meditations/recommended")
+def meditate_meditations_recommended(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """3-card recommendation row for the Library tab. Reads the user's
+    last 7 diary entries, asks Claude Haiku for 3 category slugs, then
+    picks one random meditation from each. Falls back to 3 random rows
+    when there's no diary signal yet (or Claude is unreachable)."""
+    diary = db.query(MeditateDiaryEntry).filter(
+        MeditateDiaryEntry.user_id == current_user.id,
+    ).order_by(MeditateDiaryEntry.created_at.desc()).limit(7).all()
+
+    # Build the available-categories list from real data so we never
+    # recommend a slug Claude invented.
+    from sqlalchemy import func as _f
+    cat_rows = db.query(ConciergeMeditation.category, _f.count(ConciergeMeditation.id)).group_by(ConciergeMeditation.category).all()
+    available = [c for c, _n in cat_rows if c]
+
+    chosen: list[str] = []
+    if diary and os.getenv("ANTHROPIC_API_KEY") and available:
+        signal = [{
+            "date": d.created_at.isoformat() if d.created_at else None,
+            "mood_before": d.mood_before, "mood_after": d.mood_after,
+            "emotions": (d.emotions_felt or "")[:160],
+            "general": (d.general_reflection or "")[:160],
+        } for d in diary]
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                system=(
+                    "You are a meditation-category recommender. The user is a "
+                    "concierge patient practicing daily meditation. Given their "
+                    "last 7 post-meditation diary entries (each with mood_before "
+                    "and mood_after on a 1-5 scale plus short emotion + general "
+                    "reflection text), suggest 3 categories from the supplied "
+                    "list that would best serve their next session. If moods are "
+                    "consistently low (≤2 after), favor healing / self-love / "
+                    "inner peace categories. If moods are high (4-5), favor "
+                    "deeper practice / cosmic consciousness / soul purpose."
+                ),
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Diary entries (newest first): {json.dumps(signal)}\n\n"
+                        f"Available category slugs: {json.dumps(sorted(available))}\n\n"
+                        "Return ONLY a JSON array of exactly 3 category slugs "
+                        "from the available list, no preamble, no markdown."
+                    ),
+                }],
+            )
+            parsed = _extract_json((resp.content[0].text or "").strip())
+            if isinstance(parsed, list):
+                chosen = [s for s in parsed if isinstance(s, str) and s in available][:3]
+        except Exception as e:
+            print(f"recommendations: Claude call failed — {e}")
+
+    # Fallback: 3 random categories from the bank.
+    if len(chosen) < 3 and available:
+        import random as _r
+        pool = [c for c in available if c not in chosen]
+        _r.shuffle(pool)
+        chosen.extend(pool[: 3 - len(chosen)])
+
+    # Pick one random meditation per chosen category. Use offset+limit for
+    # cheap randomness without loading every row.
+    out = []
+    for cat in chosen[:3]:
+        total = db.query(_f.count(ConciergeMeditation.id)).filter(ConciergeMeditation.category == cat).scalar() or 0
+        if total == 0:
+            continue
+        import random as _r
+        offset = _r.randint(0, total - 1)
+        m = db.query(ConciergeMeditation).filter(ConciergeMeditation.category == cat).offset(offset).limit(1).first()
+        if not m:
+            continue
+        out.append({
+            "id": m.id, "title": m.title,
+            "category": m.category, "duration_min": m.duration_min or 0,
+            "description": m.description or "",
+            "script_preview": (m.script or "")[:280],
+        })
+    return {"meditations": out, "categories": chosen[:3]}
+
+
+@app.get("/meditate/diary/mood-chart")
+def meditate_diary_mood_chart(
+    range: str = "week",
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Recharts-friendly series — one point per diary entry within the
+    window. range ∈ {week, month}. Skips entries with both moods null."""
+    days = 7 if range == "week" else 30
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    rows = db.query(MeditateDiaryEntry).filter(
+        MeditateDiaryEntry.user_id == current_user.id,
+        MeditateDiaryEntry.created_at >= cutoff,
+    ).order_by(MeditateDiaryEntry.created_at.asc()).all()
+    series = []
+    for r in rows:
+        if r.mood_before is None and r.mood_after is None:
+            continue
+        series.append({
+            "date": r.created_at.strftime("%Y-%m-%d") if r.created_at else None,
+            "mood_before": r.mood_before,
+            "mood_after": r.mood_after,
+        })
+    return {"range": range, "series": series}
+
+
+@app.get("/meditate/diary/insight")
+def meditate_diary_insight(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """One-sentence Yogananda-toned monthly observation. Cached per
+    user/month in meditate_ai_insights. Generated lazily on first
+    diary view of each new month."""
+    month = datetime.utcnow().strftime("%Y-%m")
+    existing = db.query(MeditateAiInsight).filter(
+        MeditateAiInsight.user_id == current_user.id,
+        MeditateAiInsight.month == month,
+    ).order_by(MeditateAiInsight.id.desc()).first()
+    if existing:
+        return {"insight": existing.insight_text, "month": month, "cached": True}
+
+    rows = db.query(MeditateDiaryEntry).filter(
+        MeditateDiaryEntry.user_id == current_user.id,
+        MeditateDiaryEntry.created_at >= datetime.utcnow() - timedelta(days=30),
+    ).order_by(MeditateDiaryEntry.created_at.desc()).all()
+    if len(rows) < 2:
+        return {"insight": "Sit with one more practice and a pattern will begin to show itself.", "month": month, "cached": False}
+
+    text_for_claude = json.dumps([{
+        "mood_before": r.mood_before, "mood_after": r.mood_after,
+        "emotions": (r.emotions_felt or "")[:140],
+        "reflection": (r.general_reflection or "")[:160],
+    } for r in rows[:30]])
+
+    insight = ""
+    if os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=120,
+                system=(
+                    "You write one warm, encouraging sentence (max 30 words) "
+                    "about a meditator's diary patterns. Voice is gentle and "
+                    "Yogananda-inspired. No medical advice, no diagnoses. "
+                    "Address the meditator directly with 'you' and 'your'. "
+                    "Return only the sentence — no preamble, no quotes."
+                ),
+                messages=[{"role": "user", "content": text_for_claude}],
+            )
+            insight = (resp.content[0].text or "").strip().strip('"').strip("'")
+        except Exception as e:
+            print(f"diary insight: Claude failed — {e}")
+
+    if not insight:
+        insight = "Keep returning to the breath — the soul recognizes its own patience."
+
+    row = MeditateAiInsight(user_id=current_user.id, insight_text=insight, month=month)
+    db.add(row); db.commit()
+    return {"insight": insight, "month": month, "cached": False}
 
 
 # ───── Uptime monitoring ─────────────────────────────────────────────────────

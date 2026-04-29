@@ -4,6 +4,7 @@
 // entries via the parent-managed DiaryEntryForm overlay.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { MEDITATE_TOKENS as T } from './MeditateApp';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 interface Props {
   API: string;
@@ -21,6 +22,9 @@ interface DiaryEntry {
   general_reflection: string;
   mood_before: number | null;
   mood_after: number | null;
+  gratitude_1?: string;
+  gratitude_2?: string;
+  gratitude_3?: string;
   created_at: string | null;
 }
 
@@ -98,6 +102,10 @@ const DiaryScreen: React.FC<Props> = ({ API, token, onAddEntry }) => {
           + Entry
         </button>
       </div>
+
+      {/* Mood timeline + monthly AI insight */}
+      <MoodChartCard API={API} token={token}/>
+      <MonthlyInsightCard API={API} token={token}/>
 
       {/* Filter pills */}
       <div style={{display:'flex', gap:'6px', marginBottom:'12px'}}>
@@ -211,6 +219,18 @@ const DiaryRow: React.FC<{entry: DiaryEntry; expanded: boolean; onToggle: () => 
           {entry.emotions_felt && <Section label="Emotions" text={entry.emotions_felt}/>}
           {entry.visions_or_insights && <Section label="Visions / insights" text={entry.visions_or_insights}/>}
           {entry.general_reflection && <Section label="Reflection" text={entry.general_reflection}/>}
+          {(entry.gratitude_1 || entry.gratitude_2 || entry.gratitude_3) && (
+            <div>
+              <div style={{fontSize:'9px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.gold, fontWeight:800, marginBottom:'2px'}}>
+                Three Things I'm Grateful For
+              </div>
+              <ul style={{margin:0, paddingLeft:'18px', fontFamily: T.serif, fontSize:'13.5px', color: T.navy, lineHeight:1.65}}>
+                {entry.gratitude_1 && <li>{entry.gratitude_1}</li>}
+                {entry.gratitude_2 && <li>{entry.gratitude_2}</li>}
+                {entry.gratitude_3 && <li>{entry.gratitude_3}</li>}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </button>
@@ -227,5 +247,112 @@ const Section: React.FC<{label: string; text: string}> = ({ label, text }) => (
     </div>
   </div>
 );
+
+// ───── Mood timeline + AI insight cards ──────────────────────────────────
+
+interface MoodPoint { date: string | null; mood_before: number | null; mood_after: number | null; }
+
+const MoodChartCard: React.FC<{API: string; token: string}> = ({ API, token }) => {
+  const [range, setRange] = useState<'week' | 'month'>('week');
+  const [series, setSeries] = useState<MoodPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetch(`${API}/meditate/diary/mood-chart?range=${range}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (alive) setSeries(d?.series || []); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [API, token, range]);
+
+  const isEmpty = !loading && series.length === 0;
+
+  return (
+    <div style={{
+      background: T.cardBg, border: T.cardBorder, borderRadius:'14px',
+      padding:'14px', marginBottom:'10px',
+      boxShadow:'0 4px 14px rgba(83,74,183,0.06)',
+    }}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+        <div style={{fontSize:'10px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.inkSoft, fontWeight:800}}>
+          Mood Timeline
+        </div>
+        <div style={{display:'flex', gap:'4px'}}>
+          {(['week', 'month'] as const).map(r => {
+            const active = range === r;
+            return (
+              <button key={r} onClick={() => setRange(r)}
+                style={{
+                  padding:'4px 10px', borderRadius:'999px',
+                  background: active ? T.gold : 'transparent',
+                  color: active ? 'white' : T.inkSoft,
+                  border: active ? 'none' : `0.5px solid ${T.border}`,
+                  fontSize:'10px', fontWeight: active ? 800 : 700, letterSpacing:'0.4px',
+                  cursor:'pointer', fontFamily:'inherit', textTransform:'uppercase',
+                }}>{r}</button>
+            );
+          })}
+        </div>
+      </div>
+      {isEmpty ? (
+        <div style={{padding:'18px 8px', textAlign:'center', color: T.inkSoft, fontFamily: T.serif, fontStyle:'italic', fontSize:'13px'}}>
+          Log a few entries with mood-before / mood-after to see the timeline.
+        </div>
+      ) : (
+        <div style={{width:'100%', height:'160px'}}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={series} margin={{top:8, right:8, bottom:0, left:-12}}>
+              <CartesianGrid stroke="rgba(83,74,183,0.08)" strokeDasharray="3 3"/>
+              <XAxis dataKey="date" tick={{fontSize:10, fill: T.inkSoft}} tickFormatter={(d: string) => d ? d.slice(5) : ''}/>
+              <YAxis domain={[1, 5]} ticks={[1,2,3,4,5]} tick={{fontSize:10, fill: T.inkSoft}}/>
+              <Tooltip contentStyle={{borderRadius:10, border:`0.5px solid ${T.border}`, fontFamily:'inherit', fontSize:12}}/>
+              <Legend wrapperStyle={{fontSize:10, paddingTop:4}}/>
+              <Line type="monotone" dataKey="mood_before" name="Before" stroke="#9bb6e0" strokeWidth={2} dot={{r:3}}/>
+              <Line type="monotone" dataKey="mood_after"  name="After"  stroke="#e0a8c0" strokeWidth={2} dot={{r:3}}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MonthlyInsightCard: React.FC<{API: string; token: string}> = ({ API, token }) => {
+  const [insight, setInsight] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API}/meditate/diary/insight`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (alive) setInsight(d?.insight || ''); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [API, token]);
+
+  if (loading || !insight) return null;
+  return (
+    <div style={{
+      background:'rgba(255,255,255,0.85)',
+      border:`0.5px solid ${T.gold}66`,
+      borderLeft:`3px solid ${T.gold}`,
+      borderRadius:'14px',
+      padding:'14px 16px',
+      marginBottom:'14px',
+      boxShadow:'0 4px 14px rgba(201,168,76,0.10)',
+    }}>
+      <div style={{fontSize:'10px', letterSpacing:'1.5px', textTransform:'uppercase', color: T.gold, fontWeight:800, marginBottom:'6px'}}>
+        ✦ Your Monthly Pattern
+      </div>
+      <div style={{fontFamily: T.serif, fontStyle:'italic', fontSize:'14px', color: T.navy, lineHeight:1.65}}>
+        {insight}
+      </div>
+    </div>
+  );
+};
+
+void useMemo;
 
 export default DiaryScreen;
