@@ -21,7 +21,7 @@ from database import (
     ConciergeEnergyLog, ConciergeJournalEntry,
     PageVisit,
     MeditateOracleMessage, MeditateOraclePull, MeditateDiaryEntry,
-    MeditateAccessRequest, ConciergeInquiry,
+    MeditateAccessRequest, ConciergeInquiry, HipaaAuditLog,
     ToolTrialUse,
 )
 import hashlib
@@ -5372,6 +5372,301 @@ def physician_patient_journal(
     ).order_by(ConciergeJournalEntry.created_at.desc()).limit(n).all()
     titles = _hydrate_meditation_titles(rows, db)
     return {"entries": [_serialize_journal(j, titles.get(j.meditation_id or 0)) for j in rows]}
+
+
+# ─── Monthly Wellness Review draft (Claude) ───────────────────────────────
+# Pulls 30-90 days of patient signal across every concierge surface
+# (energy log, post-meditation diary, oracle reflections, labs,
+# secure-message subjects, upcoming appointments, visit usage), hands
+# the structured brief to Claude Sonnet with Dr. Anderson's voice
+# baked into the system prompt, and returns an editable email draft
+# the physician can refine + send via the existing secure-message
+# system. Every call is logged to hipaa_audit_log with action
+# 'DRAFT_MONTHLY_REVIEW'.
+
+_DRAFT_REVIEW_SYSTEM_PROMPT = (
+    "You are Dr. Anderson, a board-certified Internal Medicine physician with an "
+    "integrative, soul-centered practice. You are writing a warm, personal monthly "
+    "wellness review email to your concierge patient.\n\n"
+    "Your tone is: warm, professional, encouraging, spiritually aware without being "
+    "prescriptive. Like a trusted physician who also understands the mind-body-spirit "
+    "connection.\n\n"
+    "Write in first person as Dr. Anderson.\n"
+    "Never mention the patient's last name.\n"
+    "Never mention specific dollar amounts or pricing.\n"
+    "Never give specific medical diagnoses in the email.\n"
+    "Always end with an intention or reflection for the month ahead inspired by Yogananda.\n\n"
+    "Structure the email as:\n"
+    "1. Warm personal opening (reference something specific from their data).\n"
+    "2. Physical wellness observations (labs if available, energy patterns).\n"
+    "3. Mind + emotional wellness (meditation consistency, mood trends).\n"
+    "4. Soul + spiritual observations (diary insights, oracle reflections if shared).\n"
+    "5. Recommendations for the month ahead (gentle, integrative, non-prescriptive).\n"
+    "6. Closing intention/reflection from Yogananda.\n"
+    "7. Warm sign-off as Dr. Anderson.\n\n"
+    "Return only the email body (no subject line, no preamble). Use plain paragraphs "
+    "separated by blank lines — no markdown headers, no bullet symbols. The patient "
+    "will read this in a secure-message thread."
+)
+
+
+def _mood_label(score: int) -> str:
+    return {1: "Struggling", 2: "Low", 3: "Okay", 4: "Good", 5: "Thriving"}.get(score, "—")
+
+
+def _build_review_brief(
+    patient: ConciergePatient,
+    energy_logs: list,
+    diary_entries: list,
+    labs: list,
+    messages: list,
+    appointments: list,
+    oracle_pulls: list,
+    medication_titles: dict[int, str],
+    tier_label: str,
+    visits_used: int,
+    visits_allowed: int,
+    meditations_used: int,
+    meditations_allowed: int,
+) -> str:
+    """Render the structured patient summary that Claude consumes. Kept
+    deterministic and free of PII beyond what the physician already sees
+    in the dashboard."""
+    first_name = (patient.name or "").strip().split(" ")[0] or "Patient"
+    parts: list[str] = []
+
+    parts.append(f"## Patient context")
+    parts.append(f"- First name: {first_name}")
+    parts.append(f"- Membership tier: {tier_label}")
+    parts.append(f"- Visits this cycle: {visits_used} of {visits_allowed}")
+    parts.append(f"- Guided meditations this cycle: {meditations_used} of {meditations_allowed}")
+    if patient.created_at:
+        parts.append(f"- Member since: {patient.created_at.strftime('%B %Y')}")
+    if patient.intake_data:
+        # Surface the highest-signal intake fields only — keep the brief tight.
+        for k in ("chief_complaint", "goals_medical", "goals_coaching", "goals_spiritual"):
+            v = (patient.intake_data or {}).get(k)
+            if v:
+                parts.append(f"- {k.replace('_', ' ').title()}: {str(v)[:240]}")
+    parts.append("")
+
+    # Energy log.
+    parts.append("## Energy log (last 30 days)")
+    if not energy_logs:
+        parts.append("- No check-ins this month.")
+    else:
+        avg = sum(e.energy_score for e in energy_logs) / len(energy_logs)
+        from collections import Counter as _C
+        moods = _C(_mood_label(e.energy_score) for e in energy_logs)
+        top_mood = moods.most_common(1)[0][0] if moods else "—"
+        flagged = sum(1 for e in energy_logs if e.energy_score <= 2)
+        parts.append(f"- Total check-ins: {len(energy_logs)}")
+        parts.append(f"- Average energy: {avg:.1f} / 5 ({top_mood} most often)")
+        if flagged:
+            parts.append(f"- Flagged days (energy 1-2): {flagged}")
+        notes = [e for e in energy_logs if (e.note or "").strip()]
+        if notes:
+            parts.append("- Recent notes:")
+            for e in notes[:5]:
+                parts.append(f"  • {e.log_date}: \"{(e.note or '')[:200]}\"")
+    parts.append("")
+
+    # Post-meditation diary entries.
+    parts.append("## Post-meditation diary (last 30 days)")
+    if not diary_entries:
+        parts.append("- No reflections this month.")
+    else:
+        parts.append(f"- Total reflections: {len(diary_entries)}")
+        for j in diary_entries[:6]:
+            title = medication_titles.get(j.meditation_id or 0) or "(standalone)"
+            mood = (j.mood_shift or "").replace("_", " ")
+            parts.append(f"- {j.entry_date} · {title}{(' · mood: ' + mood) if mood else ''}")
+            if (j.reflection or "").strip():
+                parts.append(f"  reflection: \"{(j.reflection or '')[:240]}\"")
+            if (j.intention or "").strip():
+                parts.append(f"  intention: \"{(j.intention or '')[:200]}\"")
+    parts.append("")
+
+    # Oracle reflections.
+    parts.append("## Oracle reflections (last 30 days)")
+    if not oracle_pulls:
+        parts.append("- No pulls or reflections this month.")
+    else:
+        parts.append(f"- Total pulls: {len(oracle_pulls)}")
+        with_reflections = [p for p in oracle_pulls if (p.reflection or "").strip()]
+        for p in with_reflections[:5]:
+            parts.append(f"- {p.pull_date}: \"{(p.reflection or '')[:240]}\"")
+    parts.append("")
+
+    # Labs (last 90 days).
+    parts.append("## Lab uploads (last 90 days)")
+    if not labs:
+        parts.append("- No labs uploaded.")
+    else:
+        for lab in labs[:8]:
+            note = (lab.physician_note or "").strip()
+            tag = lab.status or "pending"
+            parts.append(f"- {lab.uploaded_at.strftime('%b %d')} · {lab.filename} · {tag}{(' — ' + note[:200]) if note else ''}")
+    parts.append("")
+
+    # Messages — subjects only, for context, never bodies.
+    parts.append("## Recent secure-message subjects (last 30 days)")
+    if not messages:
+        parts.append("- No messages this month.")
+    else:
+        for m in messages[:10]:
+            who = "Dr. Anderson → patient" if m.direction == "outbound" else "patient → Dr. Anderson"
+            subj = (m.subject or "").strip() or "(no subject)"
+            cat = m.category or "general"
+            parts.append(f"- {m.created_at.strftime('%b %d')} · {who} · {cat} · {subj[:160]}")
+    parts.append("")
+
+    # Upcoming appointments.
+    parts.append("## Upcoming appointments")
+    if not appointments:
+        parts.append("- None scheduled.")
+    else:
+        for a in appointments[:5]:
+            when = a.starts_at.strftime("%a %b %d at %I:%M %p") if a.starts_at else "—"
+            parts.append(f"- {when} · {a.appointment_type} ({a.duration_min} min)")
+
+    return "\n".join(parts)
+
+
+@app.post("/concierge/physician/patients/{patient_id}/draft-review")
+def physician_draft_monthly_review(
+    patient_id: int,
+    request: Request,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Assemble the patient brief, hand it to Claude with Dr. Anderson's
+    voice baked in, audit the access, return an editable draft."""
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    now = datetime.utcnow()
+    days30 = now - timedelta(days=30)
+    days90 = now - timedelta(days=90)
+
+    # Energy log + diary entries are scoped by patient_id.
+    energy_logs = (db.query(ConciergeEnergyLog)
+                     .filter(ConciergeEnergyLog.patient_id == patient_id,
+                             ConciergeEnergyLog.created_at >= days30)
+                     .order_by(ConciergeEnergyLog.created_at.desc()).all())
+    diary_entries = (db.query(ConciergeJournalEntry)
+                       .filter(ConciergeJournalEntry.patient_id == patient_id,
+                               ConciergeJournalEntry.created_at >= days30)
+                       .order_by(ConciergeJournalEntry.created_at.desc()).all())
+    medication_titles = _hydrate_meditation_titles(diary_entries, db)
+
+    # Labs + messages + appointments — all keyed by patient_id.
+    labs = (db.query(ConciergeLabRecord)
+              .filter(ConciergeLabRecord.patient_id == patient_id,
+                      ConciergeLabRecord.uploaded_at >= days90)
+              .order_by(ConciergeLabRecord.uploaded_at.desc()).all())
+    messages = (db.query(ConciergeMessage)
+                  .filter(ConciergeMessage.patient_id == patient_id,
+                          ConciergeMessage.direction.in_(["outbound", "inbound"]),
+                          ConciergeMessage.created_at >= days30)
+                  .order_by(ConciergeMessage.created_at.desc()).all())
+    appointments = (db.query(ConciergeAppointment)
+                      .filter(ConciergeAppointment.patient_id == patient_id,
+                              ConciergeAppointment.starts_at >= now)
+                      .order_by(ConciergeAppointment.starts_at.asc()).limit(5).all())
+
+    # Oracle pulls live on the user, not the patient row.
+    oracle_pulls = []
+    if p.user_id:
+        oracle_pulls = (db.query(ConciergeOraclePull)
+                          .filter(ConciergeOraclePull.user_id == p.user_id,
+                                  ConciergeOraclePull.created_at >= days30)
+                          .order_by(ConciergeOraclePull.created_at.desc()).all())
+
+    # Tier label + allowances mirror the /concierge/me handler so the
+    # brief shows the same numbers the patient sees in the PWA.
+    tier = p.membership_tier or "awaken"
+    tier_label = CONCIERGE_TIER_PRICE.get(tier, {}).get("label", tier)
+    allowances = {
+        "awaken": {"visits": 2, "meditations": 1},
+        "align":  {"visits": 3, "meditations": 2},
+        "ascend": {"visits": 5, "meditations": 4},
+    }
+    allow = allowances.get(tier, allowances["awaken"])
+
+    brief = _build_review_brief(
+        patient=p,
+        energy_logs=energy_logs,
+        diary_entries=diary_entries,
+        labs=labs,
+        messages=messages,
+        appointments=appointments,
+        oracle_pulls=oracle_pulls,
+        medication_titles=medication_titles,
+        tier_label=tier_label,
+        visits_used=p.visits_used or 0,
+        visits_allowed=allow["visits"],
+        meditations_used=p.meditations_used or 0,
+        meditations_allowed=allow["meditations"],
+    )
+
+    first_name = (p.name or "").strip().split(" ")[0] or "Patient"
+
+    # Call Claude. Failure surfaces as 502 so the UI can offer to retry.
+    try:
+        msg = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=2000,
+            system=_DRAFT_REVIEW_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Here is my patient's data for this month:\n\n"
+                    f"{brief}\n\n"
+                    "Please draft their monthly integrative wellness review email."
+                ),
+            }],
+        )
+        body = (msg.content[0].text or "").strip()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Generation failed: {e}")
+
+    # HIPAA audit log — append-only. detail JSON captures the windows
+    # the brief actually pulled so a future review can verify scope.
+    try:
+        ua = (request.headers.get("user-agent") or "")[:500]
+        ip = _client_ip(request)
+        audit = HipaaAuditLog(
+            user_id=current_user.id,
+            action="DRAFT_MONTHLY_REVIEW",
+            resource_type="patient_record",
+            resource_id=patient_id,
+            ip_address=(ip or None),
+            user_agent=ua,
+            detail={
+                "energy_log_count": len(energy_logs),
+                "diary_entry_count": len(diary_entries),
+                "lab_count": len(labs),
+                "message_count": len(messages),
+                "oracle_pull_count": len(oracle_pulls),
+                "appointment_count": len(appointments),
+                "window_days_signal": 30,
+                "window_days_labs": 90,
+            },
+        )
+        db.add(audit); db.commit()
+    except Exception as e:
+        # Audit failure should never block the physician — log + carry on.
+        print(f"hipaa_audit_log write failed: {e}")
+        db.rollback()
+
+    subject = f"Your Monthly Wellness Review — {now.strftime('%B %Y')}"
+    return {
+        "subject": subject,
+        "body": body,
+        "patient_first_name": first_name,
+    }
 
 
 # ─── Concierge role resolution + Oracle Card + Lab Vault ──────────────────

@@ -404,6 +404,22 @@ class ConciergeInquiry(Base):
     status = Column(String, default="pending", index=True)  # pending | responded | enrolled | declined
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+# HIPAA-style audit trail. Records every action a physician (or admin)
+# takes against a patient record so we can demonstrate access provenance
+# during compliance review. Append-only; never updated. The detail JSON
+# carries action-specific context (e.g. window range for a draft review).
+class HipaaAuditLog(Base):
+    __tablename__ = "hipaa_audit_log"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)        # the actor (Dr. Anderson, etc.)
+    action = Column(String, index=True, nullable=False)          # DRAFT_MONTHLY_REVIEW, VIEW_LAB, etc.
+    resource_type = Column(String, index=True, nullable=False)   # patient_record | lab | message | ...
+    resource_id = Column(Integer, index=True, nullable=True)
+    detail = Column(JSON, nullable=True)                         # arbitrary action-specific context
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:

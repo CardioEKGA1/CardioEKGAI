@@ -1,6 +1,7 @@
 // © 2026 SoulMD, LLC. All rights reserved.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PatientWellnessPanel from './PatientWellnessPanel';
+import MonthlyReviewDraft from './MonthlyReviewDraft';
 
 interface Props { API: string; token: string; accent: string; }
 
@@ -267,6 +268,8 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
   const [savedTick, setSavedTick] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  // Slide-in panel for the AI-drafted monthly wellness review.
+  const [draftReviewOpen, setDraftReviewOpen] = useState(false);
 
   const update = (k: keyof IntakeData, v: string) => setIntake(x => ({...x, [k]: v}));
 
@@ -301,7 +304,20 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
     <div>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap', marginBottom:'16px'}}>
         <button onClick={onClose} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>← All patients</button>
-        <div style={{display:'flex', gap:'8px'}}>
+        <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
+          <button
+            onClick={() => setDraftReviewOpen(true)}
+            title="AI-drafted monthly wellness review"
+            style={{
+              background:'#C9A84C', border:'none', borderRadius:'10px',
+              padding:'7px 16px', fontSize:'12.5px', fontWeight:800,
+              color:'white', cursor:'pointer',
+              fontFamily:'Georgia, "Cormorant Garamond", "Playfair Display", serif',
+              letterSpacing:'0.4px',
+              boxShadow:'0 6px 14px rgba(201,168,76,0.30)',
+            }}>
+            ✦ Draft Monthly Review
+          </button>
           {!editMode && <button onClick={()=>setEditMode(true)} style={{background:'rgba(255,255,255,0.9)', border:'1px solid rgba(122,176,240,0.4)', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:700, color:'#4a7ad0', cursor:'pointer'}}>Edit intake</button>}
           {editMode && <button onClick={save} disabled={saving} style={{background:accent, border:'none', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:700, color:'white', cursor:'pointer', opacity:saving?0.6:1}}>{saving ? 'Saving…' : savedTick ? '✓ Saved' : 'Save changes'}</button>}
           <button onClick={()=>setDeleteConfirm(true)} style={{background:'transparent', border:'1px solid rgba(192,64,64,0.35)', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', fontWeight:600, color:'#c04040', cursor:'pointer'}}>Delete</button>
@@ -404,6 +420,16 @@ const PatientDetail: React.FC<{API:string; token:string; accent:string; patient:
             </div>
           </div>
         </div>
+      )}
+
+      {draftReviewOpen && (
+        <MonthlyReviewDraft
+          API={API} token={token}
+          patientId={p.id}
+          patientName={p.name}
+          accent={accent}
+          onClose={() => setDraftReviewOpen(false)}
+        />
       )}
     </div>
   );
