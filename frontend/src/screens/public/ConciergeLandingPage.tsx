@@ -60,7 +60,6 @@ const TIERS: Tier[] = [
       'Up to 2 guided meditation sessions',
       'Secure messaging',
       'Lab result review',
-      'Priority scheduling',
     ],
     accent: 'lavender',
   },
@@ -79,11 +78,13 @@ const TIERS: Tier[] = [
   },
 ];
 
-const ALA_CARTE: { label: string; price: string }[] = [
+const ALA_CARTE: { label: string; price: string; note?: string }[] = [
   { label: 'Medical or life-coaching session (up to 30 min)', price: '$300' },
   { label: 'Extended session (per additional 15 min)',         price: '$150' },
-  { label: 'Guided meditation session',                        price: '$44'  },
-  { label: 'Urgent same-day consult',                          price: '$444' },
+  { label: 'Guided meditation session (up to 30 min)',         price: '$44',
+    note: 'Available to members and invited guests' },
+  { label: 'Urgent same-day consult',                          price: '$444',
+    note: 'Exclusive to Ascend members. Available to other tiers based on schedule availability.' },
   { label: 'Lab result review + async message',                price: '$75'  },
 ];
 
@@ -293,12 +294,18 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
           <div style={{display:'flex', flexDirection:'column', gap:'2px'}}>
             {ALA_CARTE.map((item, i) => (
               <div key={item.label} style={{
-                display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px',
                 padding:'12px 0',
                 borderTop: i === 0 ? 'none' : '0.5px solid rgba(83,74,183,0.10)',
               }}>
-                <div style={{fontSize:'13.5px', color: INK, lineHeight:1.5}}>{item.label}</div>
-                <div style={{fontSize:'14px', fontWeight:800, color: NAVY, whiteSpace:'nowrap'}}>{item.price}</div>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px'}}>
+                  <div style={{fontSize:'13.5px', color: INK, lineHeight:1.5}}>{item.label}</div>
+                  <div style={{fontSize:'14px', fontWeight:800, color: NAVY, whiteSpace:'nowrap'}}>{item.price}</div>
+                </div>
+                {item.note && (
+                  <div style={{fontSize:'11.5px', color:'#9098a8', fontStyle:'italic', marginTop:'4px', lineHeight:1.5, paddingRight:'72px'}}>
+                    {item.note}
+                  </div>
+                )}
               </div>
             ))}
           </div>
