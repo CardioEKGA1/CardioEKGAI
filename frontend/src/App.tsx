@@ -296,13 +296,10 @@ const App: React.FC = () => {
         .then(data => {
           if (data && data.email) {
             setUser(data);
-            // SoulMD: signed-in users skip the marketing landing and go to
-            // the dashboard. EKGScan: we intentionally keep signed-in users
-            // on the landing so the Suite pitch and pricing stay visible;
-            // they click "Analyze an EKG →" to enter the tool.
-            if (!landedOnDeepLink && screen === 'landing' && isSoulMD) {
-              navigate('dashboard');
-            }
+            // soulmd.us / now leads with concierge medicine for everyone.
+            // Clinicians (signed-in or not) reach the dashboard via the
+            // "For Clinicians →" footer link. EKGScan keeps signed-in
+            // users on its landing so the Suite pitch stays visible.
           }
         })
         .catch(() => { /* network error — keep token, user retries naturally */ });
@@ -321,7 +318,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const brand = isSoulMD ? 'SoulMD' : 'EKGScan';
     const PER_SCREEN: Record<Screen, string> = {
-      landing:           isSoulMD ? 'SoulMD — Clinical AI Suite' : 'EKGScan — 12-lead EKG interpretation',
+      landing:           isSoulMD ? 'SoulMD — Concierge Medicine by Dr. Neysi Anderson' : 'EKGScan — 12-lead EKG interpretation',
       auth:              `Sign in · ${brand}`,
       upload:            `Analyze an EKG · ${brand}`,
       results:           `EKG Results · ${brand}`,
@@ -445,7 +442,7 @@ const App: React.FC = () => {
   return (
     <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
       {screen==='landing' && (isSoulMD
-        ? <SoulMDLanding onSignIn={()=>navigate('auth')} onSignUp={()=>navigate('auth')} onPrivacy={goPrivacy} onTerms={goTerms}/>
+        ? <ConciergeLandingPage API={API} onHome={() => navigate('landing')}/>
         : <Landing
             onAnalyze={()=>navigate(user ? 'upload' : 'auth')}
             onSignIn={()=>navigate('auth')}

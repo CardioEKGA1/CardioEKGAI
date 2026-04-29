@@ -172,18 +172,14 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
         </div>
         <div style={{maxWidth:'820px', margin:'0 auto', position:'relative'}}>
           <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'40px'}}>
-            <button onClick={onHome}
+            <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               style={{background:'transparent', border:'none', padding:0, cursor:'pointer'}}
-              title="SoulMD home">
-              {/* Logo bumped ~40% (32 → 46) and the default
-                  "AI CLINICAL SUITE" subtitle suppressed for the
-                  concierge surface — the lockup speaks for itself
-                  alongside the practice copy. */}
+              title="SoulMD">
               <SoulMDLogo size={46} subtitle=""/>
             </button>
-            <a href="/" onClick={(e) => { e.preventDefault(); onHome(); }}
+            <a href="/patient"
               style={{fontSize:'11px', color: INK_SOFT, fontWeight:700, letterSpacing:'1.5px', textTransform:'uppercase', textDecoration:'none'}}>
-              soulmd.us
+              Patient Login →
             </a>
           </div>
 
@@ -410,12 +406,19 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
 
         {/* Footer */}
         <div style={{textAlign:'center', marginTop:'28px', fontSize:'12px', color: INK_SOFT, lineHeight:1.8}}>
-          <a href="/" onClick={(e) => { e.preventDefault(); onHome(); }} style={{color: PURPLE, textDecoration:'none', fontWeight:700}}>soulmd.us</a>
-          <span style={{margin:'0 8px', opacity:0.5}}>·</span>
           <a href="mailto:support@soulmd.us" style={{color: PURPLE, textDecoration:'none', fontWeight:700}}>support@soulmd.us</a>
         </div>
         <div style={{textAlign:'center', marginTop:'10px', fontSize:'10px', color: INK_SOFT, opacity:0.65, fontStyle:'italic', fontFamily: SERIF, lineHeight:1.7}}>
           Direct-pay practice · Not insurance · Beta — not yet HIPAA compliant
+        </div>
+        {/* Subtle clinicians link — kept tiny and muted so it doesn't
+            compete with the membership CTAs. soulmd.us pivoted to
+            concierge-first; clinical AI tools live behind /dashboard
+            for staff and physician partners. */}
+        <div style={{textAlign:'center', marginTop:'18px', fontSize:'11px', color: INK_SOFT, opacity:0.55, lineHeight:1.7}}>
+          <a href="/dashboard" style={{color: INK_SOFT, textDecoration:'none', fontWeight:600, letterSpacing:'0.3px'}}>
+            For Clinicians →
+          </a>
         </div>
       </section>
     </div>
