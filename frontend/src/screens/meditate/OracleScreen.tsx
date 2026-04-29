@@ -1,17 +1,29 @@
 // © 2026 SoulMD, LLC. All rights reserved.
-// Oracle ritual for /meditate. Three states:
-//   1. unpulled — intention prompt + "Pull a card" CTA
-//   2. flipping — front (card-back) → 3D flip → back (flower + Yogananda message)
-//   3. revealed — message + reflection textarea + "Begin Meditation" CTA
 //
-// Uses the existing flowers.png sprite (5 cols × 2 rows of 200×200) and
-// the existing card-back.png cover. State persists server-side: same
-// card all day per user; superuser can pull again with ?pull_again=true.
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+// Oracle ritual for /meditate. Uses the SAME shared 7-card fan + flip
+// + sparkle animation as the concierge oracle (frontend/src/components/
+// shared/OracleCardFan), so any tuning to the choreography lives in
+// exactly one place forever.
+//
+// Per spec, the card faces differ from concierge:
+//   • Back (pre-flip)  — soft gradient #C5E8F4 → #f0c8d8 (or
+//                        /card-back.png), no flower, no text. All seven
+//                        cards look identical face-down.
+//   • Front (post-flip)— watercolor flower (cropped via FlowerSprite,
+//                        labels hidden) + Yogananda message in Georgia
+//                        italic + "✦ YOGANANDA ✦" attribution in gold.
+//
+// Backend wired to /meditate/oracle/today + /meditate/oracle/pull +
+// /meditate/oracle/reflect (already built).
+import React, { useCallback, useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import DictationButton from '../../DictationButton';
 import { MEDITATE_TOKENS as T } from './MeditateApp';
-// CRA bundles assets imported as ES modules — gives us a hashed URL.
-import flowersUrl from '../../assets/flowers.png';
+import {
+  OracleCardFan, OracleGoldParticles, EASE, CENTER_INDEX,
+  type OraclePhase,
+} from '../../components/shared/OracleCardFan';
+import { FlowerSprite } from '../../components/shared/FlowerSprite';
 
 interface Props {
   API: string;
@@ -30,35 +42,22 @@ interface OracleCard {
   created_at: string;
 }
 
-// Inject the 3D flip keyframes once.
-if (typeof document !== 'undefined' && !document.getElementById('__meditate_oracle_flip')) {
-  const s = document.createElement('style');
-  s.id = '__meditate_oracle_flip';
-  s.textContent = `
-    @keyframes meditateCardFlip {
-      0%   { transform: rotateY(0deg); }
-      100% { transform: rotateY(180deg); }
-    }
-    @keyframes meditateCardGlow {
-      0%,100% { box-shadow: 0 18px 40px rgba(83,74,183,0.18), 0 0 0 0 rgba(201,168,76,0.0); }
-      50%     { box-shadow: 0 18px 40px rgba(83,74,183,0.22), 0 0 0 18px rgba(201,168,76,0.10); }
-    }
-  `;
-  document.head.appendChild(s);
-}
-
 const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
-  const [loading, setLoading] = useState(true);
+  const [phase, setPhase] = useState<OraclePhase>('deck');
+  const [pickedIndex, setPickedIndex] = useState<number | null>(null);
+  const [flipped, setFlipped] = useState(false);
   const [card, setCard] = useState<OracleCard | null>(null);
+  const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
-  const [revealed, setRevealed] = useState(false);  // gates the back-of-card view
   const [err, setErr] = useState<string>('');
+
   const [reflection, setReflection] = useState<string>('');
   const [savingReflection, setSavingReflection] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [savedTickAt, setSavedTickAt] = useState<number | null>(null);
 
-  // Load today's pull on mount. If one exists we go straight to the
-  // revealed state — patients should see today's card all day.
+  // Load today's pull. If one exists, jump straight to the revealed
+  // state (center card, flipped) so the same message stays visible all
+  // day — matches the concierge oracle's "one card per day" rhythm.
   useEffect(() => {
     let alive = true;
     fetch(`${API}/meditate/oracle/today`, { headers: { Authorization: `Bearer ${token}` } })
@@ -67,7 +66,9 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
         if (!alive || !d) return;
         if (d.pulled && d.card) {
           setCard(d.card);
-          setRevealed(true);
+          setPickedIndex(CENTER_INDEX);
+          setFlipped(true);
+          setPhase('revealed');
           setReflection(d.card.reflection || '');
         }
       })
@@ -76,20 +77,65 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
     return () => { alive = false; };
   }, [API, token]);
 
-  const pull = useCallback(async (force: boolean = false) => {
-    if (pulling) return;
-    setPulling(true); setErr('');
+  const pickCard = useCallback(async (i: number) => {
+    if (phase !== 'deck' || pulling || card) return;
+    setErr('');
+    setPickedIndex(i);
+    setPhase('picking');
+    setPulling(true);
     try {
-      const url = `${API}/meditate/oracle/pull${force ? '?pull_again=true' : ''}`;
-      const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API}/meditate/oracle/pull`, {
+        method:'POST',
+        headers:{ Authorization: `Bearer ${token}` },
+      });
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || 'Could not pull a card.');
       setCard(d);
       setReflection(d.reflection || '');
-      // Brief flip delay so the animation reads — set revealed after a tick.
-      window.setTimeout(() => setRevealed(true), 600);
+      // Choreography matches the concierge timing: glide-to-center 400ms,
+      // then flip 1000ms, then settle into revealed state.
+      window.setTimeout(() => {
+        setFlipped(true);
+        window.setTimeout(() => setPhase('revealed'), 1000);
+      }, 400);
     } catch (e: any) {
       setErr(e.message || 'Could not pull a card.');
+      setPhase('deck');
+      setPickedIndex(null);
+    } finally {
+      setPulling(false);
+    }
+  }, [API, token, phase, pulling, card]);
+
+  // Superuser-only test affordance — re-pulls a fresh message + flower
+  // for today so we can iterate on copy + sprite mapping without
+  // waiting for tomorrow.
+  const pullAgain = useCallback(async () => {
+    if (pulling) return;
+    setErr('');
+    setFlipped(false);
+    setPhase('deck');
+    setPickedIndex(null);
+    setCard(null);
+    setReflection('');
+    setSavedTickAt(null);
+    setPulling(true);
+    try {
+      const res = await fetch(`${API}/meditate/oracle/pull?pull_again=true`, {
+        method:'POST',
+        headers:{ Authorization: `Bearer ${token}` },
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Could not re-pull.');
+      setCard(d);
+      setReflection(d.reflection || '');
+      setPickedIndex(CENTER_INDEX);
+      window.setTimeout(() => {
+        setFlipped(true);
+        window.setTimeout(() => setPhase('revealed'), 1000);
+      }, 400);
+    } catch (e: any) {
+      setErr(e.message || 'Could not re-pull.');
     } finally {
       setPulling(false);
     }
@@ -102,13 +148,13 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
       const res = await fetch(`${API}/meditate/oracle/reflect`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reflection: reflection }),
+        body: JSON.stringify({ reflection }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || 'Could not save reflection.');
       setCard(d);
-      setSavedAt(Date.now());
-      window.setTimeout(() => setSavedAt(null), 1800);
+      setSavedTickAt(Date.now());
+      window.setTimeout(() => setSavedTickAt(null), 1800);
     } catch (e: any) {
       setErr(e.message || 'Could not save reflection.');
     } finally {
@@ -124,201 +170,241 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
     );
   }
 
-  // ── Unpulled: intention setting + pull CTA ──────────────────────────
-  if (!card) {
-    return (
-      <div style={{padding:'20px 4px', textAlign:'center'}}>
-        <div style={{fontFamily: T.serif, fontSize:'26px', fontWeight:600, color: T.navy, lineHeight:1.2, letterSpacing:'-0.3px', marginBottom:'8px'}}>
-          A message is waiting for you
-        </div>
-        <div style={{fontFamily: T.serif, fontStyle:'italic', fontSize:'14px', color: T.inkSoft, lineHeight:1.65, maxWidth:'420px', margin:'0 auto 24px'}}>
-          Take a quiet breath. Set an intention — for healing, clarity, surrender, or simply to listen. Then, when you are ready, pull your card.
-        </div>
-
-        <button onClick={() => pull(false)} disabled={pulling}
-          style={{
-            position:'relative',
-            width: 'min(76vw, 280px)', height: 'min(108vw, 400px)', margin:'0 auto',
-            display:'flex', alignItems:'center', justifyContent:'center',
-            background: `url(/card-back.png) center/cover, linear-gradient(135deg, ${T.purple} 0%, ${T.navy} 100%)`,
-            border: `1px solid ${T.gold}55`,
-            borderRadius:'18px',
-            cursor: pulling ? 'wait' : 'pointer',
-            color:'white', fontFamily:'inherit',
-            animation:'meditateCardGlow 3.2s ease-in-out infinite',
-            boxShadow:'0 18px 40px rgba(83,74,183,0.22)',
-          }}>
-          <div style={{position:'absolute', inset:0, background:'linear-gradient(180deg, rgba(26,42,74,0.2), rgba(26,42,74,0.55))', borderRadius:'18px'}}/>
-          <div style={{position:'relative', textAlign:'center', padding:'20px'}}>
-            <div style={{fontSize:'34px', color: T.gold, marginBottom:'10px'}}>✦</div>
-            <div style={{fontFamily: T.serif, fontSize:'20px', fontWeight:600, letterSpacing:'-0.2px'}}>
-              {pulling ? 'Pulling…' : 'Pull your card'}
-            </div>
-            <div style={{fontFamily: T.serif, fontStyle:'italic', fontSize:'12px', opacity:0.8, marginTop:'6px'}}>
-              one card per day
-            </div>
-          </div>
-        </button>
-
-        {err && (
-          <div style={{marginTop:'14px', fontSize:'12px', color:'#a02020'}}>{err}</div>
-        )}
-
-        <div style={{marginTop:'24px', fontFamily: T.serif, fontStyle:'italic', fontSize:'12px', color: T.inkSoft, opacity:0.7}}>
-          The same card appears all day, like a thread you can return to.
-        </div>
-      </div>
-    );
-  }
-
-  // ── Pulled: card view (back face = message), reflection, CTA ───────
   return (
-    <div style={{padding:'12px 4px 4px'}}>
-      {/* Card with flip */}
-      <div style={{
-        position:'relative', perspective:'1200px',
-        width: 'min(76vw, 280px)', height: 'min(108vw, 400px)', margin:'0 auto 24px',
-      }}>
-        <div style={{
-          position:'absolute', inset:0,
-          transformStyle:'preserve-3d',
-          transition:'transform 800ms cubic-bezier(0.5, 0, 0.2, 1)',
-          transform: revealed ? 'rotateY(180deg)' : 'rotateY(0deg)',
-        }}>
-          {/* Front (card back design) */}
-          <div style={{
-            position:'absolute', inset:0,
-            backfaceVisibility:'hidden', WebkitBackfaceVisibility:'hidden',
-            background: `url(/card-back.png) center/cover, linear-gradient(135deg, ${T.purple} 0%, ${T.navy} 100%)`,
-            border: `1px solid ${T.gold}55`,
-            borderRadius:'18px',
-            display:'flex', alignItems:'center', justifyContent:'center',
-            color:'white', boxShadow:'0 18px 40px rgba(83,74,183,0.22)',
-          }}>
-            <div style={{textAlign:'center'}}>
-              <div style={{fontSize:'34px', color: T.gold}}>✦</div>
-            </div>
-          </div>
+    <div style={{
+      position:'relative',
+      padding:'clamp(20px,4vw,32px) 16px 28px',
+      borderRadius:'22px',
+      overflow:'hidden',
+      background:'linear-gradient(160deg, #F5F1FF 0%, #E8E4FB 35%, #DFEAFC 70%, #F1E7F8 100%)',
+      marginBottom:'14px',
+      boxShadow:'0 10px 30px rgba(83,74,183,0.12)',
+      border:'0.5px solid rgba(155,143,232,0.2)',
+    }}>
+      <OracleGoldParticles/>
 
-          {/* Back (flower + message) */}
-          <div style={{
-            position:'absolute', inset:0,
-            backfaceVisibility:'hidden', WebkitBackfaceVisibility:'hidden',
-            transform:'rotateY(180deg)',
-            background:'linear-gradient(180deg, #fff 0%, #fdf6e9 50%, #f5e6cf 100%)',
-            border: `1px solid ${T.gold}88`,
-            borderRadius:'18px',
-            padding:'18px 18px 22px',
-            display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-start',
-            boxShadow:'0 18px 40px rgba(201,168,76,0.22)',
-          }}>
-            <FlowerSprite index={card.flower_index} size={140}/>
+      {/* Header — hidden once revealed so the message can breathe */}
+      {phase !== 'revealed' && (
+        <div style={{textAlign:'center', color: T.navy, marginBottom:'18px', position:'relative', zIndex:2}}>
+          <div style={{fontFamily: T.serif, fontSize:'clamp(20px,4.4vw,26px)', fontWeight:600, letterSpacing:'0.4px', lineHeight:1.25}}>
+            What message is for you today?
+          </div>
+          <div style={{fontSize:'13px', color: T.inkSoft, fontStyle:'italic', marginTop:'6px', fontFamily: T.serif, letterSpacing:'0.6px'}}>
+            Trust. Pause. Receive.
+          </div>
+        </div>
+      )}
+
+      {/* Shared 7-card fan stage — animation parity with /concierge */}
+      <OracleCardFan
+        phase={phase}
+        pickedIndex={pickedIndex}
+        flipped={flipped}
+        locked={false /* /meditate caps at one pull/day on the server */}
+        onPick={pickCard}
+        renderBack={() => <MeditateCardBack/>}
+        renderFront={({ isPicked }) => (
+          <MeditateCardFront card={card} show={phase === 'revealed' && isPicked}/>
+        )}
+      />
+
+      {/* Hint text */}
+      <div style={{marginTop:'14px', textAlign:'center', minHeight:'22px', color: T.inkSoft, fontSize:'12.5px', fontStyle:'italic', fontFamily: T.serif, letterSpacing:'0.4px', position:'relative', zIndex:2}}>
+        {phase === 'deck' && (pulling ? 'Drawing your card…' : 'Tap the card that calls to you')}
+        {phase === 'picking' && 'The Universe is listening…'}
+      </div>
+
+      {err && <div style={{marginTop:'10px', fontSize:'12px', color:'#a02020', textAlign:'center', position:'relative', zIndex:2}}>{err}</div>}
+
+      {/* Reveal: reflection prompt + Begin Meditation CTA */}
+      <AnimatePresence>
+        {phase === 'revealed' && card && (
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1.0, delay: 1.2, ease: EASE }}
+            style={{marginTop:'22px', position:'relative', zIndex:2}}>
+
+            {/* Reflection card */}
             <div style={{
-              marginTop:'8px',
-              fontFamily: T.serif, fontStyle:'italic', fontSize:'13.5px',
-              color: T.navy, lineHeight:1.6, textAlign:'center',
-              flex:1, display:'flex', alignItems:'center',
+              background: T.cardBg, border: T.cardBorder, borderRadius:'18px',
+              padding:'16px', marginBottom:'12px',
+              boxShadow:'0 8px 22px rgba(83,74,183,0.10)',
             }}>
-              {card.message_text}
+              <div style={{fontFamily: T.serif, fontSize:'15px', fontWeight:600, color: T.navy, marginBottom:'10px', textAlign:'center'}}>
+                What did this message stir in you?
+              </div>
+              <div style={{position:'relative'}}>
+                <textarea
+                  value={reflection}
+                  onChange={e => setReflection(e.target.value)}
+                  placeholder="A feeling, a memory, a knowing — anything that arose…"
+                  style={{
+                    width:'100%', minHeight:'100px',
+                    padding:'14px 56px 14px 14px',
+                    borderRadius:'14px',
+                    border:'1px solid rgba(180,210,230,0.6)',
+                    background:'rgba(255,255,255,0.6)',
+                    color: T.ink, fontSize:'14px', lineHeight:1.6,
+                    fontFamily:'inherit', resize:'vertical', outline:'none',
+                    boxSizing:'border-box',
+                  }}
+                />
+                <div style={{position:'absolute', right:10, bottom:10}}>
+                  <DictationButton
+                    accent="purple" size={36} fallbackWhenUnsupported
+                    onTranscript={(chunk) => setReflection(v => (v + (v && !v.endsWith(' ') ? ' ' : '') + chunk).trimStart())}
+                  />
+                </div>
+              </div>
+              <button onClick={saveReflection} disabled={savingReflection || !reflection.trim()}
+                style={{
+                  marginTop:'10px', width:'100%', padding:'12px',
+                  background:`linear-gradient(135deg, ${T.purple}, ${T.navy})`,
+                  color:'white', border:'none', borderRadius:'12px',
+                  fontSize:'12.5px', fontWeight:800, cursor: (savingReflection || !reflection.trim()) ? 'default' : 'pointer',
+                  opacity: (savingReflection || !reflection.trim()) ? 0.55 : 1,
+                  fontFamily:'inherit', letterSpacing:'0.4px',
+                }}>
+                {savingReflection ? 'Saving…' : savedTickAt ? 'Saved ✓' : 'Save reflection'}
+              </button>
             </div>
-            <div style={{fontSize:'9px', letterSpacing:'2px', textTransform:'uppercase', color: T.gold, fontWeight:800, marginTop:'8px'}}>
-              ✦ Yogananda ✦
+
+            <button onClick={onBeginMeditation}
+              style={{
+                width:'100%', padding:'14px',
+                background:`linear-gradient(135deg, ${T.gold}, #a8842c)`,
+                color: T.navy, border:'none', borderRadius:'14px',
+                fontSize:'13.5px', fontWeight:800, cursor:'pointer',
+                fontFamily:'inherit', letterSpacing:'0.5px', textTransform:'uppercase',
+                boxShadow:'0 12px 28px rgba(201,168,76,0.28)',
+              }}>
+              ✦ Begin Meditation
+            </button>
+
+            {/* Superuser test re-pull — small text link, easy to ignore */}
+            <div style={{textAlign:'center', marginTop:'14px'}}>
+              <button onClick={pullAgain}
+                style={{background:'transparent', border:'none', color: T.inkSoft, fontSize:'11px', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit'}}>
+                Pull again (superuser test)
+              </button>
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Reflection prompt + CTA */}
-      <div style={{
-        background: T.cardBg, border: T.cardBorder, borderRadius:'18px',
-        padding:'18px', marginBottom:'14px',
-        boxShadow:'0 8px 22px rgba(83,74,183,0.10)',
-      }}>
-        <div style={{fontFamily: T.serif, fontSize:'17px', fontWeight:600, color: T.navy, marginBottom:'10px', textAlign:'center'}}>
-          What did this message stir in you?
-        </div>
-        <div style={{position:'relative'}}>
-          <textarea
-            value={reflection}
-            onChange={e => setReflection(e.target.value)}
-            placeholder="A feeling, a memory, a knowing — anything that arose…"
-            style={{
-              width:'100%', minHeight:'110px',
-              padding:'14px 56px 14px 14px',
-              borderRadius:'14px',
-              border:'1px solid rgba(180,210,230,0.6)',
-              background:'rgba(255,255,255,0.6)',
-              color: T.ink, fontSize:'14px', lineHeight:1.6,
-              fontFamily:'inherit', resize:'vertical', outline:'none',
-              boxSizing:'border-box',
-            }}
-          />
-          <div style={{position:'absolute', right:10, bottom:10}}>
-            <DictationButton
-              accent="purple"
-              size={36}
-              fallbackWhenUnsupported
-              onTranscript={(chunk) => setReflection(v => (v + (v && !v.endsWith(' ') ? ' ' : '') + chunk).trimStart())}
-            />
-          </div>
-        </div>
-
-        {err && <div style={{fontSize:'12px', color:'#a02020', marginTop:'8px'}}>{err}</div>}
-
-        <div style={{display:'flex', gap:'8px', marginTop:'12px'}}>
-          <button onClick={saveReflection} disabled={savingReflection || !reflection.trim()}
-            style={{
-              flex:1, padding:'12px', borderRadius:'12px',
-              background: `linear-gradient(135deg, ${T.purple}, ${T.navy})`,
-              color:'white', border:'none', fontSize:'13px', fontWeight:800,
-              cursor: (savingReflection || !reflection.trim()) ? 'default' : 'pointer',
-              opacity: (savingReflection || !reflection.trim()) ? 0.55 : 1,
-              fontFamily:'inherit', letterSpacing:'0.4px',
-            }}>
-            {savingReflection ? 'Saving…' : savedAt ? 'Saved ✓' : 'Save reflection'}
-          </button>
-        </div>
-      </div>
-
-      <button onClick={onBeginMeditation}
-        style={{
-          width:'100%', padding:'14px',
-          background: `linear-gradient(135deg, ${T.gold}, #a8842c)`,
-          color: T.navy, border:'none', borderRadius:'14px',
-          fontSize:'14px', fontWeight:800, cursor:'pointer',
-          fontFamily:'inherit', letterSpacing:'0.5px', textTransform:'uppercase',
-          boxShadow:'0 12px 28px rgba(201,168,76,0.28)',
-        }}>
-        ✦ Begin Meditation
-      </button>
-
-      {/* Superuser-only re-pull (for testing). Tiny link, easy to ignore. */}
-      <div style={{textAlign:'center', marginTop:'18px'}}>
-        <button onClick={() => { setRevealed(false); setSavedAt(null); pull(true); }}
-          style={{background:'transparent', border:'none', color: T.inkSoft, fontSize:'11px', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit'}}>
-          Pull again (superuser test)
-        </button>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
 
-// Sprite cropper. The bundled flowers.png is 5 cols × 2 rows of 200×200
-// crops; we scale uniformly to the requested size.
-export const FlowerSprite: React.FC<{index: number; size?: number}> = ({ index, size = 200 }) => {
-  const i = Math.max(0, Math.min(9, index));
-  const col = i % 5;
-  const row = Math.floor(i / 5);
-  const scale = size / 200;
-  return (
-    <div aria-hidden style={{
-      width: size, height: size,
-      backgroundImage: `url(${flowersUrl})`,
-      backgroundSize: `${1000 * scale}px ${400 * scale}px`,
-      backgroundPosition: `-${col * size}px -${row * size}px`,
-      backgroundRepeat: 'no-repeat',
-      borderRadius: '12px',
+// ───── Card faces ────────────────────────────────────────────────────────
+
+// Back: soft pearl→blush gradient. No flower, no text — all 7 cards in
+// the deck are visually identical until the user picks one. The optional
+// /card-back.png overlay layers on top of the gradient, anchored as a
+// background image; if the file ever moves, the gradient still reads.
+const MeditateCardBack: React.FC = () => (
+  <div style={{
+    position:'relative', width:'100%', height:'100%',
+    borderRadius:'12px',
+    background:`linear-gradient(135deg, #C5E8F4 0%, #f0c8d8 100%), url(/card-back.png) center/cover`,
+    border:`1.5px solid ${T.gold}88`,
+    overflow:'hidden',
+  }}>
+    {/* Inner gold inset ring — quiet, just for tactility */}
+    <div style={{
+      position:'absolute', inset:'8px',
+      border:`1px solid rgba(201,168,76,0.35)`,
+      borderRadius:'6px',
+      pointerEvents:'none',
     }}/>
+    {/* Center seal */}
+    <div style={{
+      position:'absolute', inset:0,
+      display:'flex', alignItems:'center', justifyContent:'center',
+      color: T.gold, fontSize:'30px', opacity:0.62,
+      textShadow:'0 2px 8px rgba(255,255,255,0.45)',
+    }}>✦</div>
+    {/* Corner sparkles to mirror the concierge tactility */}
+    <span style={{position:'absolute', top:'6px',    left:'8px',  fontSize:'8px', color: T.gold, opacity: 0.85}}>✦</span>
+    <span style={{position:'absolute', top:'6px',    right:'8px', fontSize:'8px', color: T.gold, opacity: 0.85}}>✦</span>
+    <span style={{position:'absolute', bottom:'6px', left:'8px',  fontSize:'7px', color: T.gold, opacity: 0.7}}>✧</span>
+    <span style={{position:'absolute', bottom:'6px', right:'8px', fontSize:'7px', color: T.gold, opacity: 0.7}}>✧</span>
+  </div>
+);
+
+// Front: watercolor flower at the top, Yogananda message centered in
+// Georgia italic, gold "✦ YOGANANDA ✦" attribution at the bottom.
+const MeditateCardFront: React.FC<{card: OracleCard | null; show: boolean}> = ({ card, show }) => {
+  const flowerIndex = card?.flower_index ?? 0;
+  // Bucket font size to keep the longest Yogananda message inside the
+  // card without scrolling. Mirrors the concierge auto-fit pattern.
+  const text = card?.message_text || '';
+  const fontSize = text.length < 110 ? 16
+                  : text.length < 180 ? 14
+                  : text.length < 260 ? 13
+                  : 12;
+  return (
+    <motion.div
+      initial={false}
+      animate={{ opacity: show ? 1 : 0, y: show ? 0 : 6 }}
+      transition={{ duration: 0.9, delay: 0.4, ease: EASE }}
+      style={{
+        position:'relative', width:'100%', height:'100%',
+        borderRadius:'12px',
+        background:'#FFFEFA',
+        border:`1.5px solid ${T.gold}`,
+        boxShadow:'inset 0 0 0 0.5px rgba(201,168,76,0.5)',
+        padding:'14px 14px 12px',
+        display:'flex', flexDirection:'column', alignItems:'center',
+        textAlign:'center',
+        overflow:'hidden',
+        boxSizing:'border-box',
+      }}>
+      {/* Inner gold rule */}
+      <div style={{
+        position:'absolute', inset:'8px',
+        border:`0.5px solid rgba(230,201,122,0.5)`,
+        borderRadius:'8px',
+        pointerEvents:'none',
+      }}/>
+
+      {/* Flower (cropped — labels hidden by FlowerSprite) */}
+      <div style={{marginTop:'4px', marginBottom:'8px', position:'relative'}}>
+        <FlowerSprite index={flowerIndex} size={120} borderRadius={10}/>
+      </div>
+
+      {/* Yogananda message — Georgia italic */}
+      <div style={{
+        flex:1, display:'flex', alignItems:'center', justifyContent:'center',
+        padding:'0 4px',
+      }}>
+        <div style={{
+          fontFamily: T.serif,
+          fontStyle:'italic',
+          fontSize:`${fontSize}px`,
+          color: T.navy,
+          lineHeight:1.55,
+          maxHeight:'100%',
+          overflow:'hidden',
+          display:'-webkit-box',
+          WebkitBoxOrient:'vertical',
+          WebkitLineClamp: text.length < 110 ? 5 : text.length < 180 ? 7 : text.length < 260 ? 8 : 9,
+        }}>
+          {text}
+        </div>
+      </div>
+
+      {/* Attribution */}
+      <div style={{
+        marginTop:'6px',
+        fontFamily: T.serif,
+        fontSize:'9px', letterSpacing:'2.2px', textTransform:'uppercase',
+        color: T.gold, fontWeight:700,
+      }}>
+        ✦ Yogananda ✦
+      </div>
+    </motion.div>
   );
 };
 

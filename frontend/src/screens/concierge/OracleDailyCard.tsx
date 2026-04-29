@@ -1,15 +1,24 @@
 // © 2026 SoulMD, LLC. All rights reserved.
 //
-// Oracle card ritual — 7-card watercolor-sprite arc with guaranteed-no-overflow reveal.
+// Oracle card ritual — 7-card watercolor-sprite arc with guaranteed-no-
+// overflow reveal. Animation engine + sprite cropping live in shared
+// components so the /meditate oracle stays in sync with this one.
 //
 // Card back: 1 of 10 watercolor flowers from frontend/src/assets/flowers.png
 // (2-row, 5-column sprite sheet). Flower rotates daily via dayOfYear % 10.
+// The bottom 16% of each sprite cell is a baked-in flower-name label —
+// hidden via the FlowerSpriteFill component (clip-path).
+//
 // Card front (revealed): cream + gold, auto-fit typography bucketed by
 // message length so the longest oracle pull still fits without scrolling.
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { shareOracleCard } from './shareOracleCard';
-import flowersImg from '../../assets/flowers.png';
+import {
+  OracleCardFan, OracleGoldParticles, EASE,
+  type OraclePhase,
+} from '../../components/shared/OracleCardFan';
+import { FlowerSpriteFill, SPRITE_FLOWERS, type FlowerCell } from '../../components/shared/FlowerSprite';
 
 interface OracleCardData {
   id: number; category: string;
@@ -33,46 +42,23 @@ interface Props {
 const BG_PEARL  = 'linear-gradient(160deg, #F5F1FF 0%, #E8E4FB 35%, #DFEAFC 70%, #F1E7F8 100%)';
 const GOLD      = '#C9A84C';
 const GOLD_SOFT = '#E6C97A';
-const GOLD_BRIGHT = '#FFE4A3';
+// GOLD_BRIGHT lived only inside the in-file GoldParticles which now
+// resides in shared/OracleCardFan.
 const CREAM     = '#FFFEFA';
 const INK_CARD  = '#2A2150';
 const INK_SOFT  = '#6B6889';
 const PURPLE    = '#534AB7';
 const PURPLE_MID= '#9b8fe8';
 const SERIF     = '"Playfair Display",serif';
-const EASE      = [0.22, 1, 0.36, 1] as const;
-
-// Sprite sheet mapping — 5 columns × 2 rows, 10 flowers.
-interface FlowerCell { name: string; col: number; row: number; }
-const FLOWERS: FlowerCell[] = [
-  { name: 'Rose',           col: 0, row: 0 },
-  { name: 'Lotus',          col: 1, row: 0 },
-  { name: 'Sunflower',      col: 2, row: 0 },
-  { name: 'Cherry Blossom', col: 3, row: 0 },
-  { name: 'Iris',           col: 4, row: 0 },
-  { name: 'Peony',          col: 0, row: 1 },
-  { name: 'Lily',           col: 1, row: 1 },
-  { name: 'Dahlia',          col: 2, row: 1 },
-  { name: 'Lavender',       col: 3, row: 1 },
-  { name: 'Hibiscus',       col: 4, row: 1 },
-];
+// EASE is re-imported from the shared module so this file stays consistent
+// with the canonical timing curve. Re-export is unused here.
 
 const dayOfYear = (): number => {
   const now = new Date();
   const start = new Date(now.getFullYear(), 0, 0);
   return Math.floor((now.getTime() - start.getTime()) / 86400000);
 };
-const initialFlowerIndex = (): number => dayOfYear() % FLOWERS.length;
-
-// Background position for a sprite cell on a 500% × 200% backgroundSize.
-// Each cell is 20% wide + 100% tall; x-position steps by 20% and wraps
-// column 0..4 → 0%, 25%, 50%, 75%, 100%. y-position steps row 0 → 0%, row 1 → 100%.
-const spriteBgPosition = (cell: FlowerCell) => ({
-  backgroundImage: `url(${flowersImg})`,
-  backgroundSize: '500% 200%',
-  backgroundPosition: `${cell.col * 25}% ${cell.row * 100}%`,
-  backgroundRepeat: 'no-repeat' as const,
-});
+const initialFlowerIndex = (): number => dayOfYear() % SPRITE_FLOWERS.length;
 
 // Fonts + keyframes (once).
 if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-fonts')) {
@@ -88,59 +74,17 @@ if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-fo
   document.head.appendChild(pre2);
   document.head.appendChild(link);
 }
-if (typeof document !== 'undefined' && !document.getElementById('oracle-daily-keyframes')) {
-  const s = document.createElement('style');
-  s.id = 'oracle-daily-keyframes';
-  s.innerHTML = `
-    @keyframes oracleCenterBreathe {
-      0%, 100% { transform: translateY(0); }
-      50%      { transform: translateY(-6px); }
-    }
-    @keyframes oracleGoldRing {
-      0%, 100% { box-shadow: 0 0 12px rgba(201,168,76,0.25), 0 0 28px rgba(230,201,122,0.15), inset 0 0 14px rgba(255,228,163,0.12); }
-      50%      { box-shadow: 0 0 20px rgba(201,168,76,0.55), 0 0 44px rgba(230,201,122,0.28), inset 0 0 22px rgba(255,228,163,0.25); }
-    }
-    @keyframes oracleShine {
-      0%   { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
-      35%  { opacity: 0.28; }
-      65%  { opacity: 0.28; }
-      100% { transform: translateX(120%)  skewX(-18deg); opacity: 0; }
-    }
-    @keyframes oracleParticleDrift {
-      0%   { transform: translate3d(0, 0, 0); opacity: 0; }
-      15%  { opacity: 0.85; }
-      85%  { opacity: 0.5; }
-      100% { transform: translate3d(calc(var(--drift, 16px)), -110vh, 0); opacity: 0; }
-    }
-  `;
-  document.head.appendChild(s);
-}
+// Shine + breathe + gold-ring + particle-drift keyframes now live inside
+// shared/OracleCardFan, injected on import.
 
 const dateKey = () => new Date().toISOString().slice(0, 10);
 const lockKey = () => `oracle_pulled_${dateKey()}`;
 
-// Option C dimensions — side cards 200×310, center 220×340. x-offsets tightened
-// for 390px-viewport mobile fit; center fully visible, far-left/right allowed
-// to clip off-screen (per spec — "feels like endless deck").
-const CARD_W_SIDE = 200;
-const CARD_H_SIDE = 310;
-const CARD_W_CENTER = 220;
-const CARD_H_CENTER = 340;
-const STAGE_H = 440;   // accommodates center 340 + breathe + hover + reveal y-shift
-
-interface FanPos { x: number; rot: number; scale: number; isCenter: boolean; }
-const FAN: FanPos[] = [
-  { x: -195, rot: -20, scale: 0.75, isCenter: false }, // far left
-  { x: -105, rot: -12, scale: 0.85, isCenter: false }, // mid left
-  { x:  -48, rot:  -6, scale: 0.95, isCenter: false }, // near left
-  { x:    0, rot:   0, scale: 1.00, isCenter: true  }, // center
-  { x:   48, rot:   6, scale: 0.95, isCenter: false }, // near right
-  { x:  105, rot:  12, scale: 0.85, isCenter: false }, // mid right
-  { x:  195, rot:  20, scale: 0.75, isCenter: false }, // far right
-];
+// Card geometry now lives in shared/OracleCardFan (CARD_W_*, CARD_H_*,
+// STAGE_H, FAN). Re-imported as needed.
 
 const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser, onChanged, onOpenEnergyLog }) => {
-  const [phase, setPhase] = useState<'deck' | 'picking' | 'revealed'>('deck');
+  const [phase, setPhase] = useState<OraclePhase>('deck');
   const [pickedIndex, setPickedIndex] = useState<number | null>(null);
   const [card, setCard] = useState<OracleCardData | null>(null);
   const [flipped, setFlipped] = useState(false);
@@ -155,7 +99,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
     } catch { return false; }
   });
 
-  const flower = FLOWERS[flowerIndex % FLOWERS.length];
+  const flower = SPRITE_FLOWERS[flowerIndex % SPRITE_FLOWERS.length];
 
   useEffect(() => {
     if (!(todaysCard?.pulled && todaysCard.card)) return;
@@ -238,7 +182,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
       setCard(null);
       setPickedIndex(null);
       setPhase('deck');
-      setFlowerIndex(prev => (prev + 1) % FLOWERS.length);
+      setFlowerIndex(prev => (prev + 1) % SPRITE_FLOWERS.length);
       onChanged();
     } catch (e: any) {
       setErr(e.message || 'Could not reset.');
@@ -256,7 +200,7 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
       boxShadow:'0 10px 30px rgba(83,74,183,0.12)',
       border:'0.5px solid rgba(155,143,232,0.2)',
     }}>
-      <GoldParticles/>
+      <OracleGoldParticles/>
 
       {/* HEADER */}
       {phase !== 'revealed' && (
@@ -273,14 +217,16 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
         </div>
       )}
 
-      {/* STAGE — 7 cards in an arc */}
-      <div style={{position:'relative', width:'100%', height:`${STAGE_H}px`, display:'flex', alignItems:'center', justifyContent:'center', perspective:'1400px', zIndex:2}}>
-        {FAN.map((pos, i) => (
-          <FanCard key={i} index={i} pos={pos} phase={phase} pickedIndex={pickedIndex}
-            flipped={flipped} card={card} locked={lockedToday}
-            flower={flower} onPick={pickCard}/>
-        ))}
-      </div>
+      {/* STAGE — 7-card fan from shared component */}
+      <OracleCardFan
+        phase={phase}
+        pickedIndex={pickedIndex}
+        flipped={flipped}
+        locked={lockedToday}
+        onPick={pickCard}
+        renderBack={() => <ConciergeCardBack flower={flower}/>}
+        renderFront={({ isPicked }) => <ConciergeCardFront card={card} show={phase === 'revealed' && isPicked}/>}
+      />
 
       {/* Hint */}
       <div style={{marginTop:'14px', textAlign:'center', minHeight:'22px', color: INK_SOFT, fontSize:'12.5px', fontStyle:'italic', fontFamily: SERIF, letterSpacing:'0.4px', position:'relative', zIndex:2}}>
@@ -317,115 +263,40 @@ const OracleDailyCard: React.FC<Props> = ({ API, token, todaysCard, isSuperuser,
   );
 };
 
-// ─── Fan card ─────────────────────────────────────────────────────────────
+// ─── Card faces ───────────────────────────────────────────────────────────
+// FanCard / per-slot motion lives in shared/OracleCardFan.tsx now.
 
-const FanCard: React.FC<{
-  index: number;
-  pos: FanPos;
-  phase: 'deck' | 'picking' | 'revealed';
-  pickedIndex: number | null;
-  flipped: boolean;
-  card: OracleCardData | null;
-  locked: boolean;
-  flower: FlowerCell;
-  onPick: (i: number) => void;
-}> = ({ index, pos, phase, pickedIndex, flipped, card, locked, flower, onPick }) => {
-  const isPicked = pickedIndex === index;
-  const isOther  = pickedIndex !== null && !isPicked;
-  const isCenter = pos.isCenter;
-  const baseW = isCenter ? CARD_W_CENTER : CARD_W_SIDE;
-  const baseH = isCenter ? CARD_H_CENTER : CARD_H_SIDE;
-
-  let x = pos.x, y = 0, rotate = pos.rot, scale = pos.scale, opacity = 1;
-  if (phase === 'deck') {
-    opacity = locked ? 0.6 : 1;
-  } else if (phase === 'picking' || phase === 'revealed') {
-    if (isPicked) {
-      x = 0; y = -25; rotate = 0; scale = 1.15; opacity = 1;
-    } else if (isOther) {
-      opacity = 0.18;
-    }
-  }
-
+const ConciergeCardBack: React.FC<{flower: FlowerCell}> = ({ flower }) => {
+  const idx = SPRITE_FLOWERS.findIndex(f => f.col === flower.col && f.row === flower.row);
   return (
-    <motion.div
-      initial={false}
-      animate={{ x, y, rotate, scale, opacity }}
-      transition={{ duration: 1.0, ease: EASE }}
-      whileHover={phase === 'deck' && !locked ? { y: -8, scale: pos.scale * 1.04, transition:{duration:0.25, ease: EASE} } : undefined}
-      onClick={() => onPick(index)}
-      style={{
-        position:'absolute',
-        width:`${baseW}px`, height:`${baseH}px`,
-        cursor: phase === 'deck' && !locked ? 'pointer' : 'default',
-        transformStyle:'preserve-3d',
-        zIndex: isPicked ? 20 : (10 - Math.abs(index - 3)),
-      }}>
-      {/* Aura + center breathing (only in deck phase on center card) */}
+    <div style={{
+      position:'absolute', inset:0,
+      borderRadius:'12px',
+      background: CREAM,
+      border:`1.5px solid rgba(201,168,76,0.7)`,
+      overflow:'hidden',
+      display:'flex', flexDirection:'column',
+    }}>
+      {/* Inner 8px inset border */}
       <div style={{
-        position:'absolute', inset:'-4px',
-        borderRadius:'14px',
+        position:'absolute', inset:'8px',
+        border:`1px solid ${GOLD_SOFT}80`,
+        borderRadius:'6px',
         pointerEvents:'none',
-        animation: phase === 'deck' && !locked ? 'oracleGoldRing 3.4s ease-in-out infinite' : undefined,
-        animationDelay: `${-index * 0.4}s`,
       }}/>
-      <div style={{
-        width:'100%', height:'100%',
-        animation: phase === 'deck' && isCenter && !locked ? 'oracleCenterBreathe 4.5s ease-in-out infinite' : undefined,
-      }}>
-        <motion.div
-          initial={false}
-          animate={{ rotateY: flipped && isPicked ? 180 : 0 }}
-          transition={{ duration: 1.0, ease: EASE }}
-          style={{width:'100%', height:'100%', position:'relative', transformStyle:'preserve-3d'}}>
-          <CardBack flower={flower}/>
-          <CardFront card={card} show={phase === 'revealed' && isPicked}/>
-        </motion.div>
+      {/* Flower fills the card back; FlowerSpriteFill clips the bottom
+          16% label baked into the sprite. */}
+      <div style={{position:'absolute', inset:'8px', borderRadius:'6px', overflow:'hidden'}}>
+        <FlowerSpriteFill index={idx >= 0 ? idx : 0}/>
       </div>
-    </motion.div>
+      {/* Corner sparkles */}
+      <span style={{position:'absolute', top:'6px',    left:'8px',  fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
+      <span style={{position:'absolute', top:'6px',    right:'8px', fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
+      <span style={{position:'absolute', bottom:'6px', left:'8px',  fontSize:'7px', color: GOLD_SOFT, opacity: 0.7}}>✧</span>
+      <span style={{position:'absolute', bottom:'6px', right:'8px', fontSize:'7px', color: GOLD_SOFT, opacity: 0.7}}>✧</span>
+    </div>
   );
 };
-
-// ─── Card faces ───────────────────────────────────────────────────────────
-
-const CardBack: React.FC<{flower: FlowerCell}> = ({ flower }) => (
-  <div style={{
-    position:'absolute', inset:0,
-    backfaceVisibility:'hidden',
-    WebkitBackfaceVisibility:'hidden',
-    borderRadius:'12px',
-    background: CREAM,
-    border:`1.5px solid rgba(201,168,76,0.7)`,
-    overflow:'hidden',
-    display:'flex', flexDirection:'column',
-  }}>
-    {/* Inner 8px inset border */}
-    <div style={{
-      position:'absolute', inset:'8px',
-      border:`1px solid ${GOLD_SOFT}80`,
-      borderRadius:'6px',
-      pointerEvents:'none',
-    }}/>
-    {/* Flower sprite fills the card back — no text label beneath */}
-    <div style={{
-      position:'absolute', inset:'8px',
-      borderRadius:'6px',
-      ...spriteBgPosition(flower),
-    }}/>
-    {/* Corner sparkles */}
-    <span style={{position:'absolute', top:'6px',    left:'8px',  fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
-    <span style={{position:'absolute', top:'6px',    right:'8px', fontSize:'8px', color: GOLD_SOFT, opacity: 0.9}}>✦</span>
-    <span style={{position:'absolute', bottom:'6px', left:'8px',  fontSize:'7px', color: GOLD_SOFT, opacity: 0.7}}>✧</span>
-    <span style={{position:'absolute', bottom:'6px', right:'8px', fontSize:'7px', color: GOLD_SOFT, opacity: 0.7}}>✧</span>
-    {/* Shine sweep */}
-    <div style={{
-      position:'absolute', top:0, bottom:0, left:0, width:'50%',
-      background:'linear-gradient(100deg, transparent 35%, rgba(255,255,255,0.6) 50%, transparent 65%)',
-      animation:'oracleShine 5s ease-in-out infinite',
-      mixBlendMode:'screen', pointerEvents:'none',
-    }}/>
-  </div>
-);
 
 // Body font + line clamp by length. 4-bucket schedule tuned for readability
 // on the 220×340 revealed face with 20px/16px padding — at 1.5 line-height
@@ -439,7 +310,7 @@ function bodyStyleFor(text: string): { fontSize: string; lineClamp: number } {
   return                { fontSize: '13px', lineClamp: 7 };
 }
 
-const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ card, show }) => {
+const ConciergeCardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ card, show }) => {
   const cat  = useAnimation();
   const tit  = useAnimation();
   const body = useAnimation();
@@ -459,12 +330,12 @@ const CardFront: React.FC<{card: OracleCardData | null; show: boolean}> = ({ car
   const bodyText = card?.body || '';
   const bodyS = bodyStyleFor(bodyText);
 
+  // The shared OracleCardFan wrapper already handles rotateY(180deg) +
+  // backface-hidden positioning. This component just paints the card's
+  // visible content — relative box, full size of the parent.
   return (
     <div style={{
-      position:'absolute', inset:0,
-      backfaceVisibility:'hidden',
-      WebkitBackfaceVisibility:'hidden',
-      transform:'rotateY(180deg)',
+      position:'relative', width:'100%', height:'100%',
       borderRadius:'12px',
       background: CREAM,
       border:`1.5px solid ${GOLD}`,
@@ -545,30 +416,7 @@ const LotusIcon: React.FC = () => (
   </svg>
 );
 
-const GoldParticles: React.FC = () => (
-  <div aria-hidden style={{position:'absolute', inset:0, pointerEvents:'none', overflow:'hidden', zIndex:1}}>
-    {Array.from({ length: 28 }).map((_, i) => {
-      const size = 2 + ((i * 13) % 4);
-      const dur = 14 + (i % 12);
-      const delay = -(i * 0.7);
-      const drift = ((i % 5) - 2) * 12;
-      return (
-        <div key={i} style={{
-          position:'absolute',
-          left: `${(i * 41) % 100}%`,
-          bottom: `-${10 + (i % 20)}px`,
-          width: `${size}px`, height: `${size}px`, borderRadius:'50%',
-          background: `radial-gradient(circle, ${GOLD_BRIGHT} 0%, rgba(245,207,138,0) 70%)`,
-          boxShadow: `0 0 ${size * 3}px ${GOLD_SOFT}`,
-          opacity: 0.45 + ((i * 17) % 50) / 100,
-          // @ts-expect-error CSS custom property
-          '--drift': `${drift}px`,
-          animation: `oracleParticleDrift ${dur}s linear ${delay}s infinite`,
-        }}/>
-      );
-    })}
-  </div>
-);
+// GoldParticles moved to shared/OracleCardFan as OracleGoldParticles.
 
 const primaryPill: React.CSSProperties = {
   background:'linear-gradient(135deg,#7ab0f0 0%,#9b8fe8 55%,#534AB7 100%)',
