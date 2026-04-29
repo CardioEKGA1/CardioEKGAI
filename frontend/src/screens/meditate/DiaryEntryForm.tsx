@@ -251,9 +251,21 @@ const DiaryEntryForm: React.FC<Props> = ({ API, token, meditationId, meditationT
         {/* Gratitude prompts — always shown, always optional. */}
         <Card>
           <Label>Three things I am grateful for today:</Label>
-          <input value={g1} onChange={e => setG1(e.target.value)} placeholder="1." style={gratitudeInputStyle}/>
-          <input value={g2} onChange={e => setG2(e.target.value)} placeholder="2." style={{...gratitudeInputStyle, marginTop:'8px'}}/>
-          <input value={g3} onChange={e => setG3(e.target.value)} placeholder="3." style={{...gratitudeInputStyle, marginTop:'8px'}}/>
+          {([g1, g2, g3] as const).map((val, i) => {
+            const setter = i === 0 ? setG1 : i === 1 ? setG2 : setG3;
+            return (
+              <input key={i} value={val} onChange={e => setter(e.target.value)} placeholder={`${i + 1}.`}
+                style={{
+                  width:'100%', padding:'10px 12px',
+                  marginTop: i === 0 ? 0 : '8px',
+                  borderRadius:'10px', border:'1px solid rgba(180,210,230,0.6)',
+                  background:'rgba(255,255,255,0.6)',
+                  color: T.ink, fontSize:'13.5px',
+                  fontFamily: T.serif, fontStyle:'italic',
+                  outline:'none', boxSizing:'border-box',
+                }}/>
+            );
+          })}
         </Card>
 
         {err && (
@@ -351,13 +363,11 @@ const DictateField: React.FC<{label: string; placeholder: string; value: string;
   </div>
 );
 
-const gratitudeInputStyle: React.CSSProperties = {
-  width:'100%', padding:'10px 12px',
-  borderRadius:'10px', border:'1px solid rgba(180,210,230,0.6)',
-  background:'rgba(255,255,255,0.6)',
-  color: T.ink, fontSize:'13.5px',
-  fontFamily: T.serif, fontStyle:'italic',
-  outline:'none', boxSizing:'border-box',
-};
+// IMPORTANT: do NOT define a module-level style object that reads
+// T.ink / T.serif here. MeditateApp imports this file, and this file
+// imports MEDITATE_TOKENS from MeditateApp — a circular import that
+// works fine for code inside component bodies (lazy at render time)
+// but blows up with a TDZ error if read at module evaluation time.
+// All gratitude-input styling lives inline in the component above.
 
 export default DiaryEntryForm;
