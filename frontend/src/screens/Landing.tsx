@@ -142,7 +142,7 @@ const Landing: React.FC<Props> = ({ onAnalyze, onSignIn, onSignUp, onTerms, onPr
             <div style={{position:'absolute', top:'14px', right:'14px', fontSize:'10px', fontWeight:700, background:'rgba(255,255,255,0.25)', padding:'4px 10px', borderRadius:'999px', letterSpacing:'0.5px'}}>BEST VALUE</div>
             <div style={{fontSize:'12px', fontWeight:700, color:'rgba(255,255,255,0.85)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'10px'}}>SoulMD Suite</div>
             <div style={{fontSize:'36px', fontWeight:900, lineHeight:1, marginBottom:'4px'}}>$111.11<span style={{fontSize:'15px', fontWeight:600, opacity:0.8}}>/mo</span></div>
-            <div style={{fontSize:'12px', opacity:0.85, marginBottom:'18px'}}>or $1,199/year — all 8 paid tools à la carte = $1,079.92/yr</div>
+            <div style={{fontSize:'12px', opacity:0.85, marginBottom:'18px'}}>or $999.99/year — one subscription, everything included</div>
             <ul style={{listStyle:'none', padding:0, margin:'0 0 18px 0', fontSize:'13px', lineHeight:1.85}}>
               <li>✓ All 10 clinical-AI tools</li>
               <li>✓ Unlimited LabRead &amp; CliniScore</li>

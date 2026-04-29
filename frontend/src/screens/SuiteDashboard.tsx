@@ -362,7 +362,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 
       {suiteMonthly && (
         <div style={{...CARD, padding:'12px 14px', marginBottom:'14px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'1px solid rgba(122,176,240,0.3)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px'}}>
-          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save ~$134/year — switch to yearly Suite for $1,199.</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', fontWeight:'600'}}>Save ~$333/year — switch to yearly Suite for $999.99.</div>
           <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'7px 14px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '…' : 'Upgrade to yearly'}</button>
         </div>
       )}
@@ -574,12 +574,12 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       {!loading && !isSuper && !suiteActive && (
         <div style={{...CARD, marginTop:'20px', padding:'24px', background:'linear-gradient(135deg,rgba(122,176,240,0.15),rgba(155,143,232,0.15))', border:'2px solid rgba(122,176,240,0.35)', textAlign:'center'}}>
           <div style={{fontSize:'11px', fontWeight:'700', color:'#4a7ad0', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'8px'}}>Best value</div>
-          <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — all 10 tools</div>
-          <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'4px', fontWeight:600}}>All 8 paid tools à la carte = $1,079.92/yr — Suite gives you all 10 for $1,199/yr plus unlimited LabRead &amp; CliniScore</div>
-          <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime · includes unlimited LabRead & CliniScore</div>
+          <div style={{fontSize:'20px', fontWeight:'900', color:'#1a2a4a', marginBottom:'6px'}}>SoulMD Suite — All 10 Tools</div>
+          <div style={{fontSize:'13px', color:'#1a2a4a', marginBottom:'10px', fontWeight:600, lineHeight:1.55}}>Unlock all 10 tools with SoulMD Suite — $111.11/mo or $999.99/yr. One subscription, everything included.</div>
+          <div style={{fontSize:'12px', color:'#6a8ab0', marginBottom:'14px'}}>One login · cancel anytime · includes unlimited LabRead &amp; CliniScore</div>
           <div style={{display:'flex', gap:'8px', justifyContent:'center', flexWrap:'wrap'}}>
             <button onClick={()=>subscribe('suite','monthly')} disabled={checkoutLoading==='suite_monthly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px'}}>{checkoutLoading==='suite_monthly' ? '...' : 'Monthly $111.11'}</button>
-            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $1,199'}</button>
+            <button onClick={()=>subscribe('suite','yearly')} disabled={checkoutLoading==='suite_yearly'} style={{...BTN, flex:'none', padding:'10px 20px', fontSize:'13px', background:WORDMARK, border:'none', color:'white'}}>{checkoutLoading==='suite_yearly' ? '...' : 'Yearly $999.99'}</button>
           </div>
         </div>
       )}

@@ -105,10 +105,10 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
         <PriceCard title="Standard tool"     subtitle="EKGScan · RxCheck · AntibioticAI · NephroAI"              monthly="$9.99"   yearly="$89.99"  cta="Start standard" onCta={onSignUp}/>
         <PriceCard title="Premium tool"      subtitle="ClinicalNote AI · CerebralAI · XrayRead · PalliativeMD"   monthly="$24.99"  yearly="$179.99" cta="Start premium"  onCta={onSignUp}/>
         <PriceCard title="Free tools"        subtitle="LabRead · CliniScore · 5/day each, unlimited with Suite"  monthly="$0"      yearly="$0"      cta="Try free"       onCta={onSignUp}/>
-        <PriceCard title="SoulMD Suite"      subtitle="All 10 tools · unlimited LabRead &amp; CliniScore · one login"        monthly="$111.11" yearly="$1,199"  cta="Start Suite"    onCta={onSignUp} highlighted/>
+        <PriceCard title="SoulMD Suite"      subtitle="All 10 tools · unlimited LabRead &amp; CliniScore · one login"        monthly="$111.11" yearly="$999.99"  cta="Start Suite"    onCta={onSignUp} highlighted/>
       </div>
       <div style={{textAlign:'center', fontSize:'13px', color:'#4a7ad0', marginTop:'18px', fontWeight:600, lineHeight:1.6, maxWidth:'560px', marginLeft:'auto', marginRight:'auto'}}>
-        All 8 paid tools à la carte = <b>$1,079.92/yr</b>. Suite gives you all 10 for <b>$1,199/yr</b> plus unlimited LabRead &amp; CliniScore.
+        Unlock all 10 tools with SoulMD Suite — <b>$111.11/mo</b> or <b>$999.99/yr</b>. One subscription, everything included.
       </div>
       <div style={{textAlign:'center', fontSize:'12px', color:'#8aa0c0', marginTop:'10px'}}>Cancel anytime.</div>
     </section>

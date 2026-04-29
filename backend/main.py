@@ -538,8 +538,8 @@ PRICE_PER_MONTH = {
     ("cerebralai",   "monthly"): 24.99, ("cerebralai",   "yearly"): 179.99 / 12,
     ("xrayread",     "monthly"): 24.99, ("xrayread",     "yearly"): 179.99 / 12,
     ("palliativemd", "monthly"): 24.99, ("palliativemd", "yearly"): 179.99 / 12,
-    # Suite — $111.11/mo · $1,199/yr
-    ("suite",           "monthly"): 111.11, ("suite",           "yearly"): 1199.00 / 12,
+    # Suite — $111.11/mo · $999.99/yr
+    ("suite",           "monthly"): 111.11, ("suite",           "yearly"): 999.99 / 12,
 }
 
 def monthly_budget(user: User, db: Session) -> float:
@@ -1088,7 +1088,7 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
                     <h1 style="color:#1a2a4a;margin-bottom:16px">SoulMD</h1>
                     <h2 style="color:#1a2a4a">Welcome aboard</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
-                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) at $9.99/mo or $89.99/yr, premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) at $24.99/mo or $179.99/yr, or go all-in with the SoulMD Suite ($111.11/mo or $1,199/yr — all 10 tools plus unlimited LabRead &amp; CliniScore).</p>
+                    <p style="color:#4a5e6a;line-height:1.7">From there you can unlock standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) at $9.99/mo or $89.99/yr, premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) at $24.99/mo or $179.99/yr, or go all-in with the SoulMD Suite ($111.11/mo or $999.99/yr — all 10 tools plus unlimited LabRead &amp; CliniScore).</p>
                     <a href="https://soulmd.us/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Open SoulMD Dashboard</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI output must be independently reviewed by a licensed clinician. In emergencies, call 911.</p>
                     <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
@@ -2288,7 +2288,7 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         ("STRIPE_PRICE_PALLIATIVEMD_YEARLY",  17999,  "PalliativeMD · yearly"),
         # Suite
         ("STRIPE_PRICE_SUITE_MONTHLY",        11111,  "Suite · monthly"),
-        ("STRIPE_PRICE_SUITE_YEARLY",         119900, "Suite · yearly"),
+        ("STRIPE_PRICE_SUITE_YEARLY",         99999,  "Suite · yearly"),
         # Concierge
         ("STRIPE_PRICE_CONCIERGE_AWAKEN_MONTHLY",  44400,   "Concierge Awaken · monthly"),
         ("STRIPE_PRICE_CONCIERGE_AWAKEN_YEARLY",   500000,  "Concierge Awaken · yearly"),

@@ -39,7 +39,7 @@ const Terms: React.FC<Props> = ({ onBack }) => (
         },
         {
           title: '5. Subscriptions and Billing',
-          body: 'Every clinical tool offers one free analysis before a subscription is required. Standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) are $9.99/month or $89.99/year. Premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) are $24.99/month or $179.99/year. LabRead and CliniScore are free with a 5-per-day allowance, and become unlimited with the Suite. The full SoulMD Suite (all 10 tools) is $111.11/month or $1,199/year. Subscriptions automatically renew unless cancelled. You may cancel at any time through your account settings. No refunds are provided for partial billing periods.'
+          body: 'Every clinical tool offers one free analysis before a subscription is required. Standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) are $9.99/month or $89.99/year. Premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) are $24.99/month or $179.99/year. LabRead and CliniScore are free with a 5-per-day allowance, and become unlimited with the Suite. The full SoulMD Suite (all 10 tools) is $111.11/month or $999.99/year. Subscriptions automatically renew unless cancelled. You may cancel at any time through your account settings. No refunds are provided for partial billing periods.'
         },
         {
           title: '6. Patient Data and Privacy',
