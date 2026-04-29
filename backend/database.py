@@ -341,6 +341,43 @@ class PageVisit(Base):
     region = Column(String, nullable=True)    # ip-api.com regionName
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+# ─── /meditate standalone app ───────────────────────────────────────────
+# Separate surface from the concierge PWA. Three tables: a Yogananda
+# message bank, the daily-pull ledger (also stores the per-day
+# reflection inline), and a richer post-meditation diary.
+
+class MeditateOracleMessage(Base):
+    __tablename__ = "meditate_oracle_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    message_text = Column(String, nullable=False)
+    source_tag = Column(String, default="yogananda", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class MeditateOraclePull(Base):
+    __tablename__ = "meditate_oracle_pulls"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    pull_date = Column(String, index=True, nullable=False)  # YYYY-MM-DD MST
+    message_id = Column(Integer, nullable=False)
+    flower_index = Column(Integer, nullable=False)          # 0-9 sprite index
+    reflection = Column(String, default="")                 # patient's response to the prompt
+    reflected_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class MeditateDiaryEntry(Base):
+    __tablename__ = "meditate_diary_entries"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    meditation_id = Column(Integer, nullable=True, index=True)  # nullable — standalone entries allowed
+    meditation_title = Column(String, default="")               # snapshot at write time
+    body_sensations = Column(String, default="")
+    emotions_felt = Column(String, default="")
+    visions_or_insights = Column(String, default="")
+    general_reflection = Column(String, default="")
+    mood_before = Column(Integer, nullable=True)                # 1-5
+    mood_after = Column(Integer, nullable=True)                 # 1-5
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:
@@ -408,6 +445,25 @@ try:
         """))
 except Exception as e:
     print(f"Grandfather migration skipped: {e}")
+
+# Auto-seed the meditate_oracle_messages table on first boot. Idempotent —
+# returns 0 if rows already exist, so it's safe to run on every restart.
+# A standalone runner exists at scripts/seed_yogananda_messages.py for
+# manual / forced re-seeding.
+try:
+    import os as _os
+    _os.makedirs(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "scripts"), exist_ok=True)
+    from scripts.seed_yogananda_messages import seed_into_session as _seed_yog  # type: ignore
+    _s = SessionLocal()
+    try:
+        _n = _seed_yog(_s, force=False)
+        _s.commit()
+        if _n > 0:
+            print(f"Seeded {_n} Yogananda messages into meditate_oracle_messages.")
+    finally:
+        _s.close()
+except Exception as e:  # never let seed failure block boot
+    print(f"Yogananda seed skipped: {e}")
 
 def get_db():
     db = SessionLocal()

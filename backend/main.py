@@ -20,6 +20,7 @@ from database import (
     ConciergeOraclePull, ConciergeLabRecord, PushSubscription,
     ConciergeEnergyLog, ConciergeJournalEntry,
     PageVisit,
+    MeditateOracleMessage, MeditateOraclePull, MeditateDiaryEntry,
     ToolTrialUse,
 )
 import hashlib
@@ -6275,6 +6276,281 @@ def oracle_library(_: User = Depends(verify_concierge_owner)):
         cat = oracle["categories"].get(m["category"], {})
         out.append({**m, "category_label": cat.get("label"), "category_color": cat.get("color")})
     return {"cards": out}
+
+
+# ───── /meditate standalone app ─────────────────────────────────────────
+# Separate surface from the concierge PWA. Yogananda oracle pull, full
+# meditation library (re-using concierge_meditations), and a richer
+# diary. Gated by the concierge-owner check so superuser + Dr. Anderson
+# get access immediately without inventing a new role.
+
+import random as _random
+
+
+class _MeditateOracleReflectRequest(BaseModel):
+    reflection: str
+
+
+class _MeditateDiaryCreateRequest(BaseModel):
+    meditation_id: int | None = None
+    meditation_title: str | None = None
+    body_sensations: str | None = None
+    emotions_felt: str | None = None
+    visions_or_insights: str | None = None
+    general_reflection: str | None = None
+    mood_before: int | None = None
+    mood_after: int | None = None
+
+
+def _serialize_meditate_pull(p: MeditateOraclePull, message_text: str) -> dict:
+    return {
+        "id": p.id,
+        "date": p.pull_date,
+        "message_id": p.message_id,
+        "message_text": message_text,
+        "flower_index": p.flower_index,
+        "reflection": p.reflection or "",
+        "reflected_at": p.reflected_at.isoformat() if p.reflected_at else None,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+    }
+
+
+def _serialize_meditate_diary(d: MeditateDiaryEntry) -> dict:
+    return {
+        "id": d.id,
+        "meditation_id": d.meditation_id,
+        "meditation_title": d.meditation_title or "",
+        "body_sensations": d.body_sensations or "",
+        "emotions_felt": d.emotions_felt or "",
+        "visions_or_insights": d.visions_or_insights or "",
+        "general_reflection": d.general_reflection or "",
+        "mood_before": d.mood_before,
+        "mood_after": d.mood_after,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+    }
+
+
+@app.get("/meditate/oracle/today")
+def meditate_oracle_today(
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Returns today's pull for the user (or null) so the client can
+    short-circuit the intention screen and jump straight to the reveal."""
+    today = _today_mst()
+    pull = db.query(MeditateOraclePull).filter(
+        MeditateOraclePull.user_id == current_user.id,
+        MeditateOraclePull.pull_date == today,
+    ).order_by(MeditateOraclePull.id.desc()).first()
+    if not pull:
+        return {"pulled": False, "card": None}
+    msg = db.query(MeditateOracleMessage).filter(MeditateOracleMessage.id == pull.message_id).first()
+    text = msg.message_text if msg else ""
+    return {"pulled": True, "card": _serialize_meditate_pull(pull, text)}
+
+
+@app.post("/meditate/oracle/pull")
+def meditate_oracle_pull(
+    pull_again: bool = False,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Assigns a random message + flower (0-9) to today's date. One pull
+    per day per user — re-calling returns the same card unless
+    `?pull_again=true` is passed by the superuser (test affordance)."""
+    today = _today_mst()
+    existing = db.query(MeditateOraclePull).filter(
+        MeditateOraclePull.user_id == current_user.id,
+        MeditateOraclePull.pull_date == today,
+    ).order_by(MeditateOraclePull.id.desc()).first()
+    if existing and not (pull_again and getattr(current_user, "is_superuser", False)):
+        msg = db.query(MeditateOracleMessage).filter(MeditateOracleMessage.id == existing.message_id).first()
+        return _serialize_meditate_pull(existing, msg.message_text if msg else "")
+
+    # Pick a random message + flower index. If the seed table is empty
+    # (boot race or fresh local dev), surface a graceful 503 rather than
+    # crashing.
+    from sqlalchemy import func as _f
+    total = db.query(_f.count(MeditateOracleMessage.id)).scalar() or 0
+    if total == 0:
+        raise HTTPException(status_code=503, detail="Oracle messages not seeded yet — try again in a moment.")
+    offset = _random.randint(0, total - 1)
+    message = db.query(MeditateOracleMessage).offset(offset).limit(1).first()
+    if not message:
+        raise HTTPException(status_code=503, detail="Oracle messages unavailable.")
+    flower_index = _random.randint(0, 9)
+    pull = MeditateOraclePull(
+        user_id=current_user.id, pull_date=today,
+        message_id=message.id, flower_index=flower_index,
+    )
+    db.add(pull); db.commit(); db.refresh(pull)
+    return _serialize_meditate_pull(pull, message.message_text)
+
+
+@app.post("/meditate/oracle/reflect")
+def meditate_oracle_reflect(
+    data: _MeditateOracleReflectRequest,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Save a free-text reflection on today's pulled card. Idempotent —
+    each call overwrites the prior reflection (one card, one journal
+    entry per day)."""
+    today = _today_mst()
+    pull = db.query(MeditateOraclePull).filter(
+        MeditateOraclePull.user_id == current_user.id,
+        MeditateOraclePull.pull_date == today,
+    ).order_by(MeditateOraclePull.id.desc()).first()
+    if not pull:
+        raise HTTPException(status_code=400, detail="Pull a card first.")
+    pull.reflection = (data.reflection or "").strip()
+    pull.reflected_at = datetime.utcnow()
+    db.commit(); db.refresh(pull)
+    msg = db.query(MeditateOracleMessage).filter(MeditateOracleMessage.id == pull.message_id).first()
+    return _serialize_meditate_pull(pull, msg.message_text if msg else "")
+
+
+# Library — backed by the existing concierge_meditations table. Gives the
+# /meditate app access to all 2k+ scripts without duplicating data.
+
+_MEDITATE_PAGE_SIZE_MAX = 100
+
+@app.get("/meditate/meditations")
+def meditate_library_list(
+    category: str | None = None,
+    search: str | None = None,
+    limit: int = 60,
+    offset: int = 0,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Filter + search + paginate over the meditation library. Categories
+    list comes back as part of the response so the UI's filter bar can
+    populate from a single round-trip."""
+    n = max(1, min(int(limit or 60), _MEDITATE_PAGE_SIZE_MAX))
+    o = max(0, int(offset or 0))
+    q = db.query(ConciergeMeditation)
+    if category and category != "all":
+        q = q.filter(ConciergeMeditation.category == category)
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter((ConciergeMeditation.title.ilike(like)) | (ConciergeMeditation.script.ilike(like)))
+    total = q.count()
+    rows = q.order_by(ConciergeMeditation.id.asc()).offset(o).limit(n).all()
+    out = [{
+        "id": m.id,
+        "title": m.title,
+        "category": m.category or "uncategorized",
+        "duration_min": m.duration_min or 0,
+        "description": m.description or "",
+        "difficulty": m.difficulty or None,
+        "script_preview": (m.script or "")[:280],
+    } for m in rows]
+    # Distinct categories with counts — serves the filter bar.
+    from sqlalchemy import func as _f
+    cat_rows = (db.query(ConciergeMeditation.category, _f.count(ConciergeMeditation.id))
+                  .group_by(ConciergeMeditation.category)
+                  .order_by(_f.count(ConciergeMeditation.id).desc())
+                  .all())
+    categories = [{"slug": c or "uncategorized", "count": int(n2)} for c, n2 in cat_rows]
+    return {"meditations": out, "total": total, "limit": n, "offset": o, "categories": categories}
+
+
+@app.get("/meditate/meditations/{med_id}")
+def meditate_library_detail(
+    med_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    m = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == med_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Meditation not found")
+    return {
+        "id": m.id, "title": m.title,
+        "category": m.category or "uncategorized",
+        "duration_min": m.duration_min or 0,
+        "description": m.description or "",
+        "difficulty": m.difficulty or None,
+        "affirmations": m.affirmations or [],
+        "script": m.script or "",
+        "audio_url": m.audio_url or None,
+    }
+
+
+@app.post("/meditate/diary")
+def meditate_diary_create(
+    data: _MeditateDiaryCreateRequest,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Persist a diary entry. All four prose fields + both mood scores are
+    optional individually but at least one must be filled — enforces a
+    minimum signal so we don't accumulate empty rows."""
+    bs = (data.body_sensations or "").strip()
+    em = (data.emotions_felt or "").strip()
+    vi = (data.visions_or_insights or "").strip()
+    gr = (data.general_reflection or "").strip()
+    mb = data.mood_before if data.mood_before in (1, 2, 3, 4, 5) else None
+    ma = data.mood_after  if data.mood_after  in (1, 2, 3, 4, 5) else None
+    if not (bs or em or vi or gr or mb or ma):
+        raise HTTPException(status_code=400, detail="Add at least one field before saving.")
+    title = (data.meditation_title or "").strip()
+    if data.meditation_id and not title:
+        # Hydrate snapshot from the source row so feed cards stay readable
+        # even after a meditation gets renamed or deleted.
+        src = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == data.meditation_id).first()
+        title = src.title if src else ""
+    entry = MeditateDiaryEntry(
+        user_id=current_user.id,
+        meditation_id=data.meditation_id,
+        meditation_title=title or "Standalone Entry",
+        body_sensations=bs, emotions_felt=em,
+        visions_or_insights=vi, general_reflection=gr,
+        mood_before=mb, mood_after=ma,
+    )
+    db.add(entry); db.commit(); db.refresh(entry)
+    return _serialize_meditate_diary(entry)
+
+
+@app.get("/meditate/diary")
+def meditate_diary_list(
+    filter: str = "all",
+    search: str | None = None,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    q = db.query(MeditateDiaryEntry).filter(MeditateDiaryEntry.user_id == current_user.id)
+    now = datetime.utcnow()
+    if filter == "week":
+        q = q.filter(MeditateDiaryEntry.created_at >= now - timedelta(days=7))
+    elif filter == "month":
+        q = q.filter(MeditateDiaryEntry.created_at >= now - timedelta(days=30))
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            (MeditateDiaryEntry.meditation_title.ilike(like))
+            | (MeditateDiaryEntry.general_reflection.ilike(like))
+            | (MeditateDiaryEntry.emotions_felt.ilike(like))
+            | (MeditateDiaryEntry.visions_or_insights.ilike(like))
+            | (MeditateDiaryEntry.body_sensations.ilike(like))
+        )
+    rows = q.order_by(MeditateDiaryEntry.created_at.desc()).limit(200).all()
+    return {"entries": [_serialize_meditate_diary(e) for e in rows]}
+
+
+@app.get("/meditate/diary/{entry_id}")
+def meditate_diary_detail(
+    entry_id: int,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    e = db.query(MeditateDiaryEntry).filter(
+        MeditateDiaryEntry.id == entry_id,
+        MeditateDiaryEntry.user_id == current_user.id,
+    ).first()
+    if not e:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return _serialize_meditate_diary(e)
 
 
 # ───── Uptime monitoring ─────────────────────────────────────────────────────

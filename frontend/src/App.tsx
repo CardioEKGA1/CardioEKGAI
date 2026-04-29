@@ -29,6 +29,7 @@ import PatientTerms from './screens/PatientTerms';
 import PatientIntake from './screens/PatientIntake';
 import ConciergeMedicineLanding from './screens/ConciergeMedicineLanding';
 import MarketingAgent from './screens/MarketingAgent';
+import MeditateApp from './screens/meditate/MeditateApp';
 import TrialSignupModal from './TrialSignupModal';
 
 export interface EkgResult {
@@ -62,6 +63,7 @@ type Screen =
   | 'patient_login' | 'patient_terms' | 'patient_intake'
   | 'concierge_medicine'
   | 'marketing_admin'
+  | 'meditate'
   | 'dev_login';
 
 const API = 'https://ekgscan.com';
@@ -97,6 +99,7 @@ const pathToScreen = (path: string): Screen | null => {
   // gate Admin.tsx uses). Carved out of isAdminRoute below so the App
   // shell renders MarketingAgent instead of the admin console.
   if (path === '/admin/marketing')   return 'marketing_admin';
+  if (path === '/meditate')          return 'meditate';
   if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -128,6 +131,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'patient_intake')      return '/patient/intake';
   if (s === 'concierge_medicine')  return '/concierge-medicine';
   if (s === 'marketing_admin')     return '/admin/marketing';
+  if (s === 'meditate')            return '/meditate';
   if (s === 'dev_login')           return '/dev-login';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
@@ -337,6 +341,7 @@ const App: React.FC = () => {
       patient_intake:      'Tell Us About You · SoulMD Concierge',
       concierge_medicine:  'Concierge Medicine · SoulMD',
       marketing_admin:     `Marketing Agent · ${brand}`,
+      meditate:            'SoulMD Meditate',
       dev_login:           `Dev Login · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
@@ -415,6 +420,15 @@ const App: React.FC = () => {
   // Superuser-only; shares the gating shape with /concierge-medicine.
   useEffect(() => {
     if (screen !== 'marketing_admin') return;
+    if (!token) { navigate('auth'); return; }
+    if (!user) return;
+    if (!user.is_superuser) navigate('dashboard');
+  }, [screen, user, token, navigate]);
+
+  // /meditate — standalone Yogananda oracle + meditation library + diary.
+  // Superuser-only while we iterate.
+  useEffect(() => {
+    if (screen !== 'meditate') return;
     if (!token) { navigate('auth'); return; }
     if (!user) return;
     if (!user.is_superuser) navigate('dashboard');
@@ -527,6 +541,13 @@ const App: React.FC = () => {
           onNavigateDashboard={() => navigate('dashboard')}
           onNavigateMeditations={() => navigate('meditations_library')}
           onNavigateConciergeAccess={() => navigate('concierge_access')}
+        />
+      )}
+      {screen==='meditate' && user && user.is_superuser && (
+        <MeditateApp
+          API={API}
+          token={token}
+          onBack={() => navigate(isSoulMD ? 'dashboard' : 'landing')}
         />
       )}
       {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
