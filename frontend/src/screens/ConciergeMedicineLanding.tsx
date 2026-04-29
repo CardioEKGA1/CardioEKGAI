@@ -234,8 +234,8 @@ const ConciergeMedicineLanding: React.FC<Props> = ({ onBack }) => {
           </div>
           <div style={{fontSize:'14px', color: NAVY, lineHeight:1.7, marginTop:'14px', maxWidth:'520px', margin:'14px auto 0', opacity:0.88}}>
             If you received an invitation, contact{' '}
-            <a href="mailto:anderson@soulmd.us?subject=Concierge%20invitation" style={{color: PURPLE, textDecoration:'none', fontWeight:800}}>
-              anderson@soulmd.us
+            <a href="mailto:support@soulmd.us?subject=Concierge%20invitation" style={{color: PURPLE, textDecoration:'none', fontWeight:800}}>
+              support@soulmd.us
             </a>{' '}
             to begin your journey.
           </div>

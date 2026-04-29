@@ -332,7 +332,7 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
         <div style={{textAlign:'center', marginTop:'28px', fontSize:'12px', color: INK_SOFT, lineHeight:1.8}}>
           <a href="/" onClick={(e) => { e.preventDefault(); onHome(); }} style={{color: PURPLE, textDecoration:'none', fontWeight:700}}>soulmd.us</a>
           <span style={{margin:'0 8px', opacity:0.5}}>·</span>
-          <a href="mailto:anderson@soulmd.us" style={{color: PURPLE, textDecoration:'none', fontWeight:700}}>anderson@soulmd.us</a>
+          <a href="mailto:support@soulmd.us" style={{color: PURPLE, textDecoration:'none', fontWeight:700}}>support@soulmd.us</a>
         </div>
         <div style={{textAlign:'center', marginTop:'10px', fontSize:'10px', color: INK_SOFT, opacity:0.65, fontStyle:'italic', fontFamily: SERIF, lineHeight:1.7}}>
           Direct-pay practice · Not insurance · Beta — not yet HIPAA compliant

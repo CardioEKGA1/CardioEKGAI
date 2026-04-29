@@ -948,7 +948,7 @@ const DeleteAccountModal: React.FC<{onClose:()=>void; patientEmail:string}> = ({
     const body = encodeURIComponent(
       `Patient: ${patientEmail}\n\nI am requesting deletion of my SoulMD Concierge account. I understand this will cancel my subscription and remove my personal data from the platform.\n\nSigned.`
     );
-    window.location.href = `mailto:anderson@soulmd.us?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:support@soulmd.us?subject=${subject}&body=${body}`;
   };
   return (
     <SheetModal onClose={onClose}>

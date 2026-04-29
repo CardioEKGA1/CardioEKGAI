@@ -198,7 +198,7 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
           </div>
           <div style={{fontFamily:'"Cormorant Garamond",Georgia,serif', fontSize:'19px', fontWeight:500, color:INK, lineHeight:1.55, maxWidth:'500px', margin:'0 auto'}}>
             This practice accepts new members by invitation only. If you received an invitation, contact{' '}
-            <a href="mailto:anderson@soulmd.us?subject=Concierge%20invitation" style={{color:TEAL, textDecoration:'none', fontWeight:700, fontStyle:'italic'}}>anderson@soulmd.us</a>
+            <a href="mailto:support@soulmd.us?subject=Concierge%20invitation" style={{color:TEAL, textDecoration:'none', fontWeight:700, fontStyle:'italic'}}>support@soulmd.us</a>
             {' '}to begin your journey.
           </div>
           <div style={{fontSize:'11px', color:DEEPP, opacity:0.6, marginTop:'18px', letterSpacing:'0.3px'}}>
@@ -215,7 +215,7 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
         </div>
 
         <div style={{textAlign:'center', fontSize:'11px', color:DEEPP, opacity:0.6, padding:'16px 0'}}>
-          Already a member but don't see your account? <a href="mailto:anderson@soulmd.us?subject=Concierge%20access%20issue" style={{color:TEAL, textDecoration:'none', fontWeight:700}}>anderson@soulmd.us</a>
+          Already a member but don't see your account? <a href="mailto:support@soulmd.us?subject=Concierge%20access%20issue" style={{color:TEAL, textDecoration:'none', fontWeight:700}}>support@soulmd.us</a>
         </div>
       </div>
     </div>

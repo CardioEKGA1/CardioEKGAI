@@ -132,7 +132,7 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
             Your journey. Your healing. Your space.
           </div>
           <div style={{marginTop:'10px', fontSize:'11px', color: PURPLE_SOFT, textAlign:'center', opacity:0.7}}>
-            Need help? <a href="mailto:anderson@soulmd.us" style={{color: PURPLE, textDecoration:'none', fontWeight:700}}>anderson@soulmd.us</a>
+            Need help? <a href="mailto:support@soulmd.us" style={{color: PURPLE, textDecoration:'none', fontWeight:700}}>support@soulmd.us</a>
           </div>
         </div>
       </main>
