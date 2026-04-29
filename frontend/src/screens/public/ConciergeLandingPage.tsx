@@ -24,7 +24,7 @@ const BLUSH       = '#f0c8d8';
 const INK         = '#2a3a5a';
 const INK_SOFT    = '#6B6889';
 const SERIF       = 'Georgia, "Cormorant Garamond", "Playfair Display", "Times New Roman", serif';
-const PAGE_BG     = 'linear-gradient(180deg, #FAF9FD 0%, #F1ECF8 100%)';
+const PAGE_BG     = 'linear-gradient(160deg, #F5F1FF 0%, #E8E4FB 35%, #DFEAFC 70%, #F1E7F8 100%)';
 const CARD_BG     = '#FFFFFF';
 const CARD_BORDER = '0.5px solid rgba(83,74,183,0.10)';
 
@@ -141,19 +141,19 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
 
   return (
     <div style={{minHeight:'100vh', background: PAGE_BG, color: INK, fontFamily:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif'}}>
-      {/* HERO — dark navy with gold accents and faint Cho Ku Rei */}
+      {/* HERO — soft pearl gradient (no dark sections anywhere on the
+          page). Navy is reserved for headings + body text only; gold
+          drives the accents. */}
       <section style={{
         position:'relative',
-        background: `linear-gradient(135deg, ${NAVY_DEEP} 0%, ${NAVY} 55%, ${NAVY_SOFT} 100%)`,
-        color: 'white',
         padding:'clamp(40px,8vw,72px) clamp(20px,5vw,32px) clamp(48px,8vw,80px)',
         overflow:'hidden',
       }}>
-        <div aria-hidden style={{position:'absolute', right:'-40px', bottom:'-40px', opacity:0.10, pointerEvents:'none'}}>
-          <ChoKuRei size={300} color={GOLD_BRIGHT} opacity={1}/>
+        <div aria-hidden style={{position:'absolute', right:'-40px', bottom:'-40px', opacity:0.08, pointerEvents:'none'}}>
+          <ChoKuRei size={300} color={GOLD} opacity={1}/>
         </div>
-        <div aria-hidden style={{position:'absolute', left:'-40px', top:'-40px', opacity:0.06, pointerEvents:'none'}}>
-          <ChoKuRei size={220} color={GOLD_BRIGHT} opacity={1}/>
+        <div aria-hidden style={{position:'absolute', left:'-40px', top:'-40px', opacity:0.05, pointerEvents:'none'}}>
+          <ChoKuRei size={220} color={GOLD} opacity={1}/>
         </div>
         <div style={{maxWidth:'820px', margin:'0 auto', position:'relative'}}>
           <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'40px'}}>
@@ -163,28 +163,28 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
               <SoulMDLogo size={32}/>
             </button>
             <a href="/" onClick={(e) => { e.preventDefault(); onHome(); }}
-              style={{fontSize:'11px', color:'rgba(255,255,255,0.7)', fontWeight:700, letterSpacing:'1.5px', textTransform:'uppercase', textDecoration:'none'}}>
+              style={{fontSize:'11px', color: INK_SOFT, fontWeight:700, letterSpacing:'1.5px', textTransform:'uppercase', textDecoration:'none'}}>
               soulmd.us
             </a>
           </div>
 
-          <div style={{display:'inline-flex', padding:'5px 14px', borderRadius:'999px', background: GOLD_SOFT, color: GOLD_BRIGHT, fontSize:'10px', fontWeight:800, letterSpacing:'1.8px', textTransform:'uppercase', marginBottom:'18px'}}>
+          <div style={{display:'inline-flex', padding:'5px 14px', borderRadius:'999px', background: GOLD_SOFT, color: GOLD_DEEP, fontSize:'10px', fontWeight:800, letterSpacing:'1.8px', textTransform:'uppercase', marginBottom:'18px', border:`0.5px solid ${GOLD}55`}}>
             ✦ Salt Lake City, UT
           </div>
 
-          <h1 style={{fontFamily: SERIF, fontSize:'clamp(34px,8vw,56px)', fontWeight:600, lineHeight:1.05, letterSpacing:'-0.8px', margin:'0 0 16px', color:'white'}}>
+          <h1 style={{fontFamily: SERIF, fontSize:'clamp(34px,8vw,56px)', fontWeight:600, lineHeight:1.05, letterSpacing:'-0.8px', margin:'0 0 16px', color: NAVY}}>
             Private Medicine.<br/>
-            <span style={{color: GOLD}}>Personal Care.</span>
+            <span style={{color: GOLD_DEEP}}>Personal Care.</span>
           </h1>
-          <p style={{fontSize:'clamp(15px,2.6vw,17px)', color:'rgba(255,255,255,0.78)', lineHeight:1.6, maxWidth:'560px', margin:'0 0 28px'}}>
-            Dr. Neysi Anderson, MD — Board-Certified Internal Medicine. A concierge practice where science meets the soul.
+          <p style={{fontSize:'clamp(15px,2.6vw,17px)', color: INK_SOFT, lineHeight:1.6, maxWidth:'560px', margin:'0 0 28px'}}>
+            Dr. Anderson, MD — Board-Certified Internal Medicine. A concierge practice where science meets the soul.
           </p>
 
           <button onClick={scrollToTiers}
             style={{
               padding:'14px 24px', borderRadius:'14px',
-              background:`linear-gradient(135deg, ${GOLD}, ${GOLD_DEEP})`,
-              color: NAVY_DEEP, border:'none',
+              background: GOLD,
+              color:'white', border:'none',
               fontSize:'14px', fontWeight:800, letterSpacing:'0.5px',
               cursor:'pointer', fontFamily:'inherit',
               boxShadow:'0 12px 28px rgba(201,168,76,0.32)',
@@ -314,12 +314,12 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
               <button type="submit" disabled={submitting}
                 style={{
                   width:'100%', padding:'15px 18px',
-                  background:`linear-gradient(135deg, ${NAVY_DEEP} 0%, ${NAVY} 100%)`,
-                  color:'white', border:`1px solid ${GOLD}`,
+                  background: GOLD,
+                  color:'white', border:'none',
                   borderRadius:'14px',
                   fontSize:'14px', fontWeight:800, cursor: submitting ? 'wait' : 'pointer',
                   fontFamily:'inherit', letterSpacing:'0.5px', textTransform:'uppercase',
-                  boxShadow:'0 12px 28px rgba(26,42,74,0.32)',
+                  boxShadow:'0 12px 28px rgba(201,168,76,0.32)',
                   opacity: submitting ? 0.7 : 1,
                 }}>
                 {submitting ? 'Sending…' : 'Submit Inquiry →'}

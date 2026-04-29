@@ -3018,7 +3018,7 @@ class MarketingGenerateRequest(BaseModel):
 
 _MARKETING_SYSTEM_PROMPT = (
     "You are a medical SaaS marketing expert for SoulMD (soulmd.us) — a clinical AI "
-    "platform built by Dr. Neysi Anderson, board-certified Internal Medicine physician "
+    "platform built by Dr. Anderson, board-certified Internal Medicine physician "
     "in Salt Lake City, UT. SoulMD offers 10 AI clinical tools for physicians: EKGScan, "
     "NephroAI, RxCheck, AntibioticAI, XrayRead, CerebralAI, ClinicalNote AI, PalliativeMD, "
     "LabRead, CliniScore. Pricing: Standard tools $9.99/mo, Premium $24.99/mo, Full Suite "
@@ -6592,8 +6592,12 @@ class _ConciergeInquiryRequest(BaseModel):
 
 def _send_anderson_notification(subject: str, body_html: str) -> bool:
     """Tiny convenience wrapper around SendGrid for the practice owner's
-    inbox. Returns True iff the message hit the SendGrid API. Caller
-    should swallow the result — failures are logged, never raised."""
+    inbox. Delivers To: CONCIERGE_OWNER_EMAIL (anderson@) — kept
+    server-side and never exposed to patients. Reply-To is the public
+    support@soulmd.us mailbox so any reply Dr. Anderson sends from her
+    inbox goes out from support@, not the private owner address.
+    Returns True iff the message hit the SendGrid API. Failures are
+    logged and swallowed — the caller's DB row is already saved."""
     if not SENDGRID_API_KEY:
         print(f"SendGrid disabled — skipping notification: {subject}")
         return False
@@ -6604,7 +6608,7 @@ def _send_anderson_notification(subject: str, body_html: str) -> bool:
             subject=subject,
             html_content=body_html,
         )
-        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        msg.reply_to = "support@soulmd.us"
         sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
         sg.send(msg)
         return True

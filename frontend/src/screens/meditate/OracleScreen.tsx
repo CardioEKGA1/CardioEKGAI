@@ -15,7 +15,7 @@
 //
 // Backend wired to /meditate/oracle/today + /meditate/oracle/pull +
 // /meditate/oracle/reflect (already built).
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import DictationButton from '../../DictationButton';
 import { MEDITATE_TOKENS as T } from './MeditateApp';
@@ -24,6 +24,16 @@ import {
   type OraclePhase,
 } from '../../components/shared/OracleCardFan';
 import { FlowerSprite } from '../../components/shared/FlowerSprite';
+
+// Same daily-flower trick the concierge oracle uses: pick one flower
+// (0-9) per day so all 7 deck cards show the same illustration before
+// the user picks one. Keeps the deck visually unified and matches the
+// concierge UX exactly.
+const dayOfYear = (): number => {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  return Math.floor((now.getTime() - start.getTime()) / 86400000);
+};
 
 interface Props {
   API: string;
@@ -54,6 +64,12 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
   const [reflection, setReflection] = useState<string>('');
   const [savingReflection, setSavingReflection] = useState(false);
   const [savedTickAt, setSavedTickAt] = useState<number | null>(null);
+
+  // Daily flower index used on every card's pre-flip face. Stable for
+  // the day so the deck reads as a unified illustration. The actual
+  // post-pull card.flower_index is still stored server-side for record
+  // — we just don't render it on the deck cards' fronts.
+  const deckFlowerIndex = useMemo(() => dayOfYear() % 10, []);
 
   // Load today's pull. If one exists, jump straight to the revealed
   // state (center card, flipped) so the same message stays visible all
@@ -203,7 +219,7 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
         flipped={flipped}
         locked={false /* /meditate caps at one pull/day on the server */}
         onPick={pickCard}
-        renderBack={() => <MeditateCardBack/>}
+        renderBack={() => <MeditateCardBack flowerIndex={deckFlowerIndex}/>}
         renderFront={({ isPicked }) => (
           <MeditateCardFront card={card} show={phase === 'revealed' && isPicked}/>
         )}
@@ -299,51 +315,55 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
 };
 
 // ───── Card faces ────────────────────────────────────────────────────────
+// FRONT (visible pre-flip in the fan): watercolor flower on cream — no
+// text, no gradient. All 7 deck cards show the same daily flower so
+// the deck reads as a unified illustration. Mirrors the concierge
+// CardBack pattern exactly.
+// BACK  (revealed after flip): Yogananda message in Georgia italic on
+// a soft pearl→lavender gradient — no flower, no attribution.
 
-// Back: soft pearl→blush gradient. No flower, no text — all 7 cards in
-// the deck are visually identical until the user picks one. The optional
-// /card-back.png overlay layers on top of the gradient, anchored as a
-// background image; if the file ever moves, the gradient still reads.
-const MeditateCardBack: React.FC = () => (
+const MeditateCardBack: React.FC<{flowerIndex: number}> = ({ flowerIndex }) => (
   <div style={{
     position:'relative', width:'100%', height:'100%',
     borderRadius:'12px',
-    background:`linear-gradient(135deg, #C5E8F4 0%, #f0c8d8 100%), url(/card-back.png) center/cover`,
-    border:`1.5px solid ${T.gold}88`,
+    background:'#FFFEFA',
+    border:`1.5px solid ${T.gold}`,
+    boxShadow:'inset 0 0 0 0.5px rgba(201,168,76,0.5)',
     overflow:'hidden',
+    display:'flex', alignItems:'center', justifyContent:'center',
   }}>
-    {/* Inner gold inset ring — quiet, just for tactility */}
+    {/* Inner gold inset ring */}
     <div style={{
       position:'absolute', inset:'8px',
-      border:`1px solid rgba(201,168,76,0.35)`,
+      border:`1px solid rgba(201,168,76,0.45)`,
       borderRadius:'6px',
       pointerEvents:'none',
     }}/>
-    {/* Center seal */}
-    <div style={{
-      position:'absolute', inset:0,
-      display:'flex', alignItems:'center', justifyContent:'center',
-      color: T.gold, fontSize:'30px', opacity:0.62,
-      textShadow:'0 2px 8px rgba(255,255,255,0.45)',
-    }}>✦</div>
-    {/* Corner sparkles to mirror the concierge tactility */}
-    <span style={{position:'absolute', top:'6px',    left:'8px',  fontSize:'8px', color: T.gold, opacity: 0.85}}>✦</span>
-    <span style={{position:'absolute', top:'6px',    right:'8px', fontSize:'8px', color: T.gold, opacity: 0.85}}>✦</span>
+    {/* Watercolor flower (label-cropped via FlowerSprite). Sized so
+        the illustration fills the card minus the inset ring. The
+        inner div size is recalculated in CSS off the parent — using
+        a fixed 168px square to mirror the concierge crop dimensions
+        (200px sprite × 0.84 = 168). */}
+    <FlowerSprite index={flowerIndex} size={168} borderRadius={6}/>
+    {/* Corner sparkles for tactility */}
+    <span style={{position:'absolute', top:'6px',    left:'8px',  fontSize:'8px', color: T.gold, opacity: 0.9}}>✦</span>
+    <span style={{position:'absolute', top:'6px',    right:'8px', fontSize:'8px', color: T.gold, opacity: 0.9}}>✦</span>
     <span style={{position:'absolute', bottom:'6px', left:'8px',  fontSize:'7px', color: T.gold, opacity: 0.7}}>✧</span>
     <span style={{position:'absolute', bottom:'6px', right:'8px', fontSize:'7px', color: T.gold, opacity: 0.7}}>✧</span>
   </div>
 );
 
-// Front: watercolor flower at the top, Yogananda message centered in
-// Georgia italic, gold "✦ YOGANANDA ✦" attribution at the bottom.
 const MeditateCardFront: React.FC<{card: OracleCard | null; show: boolean}> = ({ card, show }) => {
-  const flowerIndex = card?.flower_index ?? 0;
-  // Bucket font size to keep the longest Yogananda message inside the
-  // card without scrolling. Mirrors the concierge auto-fit pattern.
   const text = card?.message_text || '';
-  const fontSize = text.length < 110 ? 16
-                  : text.length < 180 ? 14
+  // Bucket font size + line clamp so the longest Yogananda message
+  // still fits the 220×340 picked card without scroll.
+  const fontSize = text.length < 110 ? 17
+                  : text.length < 180 ? 15
                   : text.length < 260 ? 13
+                  : 12;
+  const lineClamp = text.length < 110 ? 7
+                  : text.length < 180 ? 9
+                  : text.length < 260 ? 11
                   : 12;
   return (
     <motion.div
@@ -353,11 +373,11 @@ const MeditateCardFront: React.FC<{card: OracleCard | null; show: boolean}> = ({
       style={{
         position:'relative', width:'100%', height:'100%',
         borderRadius:'12px',
-        background:'#FFFEFA',
-        border:`1.5px solid ${T.gold}`,
-        boxShadow:'inset 0 0 0 0.5px rgba(201,168,76,0.5)',
-        padding:'14px 14px 12px',
-        display:'flex', flexDirection:'column', alignItems:'center',
+        background:'linear-gradient(135deg, #F5F1FF 0%, #E8E4FB 100%)',
+        border:`1.5px solid ${T.gold}88`,
+        boxShadow:'inset 0 0 0 0.5px rgba(201,168,76,0.4)',
+        padding:'22px 18px',
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
         textAlign:'center',
         overflow:'hidden',
         boxSizing:'border-box',
@@ -370,40 +390,20 @@ const MeditateCardFront: React.FC<{card: OracleCard | null; show: boolean}> = ({
         pointerEvents:'none',
       }}/>
 
-      {/* Flower (cropped — labels hidden by FlowerSprite) */}
-      <div style={{marginTop:'4px', marginBottom:'8px', position:'relative'}}>
-        <FlowerSprite index={flowerIndex} size={120} borderRadius={10}/>
-      </div>
-
-      {/* Yogananda message — Georgia italic */}
+      {/* Yogananda message — Georgia italic, centered, full card */}
       <div style={{
-        flex:1, display:'flex', alignItems:'center', justifyContent:'center',
-        padding:'0 4px',
-      }}>
-        <div style={{
-          fontFamily: T.serif,
-          fontStyle:'italic',
-          fontSize:`${fontSize}px`,
-          color: T.navy,
-          lineHeight:1.55,
-          maxHeight:'100%',
-          overflow:'hidden',
-          display:'-webkit-box',
-          WebkitBoxOrient:'vertical',
-          WebkitLineClamp: text.length < 110 ? 5 : text.length < 180 ? 7 : text.length < 260 ? 8 : 9,
-        }}>
-          {text}
-        </div>
-      </div>
-
-      {/* Attribution */}
-      <div style={{
-        marginTop:'6px',
         fontFamily: T.serif,
-        fontSize:'9px', letterSpacing:'2.2px', textTransform:'uppercase',
-        color: T.gold, fontWeight:700,
+        fontStyle:'italic',
+        fontSize:`${fontSize}px`,
+        color: T.navy,
+        lineHeight:1.6,
+        padding:'0 4px',
+        display:'-webkit-box',
+        WebkitBoxOrient:'vertical',
+        WebkitLineClamp: lineClamp,
+        overflow:'hidden',
       }}>
-        ✦ Yogananda ✦
+        {text}
       </div>
     </motion.div>
   );
