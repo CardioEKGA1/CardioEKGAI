@@ -78,6 +78,38 @@ const SoulMDLanding: React.FC<Props> = ({ onSignIn, onSignUp, onPrivacy, onTerms
             <div style={{fontSize:'11px', color:'#4a7ad0', fontWeight:'700', marginTop:'4px'}}>{t.price}</div>
           </div>
         ))}
+        {/* Concierge Medicine — invitation-only card visible to all
+            visitors (signed in or not). Click hard-navigates to the
+            public /concierge-medicine landing where the inquiry form
+            lives. Same gold treatment as the authed dashboard tile. */}
+        <div style={{...CARD, padding:'20px', display:'flex', flexDirection:'column', gap:'10px', border:'1px solid rgba(201,168,76,0.45)', boxShadow:'0 6px 20px rgba(201,168,76,0.14)'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
+            <div style={{fontSize:'32px'}}>🌿</div>
+            <span style={{
+              fontSize:'9.5px', fontWeight:800, letterSpacing:'1.6px', textTransform:'uppercase',
+              color:'#A88830',
+              background:'rgba(201,168,76,0.10)',
+              border:'0.5px solid rgba(201,168,76,0.55)',
+              borderRadius:'999px', padding:'4px 10px',
+              whiteSpace:'nowrap',
+            }}>By Invitation Only</span>
+          </div>
+          <div style={{fontSize:'16px', fontWeight:'800', color:'#1a2a4a'}}>Concierge Medicine</div>
+          <div style={{fontSize:'13px', color:'#6a8ab0', lineHeight:'1.55', flex:1}}>
+            Where science meets the soul. A private medical practice for the whole person — body, mind, and spirit.
+          </div>
+          <a href="/concierge-medicine"
+            style={{
+              marginTop:'4px', textAlign:'center',
+              background:'#C9A84C', color:'white',
+              borderRadius:'12px', padding:'10px',
+              fontSize:'13px', fontWeight:800, letterSpacing:'0.4px',
+              textDecoration:'none',
+              boxShadow:'0 6px 14px rgba(201,168,76,0.30)',
+            }}>
+            Request an Invitation →
+          </a>
+        </div>
       </div>
     </section>
 

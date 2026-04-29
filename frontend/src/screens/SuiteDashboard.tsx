@@ -40,7 +40,7 @@ const TOOLS: Tool[] = [
   { slug:'rxcheck',      name:'RxCheck',         icon:'💊', desc:'Full medication interaction safety check',                                                                                       monthly:9.99,  yearly:89.99,  keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
   { slug:'xrayread',     name:'XrayRead',        icon:'🩻', desc:'Structured radiology report from any X-ray image',                                                                               monthly:24.99, yearly:179.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
   // ── Discovery / admin tiles — pinned last ────────────────────────────
-  { slug:'concierge',    name:'Concierge Medicine', icon:'🌿', desc:'Where science meets the soul — Dr. Anderson\'s integrative practice. Membership + à la carte care.',                        monthly:0,     yearly:0,      free:true,  keywords:'concierge anderson membership integrative direct-pay soul ritual meditation oracle holistic reiki chakra' },
+  { slug:'concierge',    name:'Concierge Medicine', icon:'🌿', desc:'Where science meets the soul. A private medical practice for the whole person — body, mind, and spirit.',                                  monthly:0,     yearly:0,      free:true,  keywords:'concierge anderson membership integrative direct-pay soul ritual meditation oracle holistic reiki chakra invitation' },
   { slug:'meditations',  name:'Meditations',     icon:'🕯️', desc:'2,000+ guided meditation scripts — browse, search, favorite. Superuser tool.',                                                  monthly:0,     yearly:0,      free:true,  keywords:'meditation mindfulness breathwork sleep chakra grounding visualization library scripts' },
 ];
 
@@ -49,9 +49,10 @@ const TOOLS: Tool[] = [
 const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','xrayread','cerebralai','palliativemd','labread','cliniscore','concierge','meditations']);
 
 // Tools the superuser sees but regular users don't (admin-scoped content).
-// concierge is intentionally NOT here — everyone should be able to discover
-// the concierge practice from the tool grid.
-const SUPERUSER_ONLY_TOOLS = new Set(['meditations', 'concierge']);
+// Concierge Medicine is visible to everyone now — non-superusers see an
+// invitation-only card that links to the public /concierge-medicine
+// landing; superusers click through to the physician dashboard.
+const SUPERUSER_ONLY_TOOLS = new Set(['meditations']);
 
 // The 8 tools with the 1-use-free-trial model. labread + cliniscore are
 // already 5/day free for everyone so they stay out of the trial system.
@@ -476,6 +477,13 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
       {!loading && visibleTools.length > 0 && (
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:'14px'}}>
           {visibleTools.map(t => {
+            // Concierge Medicine has its own treatment for non-superusers:
+            // gold "By Invitation Only" badge + Request CTA → public
+            // landing. Superuser keeps the standard tile (clicks through
+            // to /concierge physician dashboard).
+            if (t.slug === 'concierge' && !isSuper) {
+              return <ConciergeInviteCard key={t.slug} name={t.name} icon={t.icon} desc={t.desc}/>;
+            }
             const active = hasAccess(t.slug);
             const mLoading = checkoutLoading === `${t.slug}_monthly`;
             const yLoading = checkoutLoading === `${t.slug}_yearly`;
@@ -646,6 +654,44 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         </div>
       )}
     </div>
+    </div>
+  );
+};
+
+// ───── Concierge invitation tile (non-superuser dashboard view) ────────
+// Same overall card geometry as the standard tool tiles so the grid
+// stays visually consistent. Diverges in copy + chrome: gold by-
+// invitation-only badge + a gold "Request an Invitation →" button that
+// hard-navigates to /concierge-medicine (the public landing where the
+// inquiry form lives).
+const ConciergeInviteCard: React.FC<{name: string; icon: React.ReactNode; desc: string}> = ({ name, icon, desc }) => {
+  const goLanding = () => { window.location.href = '/concierge-medicine'; };
+  return (
+    <div style={{...CARD, display:'flex', flexDirection:'column', gap:'8px', position:'relative', border:'1px solid rgba(201,168,76,0.45)', boxShadow:'0 6px 20px rgba(201,168,76,0.14)'}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
+        <div style={{fontSize:'32px'}}>{icon}</div>
+        <span style={{
+          fontSize:'9.5px', fontWeight:800, letterSpacing:'1.6px', textTransform:'uppercase',
+          color:'#A88830',
+          background:'rgba(201,168,76,0.10)',
+          border:'0.5px solid rgba(201,168,76,0.55)',
+          borderRadius:'999px', padding:'4px 10px',
+          whiteSpace:'nowrap',
+        }}>By Invitation Only</span>
+      </div>
+      <div style={{fontSize:'16px', fontWeight:'800', color:'#1a2a4a'}}>{name}</div>
+      <div style={{fontSize:'13px', color:'#6a8ab0', lineHeight:'1.55', flex:1}}>{desc}</div>
+      <button onClick={goLanding}
+        style={{
+          marginTop:'4px',
+          background:'#C9A84C', color:'white', border:'none',
+          borderRadius:'12px', padding:'10px',
+          fontSize:'13px', fontWeight:800, letterSpacing:'0.4px',
+          cursor:'pointer', fontFamily:'inherit',
+          boxShadow:'0 6px 14px rgba(201,168,76,0.30)',
+        }}>
+        Request an Invitation →
+      </button>
     </div>
   );
 };

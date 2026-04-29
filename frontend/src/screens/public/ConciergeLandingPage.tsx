@@ -179,6 +179,23 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
             Private Medicine.<br/>
             <span style={{color: GOLD_DEEP}}>Personal Care.</span>
           </h1>
+
+          {/* Refined invitation-only signal — gold border + small caps,
+              centered. Reads as exclusivity, not a warning. */}
+          <div style={{display:'inline-block', marginBottom:'16px'}}>
+            <span style={{
+              display:'inline-block',
+              fontSize:'10px', fontWeight:800, letterSpacing:'2.4px', textTransform:'uppercase',
+              color: GOLD_DEEP,
+              background:'rgba(201,168,76,0.06)',
+              border:`1px solid ${GOLD}`,
+              borderRadius:'999px',
+              padding:'6px 16px',
+            }}>
+              ✦ By Invitation Only
+            </span>
+          </div>
+
           <p style={{fontSize:'clamp(15px,2.6vw,17px)', color: INK_SOFT, lineHeight:1.6, maxWidth:'560px', margin:'0 0 20px'}}>
             Dr. Anderson, MD — Board-Certified Internal Medicine. A concierge practice where science meets the soul.
           </p>
@@ -289,18 +306,18 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
               <h3 style={{fontFamily: SERIF, fontSize:'22px', fontWeight:600, color: NAVY, margin:'0 0 10px'}}>
                 Thank you, {name.trim().split(' ')[0] || 'friend'}.
               </h3>
-              <p style={{fontSize:'14px', color: INK_SOFT, lineHeight:1.65, maxWidth:'420px', margin:'0 auto'}}>
-                Dr. Anderson will be in touch within 48 hours.
+              <p style={{fontSize:'14px', color: INK_SOFT, lineHeight:1.65, maxWidth:'480px', margin:'0 auto'}}>
+                Your request has been received. Dr. Anderson will personally review it and reach out if there is alignment. Thank you for trusting us with your care.
               </p>
             </div>
           ) : (
             <form onSubmit={submit}>
               <div style={{textAlign:'center', marginBottom:'22px'}}>
                 <h3 style={{fontFamily: SERIF, fontSize:'24px', fontWeight:600, color: NAVY, margin:'0 0 8px', letterSpacing:'-0.3px'}}>
-                  Apply for Membership
+                  Request Your Invitation
                 </h3>
-                <p style={{fontSize:'13px', color: INK_SOFT, lineHeight:1.6, margin:0, maxWidth:'480px', marginInline:'auto'}}>
-                  Dr. Anderson accepts a limited number of patients. Inquire below and she will personally respond within 48 hours.
+                <p style={{fontSize:'13px', color: INK_SOFT, lineHeight:1.65, margin:0, maxWidth:'500px', marginInline:'auto'}}>
+                  Dr. Anderson personally reviews each request and extends invitations to those whose goals align with this practice's vision. Spots are intentionally limited.
                 </p>
               </div>
 
@@ -344,7 +361,7 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
                   boxShadow:'0 12px 28px rgba(201,168,76,0.32)',
                   opacity: submitting ? 0.7 : 1,
                 }}>
-                {submitting ? 'Sending…' : 'Submit Inquiry →'}
+                {submitting ? 'Sending…' : 'Request My Invitation →'}
               </button>
             </form>
           )}
