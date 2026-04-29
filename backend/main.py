@@ -6611,6 +6611,17 @@ def _esc(s: str | None) -> str:
               .replace("\"", "&quot;").replace("'", "&#39;").replace("\n", "<br>"))
 
 
+# Hoisted out of the f-strings below so the expression part stays free of
+# backslash-escaped quotes — Python 3.11 (Railway's runtime) rejects
+# backslashes inside f-string `{...}` expressions, which is the syntax
+# error that took the prior boot down.
+_EMPTY_FIELD_HTML = "<em style='color:#888'>(none provided)</em>"
+_EMPTY_DASH_HTML  = "<em style='color:#888'>—</em>"
+
+def _now_stamp() -> str:
+    return datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")
+
+
 @app.post("/meditations/request-access")
 def public_meditations_request(
     data: _MeditationsAccessRequest,
@@ -6631,8 +6642,8 @@ def public_meditations_request(
             f'  <p style="margin:6px 0;font-size:13px"><b>Name:</b> {_esc(name)}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Email:</b> <a href="mailto:{_esc(email)}" style="color:#534AB7">{_esc(email)}</a></p>'
             f'  <p style="margin:14px 0 6px;font-size:13px;font-weight:700">Reason:</p>'
-            f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(reason) or "<em style=\"color:#888\">(none provided)</em>"}</div>'
-            f'  <p style="margin:18px 0 0;font-size:11px;color:#8aa0c0">Received {datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")} · request id #{row.id}</p>'
+            f"  <div style=\"background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a\">{_esc(reason) or _EMPTY_FIELD_HTML}</div>"
+            f"  <p style=\"margin:18px 0 0;font-size:11px;color:#8aa0c0\">Received {_now_stamp()} · request id #{row.id}</p>"
             f'</div>'
         ),
     )
@@ -6666,11 +6677,11 @@ def public_concierge_inquiry(
             f'  <h2 style="margin:0 0 16px;font-size:18px;color:#1a2a4a">New Concierge Membership Inquiry</h2>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Name:</b> {_esc(name)}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Email:</b> <a href="mailto:{_esc(email)}" style="color:#534AB7">{_esc(email)}</a></p>'
-            f'  <p style="margin:6px 0;font-size:13px"><b>Phone:</b> {_esc(phone) or "<em style=\"color:#888\">—</em>"}</p>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Phone:</b> {_esc(phone) or _EMPTY_DASH_HTML}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Tier interest:</b> {tier_label}</p>'
             f'  <p style="margin:14px 0 6px;font-size:13px;font-weight:700">Message:</p>'
-            f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(message) or "<em style=\"color:#888\">(none provided)</em>"}</div>'
-            f'  <p style="margin:18px 0 0;font-size:11px;color:#8aa0c0">Received {datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")} · inquiry id #{row.id}</p>'
+            f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(message) or _EMPTY_FIELD_HTML}</div>'
+            f'  <p style="margin:18px 0 0;font-size:11px;color:#8aa0c0">Received {_now_stamp()} · inquiry id #{row.id}</p>'
             f'</div>'
         ),
     )
