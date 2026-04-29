@@ -7362,7 +7362,14 @@ class _ConciergeInquiryRequest(BaseModel):
     email: str
     phone: str | None = None
     tier_interest: str | None = None
+    # Legacy free-text field — still accepted from the bottom-of-page
+    # fallback form. New tier-card form posts health_history instead.
     message: str | None = None
+    # Richer intake added with the per-tier flippable form.
+    dob: str | None = None
+    health_history: str | None = None
+    heard_from: str | None = None
+    insurance_acknowledged: bool | None = None
 
 
 def _send_anderson_notification(subject: str, body_html: str) -> bool:
@@ -7445,32 +7452,57 @@ def public_concierge_inquiry(
     data: _ConciergeInquiryRequest,
     db: Session = Depends(get_db),
 ):
-    name = (data.name or "").strip()
+    name  = (data.name or "").strip()
     email = (data.email or "").strip()
     phone = (data.phone or "").strip()
-    tier = (data.tier_interest or "").strip().lower() or None
-    message = (data.message or "").strip()
+    tier  = (data.tier_interest or "").strip().lower() or None
+    # health_history is the new primary narrative field (per-tier card
+    # form). Legacy `message` is still accepted from the bottom-of-page
+    # fallback form. We persist whichever the caller provided into both
+    # so admin queries don't have to coalesce.
+    health_history = (data.health_history or "").strip()
+    legacy_msg     = (data.message or "").strip()
+    primary_text   = health_history or legacy_msg
+    dob = (data.dob or "").strip() or None
+    heard_from = (data.heard_from or "").strip() or None
+    insurance_acked = bool(data.insurance_acknowledged)
+
     if not name or "@" not in email:
         raise HTTPException(status_code=400, detail="Name and a valid email are required.")
     if tier and tier not in {"awaken", "align", "ascend", "unsure"}:
         tier = "unsure"
+
     row = ConciergeInquiry(
         name=name, email=email, phone=phone or None,
-        tier_interest=tier, message=message,
+        tier_interest=tier,
+        message=legacy_msg or "",
+        dob=dob,
+        health_history=primary_text,
+        heard_from=heard_from,
+        insurance_acknowledged=insurance_acked,
     )
     db.add(row); db.commit(); db.refresh(row)
+
     tier_label = {"awaken":"Awaken","align":"Align","ascend":"Ascend","unsure":"Not sure yet"}.get(tier or "", "—")
+    subject = (
+        f"Invitation Request: {tier_label} — {name}"
+        if tier and tier != "unsure"
+        else f"New Concierge Inquiry — {name} ({tier_label})"
+    )
     _send_anderson_notification(
-        subject=f"New Concierge Inquiry — {name} ({tier_label})",
+        subject=subject,
         body_html=(
             f'<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a2a4a">'
             f'  <h2 style="margin:0 0 16px;font-size:18px;color:#1a2a4a">New Concierge Membership Inquiry</h2>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Name:</b> {_esc(name)}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Email:</b> <a href="mailto:{_esc(email)}" style="color:#534AB7">{_esc(email)}</a></p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Phone:</b> {_esc(phone) or _EMPTY_DASH_HTML}</p>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Date of birth:</b> {_esc(dob) or _EMPTY_DASH_HTML}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Tier interest:</b> {tier_label}</p>'
-            f'  <p style="margin:14px 0 6px;font-size:13px;font-weight:700">Message:</p>'
-            f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(message) or _EMPTY_FIELD_HTML}</div>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Heard from:</b> {_esc(heard_from) or _EMPTY_DASH_HTML}</p>'
+            f'  <p style="margin:6px 0;font-size:13px"><b>Insurance acknowledged:</b> {"Yes" if insurance_acked else "No"}</p>'
+            f'  <p style="margin:14px 0 6px;font-size:13px;font-weight:700">Health history &amp; reason for joining:</p>'
+            f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(primary_text) or _EMPTY_FIELD_HTML}</div>'
             f'  <p style="margin:18px 0 0;font-size:11px;color:#8aa0c0">Received {_now_stamp()} · inquiry id #{row.id}</p>'
             f'</div>'
         ),

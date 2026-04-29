@@ -450,7 +450,14 @@ class ConciergeInquiry(Base):
     email = Column(String, index=True, nullable=False)
     phone = Column(String, nullable=True)
     tier_interest = Column(String, nullable=True)  # awaken | align | ascend | unsure
+    # message is the legacy free-text column kept for back-compat with
+    # historical inquiries. New submissions write to health_history.
     message = Column(String, default="")
+    # Richer intake added with the flippable tier-card request form:
+    dob = Column(String, nullable=True)                       # ISO date string
+    health_history = Column(String, default="")               # primary narrative field
+    heard_from = Column(String, nullable=True)                # social/referral/etc.
+    insurance_acknowledged = Column(Boolean, default=False)   # required checkbox
     status = Column(String, default="pending", index=True)  # pending | responded | enrolled | declined
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
@@ -525,6 +532,11 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_1 VARCHAR"))
         conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_2 VARCHAR"))
         conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_3 VARCHAR"))
+        # Richer concierge inquiry intake (flippable tier-card form).
+        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS dob VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS health_history VARCHAR DEFAULT ''"))
+        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS heard_from VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS insurance_acknowledged BOOLEAN DEFAULT FALSE"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 
