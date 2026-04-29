@@ -160,7 +160,11 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
             <button onClick={onHome}
               style={{background:'transparent', border:'none', padding:0, cursor:'pointer'}}
               title="SoulMD home">
-              <SoulMDLogo size={32}/>
+              {/* Logo bumped ~40% (32 → 46) and the default
+                  "AI CLINICAL SUITE" subtitle suppressed for the
+                  concierge surface — the lockup speaks for itself
+                  alongside the practice copy. */}
+              <SoulMDLogo size={46} subtitle=""/>
             </button>
             <a href="/" onClick={(e) => { e.preventDefault(); onHome(); }}
               style={{fontSize:'11px', color: INK_SOFT, fontWeight:700, letterSpacing:'1.5px', textTransform:'uppercase', textDecoration:'none'}}>
@@ -168,16 +172,34 @@ const ConciergeLandingPage: React.FC<Props> = ({ API, onHome }) => {
             </a>
           </div>
 
-          <div style={{display:'inline-flex', padding:'5px 14px', borderRadius:'999px', background: GOLD_SOFT, color: GOLD_DEEP, fontSize:'10px', fontWeight:800, letterSpacing:'1.8px', textTransform:'uppercase', marginBottom:'18px', border:`0.5px solid ${GOLD}55`}}>
-            ✦ Salt Lake City, UT
-          </div>
+          {/* (Salt Lake City badge removed — practice scope is
+              communicated by the membership copy below.) */}
 
           <h1 style={{fontFamily: SERIF, fontSize:'clamp(34px,8vw,56px)', fontWeight:600, lineHeight:1.05, letterSpacing:'-0.8px', margin:'0 0 16px', color: NAVY}}>
             Private Medicine.<br/>
             <span style={{color: GOLD_DEEP}}>Personal Care.</span>
           </h1>
-          <p style={{fontSize:'clamp(15px,2.6vw,17px)', color: INK_SOFT, lineHeight:1.6, maxWidth:'560px', margin:'0 0 28px'}}>
+          <p style={{fontSize:'clamp(15px,2.6vw,17px)', color: INK_SOFT, lineHeight:1.6, maxWidth:'560px', margin:'0 0 20px'}}>
             Dr. Anderson, MD — Board-Certified Internal Medicine. A concierge practice where science meets the soul.
+          </p>
+
+          {/* Soft gold divider + spiritual-downloads line. Kept narrow
+              and Georgia italic so it reads as a quiet aside rather
+              than a clinical claim. */}
+          <div aria-hidden style={{
+            width:'72px', height:'1px',
+            background:`linear-gradient(90deg, transparent, ${GOLD} 50%, transparent)`,
+            margin:'0 0 16px',
+          }}/>
+          <p style={{
+            fontFamily: SERIF, fontStyle:'italic',
+            fontSize:'clamp(13px,2.2vw,15px)',
+            color:'#7B6EA0',
+            lineHeight:1.7,
+            maxWidth:'560px',
+            margin:'0 0 28px',
+          }}>
+            Where medicine meets the sacred — members may experience profound moments of clarity, inner knowing, and spiritual awakening as part of their healing journey.
           </p>
 
           <button onClick={scrollToTiers}
