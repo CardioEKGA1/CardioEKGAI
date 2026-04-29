@@ -107,9 +107,10 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
     }
   }, [API, token, phase, pulling, card]);
 
-  // Superuser-only test affordance — re-pulls a fresh message + flower
-  // for today so we can iterate on copy + sprite mapping without
-  // waiting for tomorrow.
+  // Pull a fresh card. The /meditate route is superuser-gated upstream
+  // in App.tsx, so every visitor here is a superuser and the backend
+  // hands back a brand-new random message + flower on every call. The
+  // legacy ?pull_again=true query is no longer required.
   const pullAgain = useCallback(async () => {
     if (pulling) return;
     setErr('');
@@ -121,7 +122,7 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
     setSavedTickAt(null);
     setPulling(true);
     try {
-      const res = await fetch(`${API}/meditate/oracle/pull?pull_again=true`, {
+      const res = await fetch(`${API}/meditate/oracle/pull`, {
         method:'POST',
         headers:{ Authorization: `Bearer ${token}` },
       });
@@ -287,7 +288,7 @@ const OracleScreen: React.FC<Props> = ({ API, token, onBeginMeditation }) => {
             <div style={{textAlign:'center', marginTop:'14px'}}>
               <button onClick={pullAgain}
                 style={{background:'transparent', border:'none', color: T.inkSoft, fontSize:'11px', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit'}}>
-                Pull again (superuser test)
+                ✦ Pull another card
               </button>
             </div>
           </motion.div>

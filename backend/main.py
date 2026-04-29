@@ -6356,17 +6356,28 @@ def meditate_oracle_pull(
     current_user: User = Depends(verify_concierge_owner),
     db: Session = Depends(get_db),
 ):
-    """Assigns a random message + flower (0-9) to today's date. One pull
-    per day per user — re-calling returns the same card unless
-    `?pull_again=true` is passed by the superuser (test affordance)."""
+    """Pull today's oracle card.
+
+    Regular users: one pull per day — re-calling returns the same row.
+    Superusers (anderson@soulmd.us): unlimited fresh pulls. Each call
+    inserts a new row so the prior one is preserved (GET …/today reads
+    the most-recent row), and pulls for the superuser never affect any
+    other user's daily card because rows are scoped by user_id.
+    The legacy `?pull_again=true` query stays accepted but is now a
+    no-op — superusers don't need it.
+    """
+    is_super = bool(getattr(current_user, "is_superuser", False))
     today = _today_mst()
-    existing = db.query(MeditateOraclePull).filter(
-        MeditateOraclePull.user_id == current_user.id,
-        MeditateOraclePull.pull_date == today,
-    ).order_by(MeditateOraclePull.id.desc()).first()
-    if existing and not (pull_again and getattr(current_user, "is_superuser", False)):
-        msg = db.query(MeditateOracleMessage).filter(MeditateOracleMessage.id == existing.message_id).first()
-        return _serialize_meditate_pull(existing, msg.message_text if msg else "")
+    if not is_super:
+        existing = db.query(MeditateOraclePull).filter(
+            MeditateOraclePull.user_id == current_user.id,
+            MeditateOraclePull.pull_date == today,
+        ).order_by(MeditateOraclePull.id.desc()).first()
+        if existing:
+            msg = db.query(MeditateOracleMessage).filter(MeditateOracleMessage.id == existing.message_id).first()
+            return _serialize_meditate_pull(existing, msg.message_text if msg else "")
+    # Suppress the unused-arg warning while keeping the param accepted.
+    _ = pull_again
 
     # Pick a random message + flower index. If the seed table is empty
     # (boot race or fresh local dev), surface a graceful 503 rather than
