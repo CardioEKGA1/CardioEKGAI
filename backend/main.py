@@ -1202,10 +1202,37 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
     payload = decode_token(data.token)
     if not payload or payload.get("purpose") != "magic":
         raise HTTPException(status_code=400, detail="Invalid or expired link")
+    # One-time-use guard. Magic JWTs are stateless, so we record the
+    # token's signature segment (last "." chunk) on first consume and
+    # reject every subsequent call that resolves to the same signature.
+    # This neutralizes link-replay attacks without changing token shape.
+    sig = (data.token or "").rsplit(".", 1)[-1] if data.token else ""
+    if sig:
+        already = db.query(MagicLinkConsumed.id).filter(
+            MagicLinkConsumed.token_sig == sig,
+        ).first()
+        if already:
+            raise HTTPException(status_code=400, detail="This sign-in link has already been used. Please request a new one.")
     email = payload.get("sub")
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=400, detail="Account not found")
+    # Stamp the consume row before we do the rest of the work so a
+    # concurrent replay during the welcome-email path still fails.
+    if sig:
+        try:
+            db.add(MagicLinkConsumed(
+                token_sig=sig,
+                email=(email or "").lower() or None,
+                consumed_ip=_client_ip(request) or None,
+                consumed_ua=(request.headers.get("user-agent") or "")[:500] or None,
+            ))
+            db.commit()
+        except Exception as e:
+            # Unique-violation (rare race) → treat as already consumed.
+            db.rollback()
+            print(f"magic-link consume insert failed (likely race): {e}")
+            raise HTTPException(status_code=400, detail="This sign-in link has already been used. Please request a new one.")
     first_login = not user.is_verified
     if first_login:
         user.is_verified = True
