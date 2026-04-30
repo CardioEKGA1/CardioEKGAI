@@ -386,18 +386,17 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
               src="/images/dr-anderson.jpeg"
               alt="N. Anderson, MD"
               style={{
-                width:'300px',
-                height:'300px',
-                minWidth:'300px',
-                minHeight:'300px',
+                width:'280px',
+                height:'340px',
+                minWidth:'280px',
+                minHeight:'340px',
                 objectFit:'cover',
                 objectPosition:'center top',
-                borderRadius:'50%',
+                borderRadius:'12px',
                 border:`1.5px solid ${GOLD}`,
-                outline:'6px solid transparent',
                 // Double-ring gold effect: inner navy band (matching the
                 // section background), then a thin gold outer ring.
-                boxShadow:`0 0 0 8px ${BG_BASE}, 0 0 0 9.5px ${GOLD}`,
+                boxShadow:`0 0 0 6px ${NAVY}, 0 0 0 7.5px ${GOLD}`,
                 display:'block',
               }}
             />
