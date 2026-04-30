@@ -1521,6 +1521,27 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         customer_id = obj.get("customer")
         metadata = obj.get("metadata") or {}
 
+        # Concierge remaining-balance one-shot checkout: when the patient
+        # clicks the email's "Pay remaining balance" CTA, the Checkout
+        # Session created in _transition_to_balance_invoice fires here.
+        # Identify by metadata.concierge_kind=remaining_balance and
+        # mark the patient as active_annual immediately. invoice.paid
+        # will also fire shortly with the same outcome — _on_remaining_
+        # balance_paid is idempotent via _has_counted_invoice.
+        if metadata.get("concierge_kind") == "remaining_balance":
+            try:
+                patient_id = int(metadata.get("concierge_patient_id") or 0)
+            except (ValueError, TypeError):
+                patient_id = 0
+            tier = (metadata.get("concierge_tier") or "").strip().lower()
+            if patient_id and tier in {"awaken", "align", "ascend"}:
+                p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+                if p:
+                    session_id = obj.get("id") or ""
+                    if not _has_counted_invoice(p, session_id):
+                        _on_remaining_balance_paid(p, tier, session_id, db)
+            return {"status": "concierge_remaining_balance_paid"}
+
         # Concierge inquiry approval flow: when an approve-and-checkout
         # session completes, provision the ConciergePatient row, link
         # the Stripe customer/subscription, mark the inquiry as enrolled,
@@ -1662,7 +1683,250 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     user.subscription_tier = "free"
             db.commit()
 
+    elif event_type in ("invoice.paid", "invoice.payment_succeeded"):
+        # Concierge billing lifecycle counter. Each successful invoice on
+        # a concierge subscription bumps the patient's monthly_payment_count;
+        # at 3 we transition to balance_invoice_sent + send the one-time
+        # remaining-balance invoice. Stripe sends one of these per cycle so
+        # double-counting is impossible — and we de-dup explicitly by
+        # tracking which invoice IDs we've already counted via a set on
+        # ConciergePatient.intake_data["counted_invoice_ids"] (cheap, no
+        # new column needed). Non-concierge invoices fall through unchanged.
+        try:
+            _handle_concierge_invoice_paid(obj, db)
+        except Exception as e:
+            print(f"concierge invoice.paid handler error: {e}")
+
     return {"status": "ok"}
+
+
+# ───── Concierge billing lifecycle webhook helpers ────────────────────
+# Hoisted out of the webhook body so the logic is readable and testable.
+# All paths are idempotent — re-receiving the same Stripe event is a
+# no-op. Stripe's at-least-once delivery semantics make this critical.
+
+def _patient_for_stripe_invoice(invoice_obj: dict, db: Session) -> "ConciergePatient | None":
+    """Resolve the ConciergePatient row for a Stripe invoice. Tries
+    customer ID first (most reliable), then customer_email as fallback
+    so a hand-created Stripe invoice that wasn't pre-linked still
+    finds its way home."""
+    customer_id = invoice_obj.get("customer")
+    if customer_id:
+        p = db.query(ConciergePatient).filter(
+            ConciergePatient.stripe_customer_id == customer_id
+        ).first()
+        if p:
+            return p
+    email = (invoice_obj.get("customer_email") or "").strip().lower()
+    if email:
+        p = db.query(ConciergePatient).filter(
+            func.lower(ConciergePatient.email) == email
+        ).first()
+        if p:
+            return p
+    return None
+
+
+def _invoice_price_ids(invoice_obj: dict) -> list[str]:
+    """Pull out every price ID referenced on the invoice's line items.
+    Stripe nests prices under lines.data[*].price.id in the webhook
+    payload. Returns a list (not a set) preserving order so the first
+    line is the primary one for tier lookup."""
+    out: list[str] = []
+    lines = (invoice_obj.get("lines") or {}).get("data") or []
+    for ln in lines:
+        price = (ln.get("price") or {})
+        pid = price.get("id")
+        if pid:
+            out.append(pid)
+    return out
+
+
+def _tier_from_price_ids(price_ids: list[str]) -> "tuple[str | None, str | None]":
+    """Given a list of Stripe price IDs from an invoice, decide which
+    concierge tier this invoice belongs to AND whether it's a monthly
+    recurring charge or the one-time remaining-balance charge.
+
+    Returns (tier, kind) where:
+      tier ∈ {"awaken","align","ascend"} or None if not concierge
+      kind ∈ {"monthly","remaining"} or None
+
+    Uses metadata.slug on the price (set by the seeder + the public
+    Stripe products) — we never hardcode price IDs in this lookup
+    since they rotate per environment.
+    """
+    if not price_ids:
+        return None, None
+    # Pull the actual price objects so we can read metadata.
+    for pid in price_ids:
+        try:
+            pr = stripe.Price.retrieve(pid)
+        except Exception:
+            continue
+        slug = ((getattr(pr, "metadata", None) or {}).get("slug") or "")
+        # Recurring monthly tier prices have slug concierge_<tier> and a
+        # `recurring` block with interval=month.
+        if slug.startswith("concierge_") and slug.endswith("_remaining"):
+            tier = slug.replace("concierge_", "").replace("_remaining", "")
+            if tier in {"awaken", "align", "ascend"}:
+                return tier, "remaining"
+        if slug in {"concierge_awaken", "concierge_align", "concierge_ascend"}:
+            tier = slug.replace("concierge_", "")
+            recurring = getattr(pr, "recurring", None)
+            interval = recurring.interval if recurring else None
+            if interval == "month":
+                return tier, "monthly"
+            if interval == "year":
+                # Annual renewal payment.
+                return tier, "annual"
+    return None, None
+
+
+def _has_counted_invoice(p: ConciergePatient, invoice_id: str) -> bool:
+    """Webhook idempotency. Stripe may resend the same event; we keep a
+    per-patient set of counted invoice IDs in intake_data so we never
+    count the same monthly payment twice. JSON column lets us avoid a
+    schema migration just for the dedup ledger."""
+    raw = (p.intake_data or {}).get("counted_invoice_ids") or []
+    return invoice_id in set(raw)
+
+
+def _mark_counted_invoice(p: ConciergePatient, invoice_id: str) -> None:
+    raw = list((p.intake_data or {}).get("counted_invoice_ids") or [])
+    if invoice_id and invoice_id not in raw:
+        raw.append(invoice_id)
+    data = dict(p.intake_data or {})
+    data["counted_invoice_ids"] = raw[-50:]  # keep last 50 to bound growth
+    p.intake_data = data
+
+
+def _handle_concierge_invoice_paid(invoice_obj: dict, db: Session) -> None:
+    """Top-level invoice.paid dispatcher for concierge patients.
+    Branches on whether the invoice is a monthly tier charge, the
+    one-time remaining-balance charge, or an annual renewal charge."""
+    p = _patient_for_stripe_invoice(invoice_obj, db)
+    if not p:
+        return
+    invoice_id = invoice_obj.get("id") or ""
+    if invoice_id and _has_counted_invoice(p, invoice_id):
+        return
+    price_ids = _invoice_price_ids(invoice_obj)
+    tier, kind = _tier_from_price_ids(price_ids)
+    if not tier or not kind:
+        return
+
+    if kind == "monthly":
+        _on_monthly_payment(p, tier, invoice_id, db)
+    elif kind == "remaining":
+        _on_remaining_balance_paid(p, tier, invoice_id, db)
+    elif kind == "annual":
+        _on_annual_renewal_paid(p, tier, invoice_id, db)
+
+
+def _on_monthly_payment(p: ConciergePatient, tier: str, invoice_id: str, db: Session) -> None:
+    """Bump monthly_payment_count + total_paid_cents. On the THIRD
+    payment in year 1, transition to balance_invoice_sent and email the
+    patient the one-time remaining-balance Stripe Checkout URL."""
+    now = datetime.utcnow()
+    p.monthly_payment_count = int(p.monthly_payment_count or 0) + 1
+    monthly_cents = CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("monthly", 0)
+    p.total_paid_cents = int(p.total_paid_cents or 0) + monthly_cents
+    if not p.trial_end_date and p.created_at:
+        p.trial_end_date = p.created_at + timedelta(days=90)
+    _mark_counted_invoice(p, invoice_id)
+    p.updated_at = now
+    db.commit()
+
+    if p.is_first_year and p.monthly_payment_count >= 3 and p.membership_status == MembershipStatus.ACTIVE_MONTHLY:
+        _transition_to_balance_invoice(p, tier, db)
+
+
+def _transition_to_balance_invoice(p: ConciergePatient, tier: str, db: Session) -> None:
+    """Year-1 month-3 transition. Creates a Stripe Checkout Session for
+    the one-time remaining-balance price (so the patient pays it as a
+    single click), saves the URL, stamps the lifecycle columns, and
+    emails the patient. Idempotent — re-entry is safe because
+    membership_status flips out of active_monthly the first time."""
+    now = datetime.utcnow()
+    price_id = _stripe_price_remaining(tier)
+    if not stripe.api_key or not price_id:
+        # Env not yet configured — leave the row in active_monthly so
+        # the cron can retry once env vars land. Don't email yet.
+        print(f"[concierge-billing] balance trigger skipped for patient {p.id}: stripe_key={bool(stripe.api_key)} price_id={bool(price_id)}")
+        return
+
+    # Create a one-shot Checkout Session for the remaining-balance price.
+    # client_reference_id ties the session back to this patient so the
+    # checkout.session.completed handler can mark the balance paid even
+    # if the customer record wasn't pre-linked.
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=[{"price": price_id, "quantity": 1}],
+            customer=p.stripe_customer_id or None,
+            customer_email=None if p.stripe_customer_id else p.email,
+            client_reference_id=str(p.id),
+            success_url="https://soulmd.us/patient?paid=1",
+            cancel_url="https://soulmd.us/patient",
+            metadata={
+                "concierge_kind": "remaining_balance",
+                "concierge_patient_id": str(p.id),
+                "concierge_tier": tier,
+            },
+        )
+        checkout_url = session.url
+    except Exception as e:
+        print(f"[concierge-billing] failed to create balance checkout for patient {p.id}: {e}")
+        return
+
+    p.membership_status = MembershipStatus.BALANCE_INVOICE_SENT
+    p.remaining_balance_invoice_sent_at = now
+    p.remaining_balance_due_at = now + timedelta(days=14)
+    p.grace_period_end = now + timedelta(days=14)
+    # Stash the URL on intake_data so the patient portal banner + cron
+    # warnings can reuse it (Stripe checkout URLs stay valid 24h, so cron
+    # may need to regenerate; we accept that and let cron rebuild).
+    data = dict(p.intake_data or {})
+    data["remaining_balance_checkout_url"] = checkout_url
+    p.intake_data = data
+    p.updated_at = now
+    db.commit()
+
+    _send_balance_invoice_email(p, tier, checkout_url)
+
+
+def _on_remaining_balance_paid(p: ConciergePatient, tier: str, invoice_id: str, db: Session) -> None:
+    """One-time remaining-balance invoice cleared. Mark the patient as
+    a full annual member and stamp the renewal due date."""
+    now = datetime.utcnow()
+    remaining_cents = CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("remaining_after_3mo", 0)
+    p.total_paid_cents = int(p.total_paid_cents or 0) + remaining_cents
+    p.membership_status = MembershipStatus.ACTIVE_ANNUAL
+    p.annual_start_date = now
+    p.annual_renewal_due_at = now + timedelta(days=365)
+    p.is_first_year = False
+    p.grace_period_end = None
+    _mark_counted_invoice(p, invoice_id)
+    p.updated_at = now
+    db.commit()
+    _send_balance_paid_email(p, tier)
+
+
+def _on_annual_renewal_paid(p: ConciergePatient, tier: str, invoice_id: str, db: Session) -> None:
+    """Year 2+ annual renewal cleared. Push the renewal due date forward
+    365 days and clear any renewal-grace state."""
+    now = datetime.utcnow()
+    annual_cents = CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("annual", 0)
+    p.total_paid_cents = int(p.total_paid_cents or 0) + annual_cents
+    p.membership_status = MembershipStatus.ACTIVE_ANNUAL
+    p.annual_start_date = p.annual_start_date or now
+    p.annual_renewal_due_at = now + timedelta(days=365)
+    p.renewal_invoice_sent_at = None
+    p.grace_period_end = None
+    _mark_counted_invoice(p, invoice_id)
+    p.updated_at = now
+    db.commit()
+    _send_renewal_paid_email(p, tier)
 
 class NephroRequest(BaseModel):
     sub_tool: str
@@ -9163,6 +9427,194 @@ def _send_concierge_welcome_link(patient_email: str, patient_name: str | None) -
         sg.send(msg)
     except Exception as e:
         print(f"concierge welcome link failed for {patient_email}: {e}")
+
+
+# ───── Concierge billing lifecycle emails ─────────────────────────────
+# Patient-facing transactional emails for the 3-month → annual flow.
+# Tone: warm + spiritual, Dr. Anderson's voice. From: FROM_EMAIL.
+# Reply-to: SUPPORT_EMAIL so private replies land in the public inbox.
+
+def _concierge_email_shell(salutation: str, body_html: str) -> str:
+    """Shared chrome for every lifecycle email so the visual identity
+    stays consistent. Caller passes inner HTML; this wraps it in the
+    serif/navy/lavender palette used by the welcome link template."""
+    return (
+        f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
+        f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
+        f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">{salutation},</p>'
+        f'  {body_html}'
+        f'  <p style="font-size:14px;color:#1a2a4a;margin:24px 0 4px">With care,</p>'
+        f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 2px;font-style:italic">Dr. Neysi Anderson</p>'
+        f'  <p style="font-size:12px;color:#6B7280;margin:0">SoulMD Concierge Medicine</p>'
+        f'  <p style="font-size:11px;color:#a0b0c8;margin:18px 0 0;border-top:1px solid #e0e6f0;padding-top:12px">'
+        f'    Questions? <a href="mailto:{SUPPORT_EMAIL}" style="color:#4a7ad0;text-decoration:none">{SUPPORT_EMAIL}</a>'
+        f'  </p>'
+        f'</div>'
+    )
+
+
+def _concierge_send(to_email: str, subject: str, html: str) -> bool:
+    """Tiny SendGrid wrapper that sets FROM_EMAIL + reply-to SUPPORT_EMAIL.
+    Returns True on send. Failures swallowed to stdout — billing state is
+    already committed before email is attempted."""
+    if not SENDGRID_API_KEY:
+        print(f"SendGrid disabled — skipping concierge email '{subject}' to {to_email}")
+        return False
+    try:
+        msg = Mail(
+            from_email=FROM_EMAIL, to_emails=to_email,
+            subject=subject, html_content=html,
+        )
+        msg.reply_to = SUPPORT_EMAIL
+        sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY).send(msg)
+        return True
+    except Exception as e:
+        print(f"concierge email failed ({subject} → {to_email}): {e}")
+        return False
+
+
+def _first_name(name: str | None) -> str:
+    if not name:
+        return "friend"
+    return (name.strip().split() or ["friend"])[0]
+
+
+def _send_balance_invoice_email(p: ConciergePatient, tier: str, checkout_url: str) -> None:
+    """3-month milestone — patient cleared their third monthly payment.
+    Send the warm "complete your annual membership" invitation with the
+    one-click Stripe Checkout URL and the explicit 14-day deadline."""
+    label = _tier_label(tier)
+    remaining = _fmt_dollars(CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("remaining_after_3mo", 0))
+    annual = _fmt_dollars(CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("annual", 0))
+    due_date = (p.remaining_balance_due_at or datetime.utcnow() + timedelta(days=14)).strftime("%B %d, %Y")
+    body = (
+        f'  <p style="font-size:15px;margin:0 0 14px">You\'ve completed three months with us — thank you for trusting your care to this practice.</p>'
+        f'  <p style="font-size:15px;margin:0 0 14px">Your monthly payments have been applied toward your annual {label} membership. The remaining balance is <b>{remaining}</b>, and once it\'s settled you\'ll be a full annual member at the {annual} tier through next year.</p>'
+        f'  <p style="margin:0 0 28px"><a href="{checkout_url}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Complete Annual Membership</a></p>'
+        f'  <p style="font-size:13px;color:#6B7280;margin:0 0 14px;font-style:italic">Please complete by <b>{_esc(due_date)}</b> (14 days). If we don\'t hear from you by then, your access transitions to à la carte — your portal stays open and sessions remain available at published rates, but the monthly visit and meditation allocations pause.</p>'
+        f'  <p style="font-size:13px;color:#6B7280;margin:0 0 14px">No commitment — if annual membership isn\'t the right fit, simply do nothing and à la carte access continues uninterrupted.</p>'
+    )
+    _concierge_send(
+        p.email,
+        "Complete Your SoulMD Annual Membership",
+        _concierge_email_shell(f"Dear {_esc(_first_name(p.name))}", body),
+    )
+
+
+def _send_balance_paid_email(p: ConciergePatient, tier: str) -> None:
+    """Confirmation — patient paid the remaining balance and is now a
+    full annual member."""
+    label = _tier_label(tier)
+    renews = (p.annual_renewal_due_at or datetime.utcnow() + timedelta(days=365)).strftime("%B %d, %Y")
+    body = (
+        f'  <p style="font-size:15px;margin:0 0 14px">Welcome to your full annual {label} membership ✦</p>'
+        f'  <p style="font-size:15px;margin:0 0 14px">Your portal access is active through <b>{_esc(renews)}</b>. Same visit and meditation allocations, same direct line to me — now stretched out across a full year.</p>'
+        f'  <p style="margin:0 0 24px"><a href="https://soulmd.us/patient" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Open the Portal</a></p>'
+    )
+    _concierge_send(
+        p.email,
+        "Your SoulMD Annual Membership Is Active ✦",
+        _concierge_email_shell(f"Dear {_esc(_first_name(p.name))}", body),
+    )
+
+
+def _send_renewal_paid_email(p: ConciergePatient, tier: str) -> None:
+    """Year 2+ renewal payment cleared."""
+    label = _tier_label(tier)
+    renews = (p.annual_renewal_due_at or datetime.utcnow() + timedelta(days=365)).strftime("%B %d, %Y")
+    body = (
+        f'  <p style="font-size:15px;margin:0 0 14px">Thank you for renewing your {label} membership.</p>'
+        f'  <p style="font-size:15px;margin:0 0 14px">Your access continues through <b>{_esc(renews)}</b>. I look forward to another year of care together.</p>'
+        f'  <p style="margin:0 0 24px"><a href="https://soulmd.us/patient" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Open the Portal</a></p>'
+    )
+    _concierge_send(
+        p.email,
+        "Your SoulMD Membership Has Renewed ✦",
+        _concierge_email_shell(f"Dear {_esc(_first_name(p.name))}", body),
+    )
+
+
+def _send_balance_warning_email(p: ConciergePatient, tier: str, days_left: int, checkout_url: str) -> None:
+    """Cron-driven warning at 7 / 3 / 1 days before remaining_balance_due_at."""
+    label = _tier_label(tier)
+    remaining = _fmt_dollars(CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("remaining_after_3mo", 0))
+    due_date = (p.remaining_balance_due_at or datetime.utcnow()).strftime("%B %d, %Y")
+    headline = {
+        7: "7 days to complete your annual membership",
+        3: "3 days remaining",
+        1: "Final notice — 1 day left",
+    }.get(days_left, f"{days_left} days remaining")
+    body = (
+        f'  <p style="font-size:15px;margin:0 0 14px">{headline}.</p>'
+        f'  <p style="font-size:15px;margin:0 0 14px">Your remaining balance for {label} is <b>{remaining}</b>, due <b>{_esc(due_date)}</b>. After that, access transitions to à la carte — your portal stays open and sessions remain bookable at published rates.</p>'
+        f'  <p style="margin:0 0 24px"><a href="{checkout_url}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Complete Now</a></p>'
+    )
+    _concierge_send(
+        p.email,
+        f"{headline} — SoulMD Concierge",
+        _concierge_email_shell(f"Dear {_esc(_first_name(p.name))}", body),
+    )
+
+
+def _send_renewal_invoice_email(p: ConciergePatient, tier: str, checkout_url: str) -> None:
+    """30-day notice — annual renewal opens. Year 2+."""
+    label = _tier_label(tier)
+    annual = _fmt_dollars(CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("annual", 0))
+    due = (p.annual_renewal_due_at or datetime.utcnow() + timedelta(days=30)).strftime("%B %d, %Y")
+    body = (
+        f'  <p style="font-size:15px;margin:0 0 14px">Your {label} membership renews on <b>{_esc(due)}</b>. Renewing keeps every visit, meditation, and direct line you\'ve come to rely on this past year.</p>'
+        f'  <p style="font-size:15px;margin:0 0 14px">Annual price: <b>{annual}</b>.</p>'
+        f'  <p style="margin:0 0 24px"><a href="{checkout_url}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Renew Annual Membership</a></p>'
+        f'  <p style="font-size:13px;color:#6B7280;margin:0 0 14px;font-style:italic">14 days after the renewal date, access transitions to à la carte if no payment is received. The portal stays open either way.</p>'
+    )
+    _concierge_send(
+        p.email,
+        "Renew Your SoulMD Annual Membership",
+        _concierge_email_shell(f"Dear {_esc(_first_name(p.name))}", body),
+    )
+
+
+def _send_renewal_warning_email(p: ConciergePatient, tier: str, days_left: int, checkout_url: str) -> None:
+    label = _tier_label(tier)
+    annual = _fmt_dollars(CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("annual", 0))
+    due = (p.annual_renewal_due_at or datetime.utcnow()).strftime("%B %d, %Y")
+    headline = {
+        14: "14 days until your annual renewal",
+        7:  "7 days until your annual renewal",
+        1:  "Final notice — 1 day until renewal",
+    }.get(days_left, f"{days_left} days until your annual renewal")
+    body = (
+        f'  <p style="font-size:15px;margin:0 0 14px">{headline}.</p>'
+        f'  <p style="font-size:15px;margin:0 0 14px">Annual {label}: <b>{annual}</b> · due <b>{_esc(due)}</b>.</p>'
+        f'  <p style="margin:0 0 24px"><a href="{checkout_url}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Renew Now</a></p>'
+    )
+    _concierge_send(
+        p.email,
+        f"{headline} — SoulMD Concierge",
+        _concierge_email_shell(f"Dear {_esc(_first_name(p.name))}", body),
+    )
+
+
+def _send_downgrade_email(p: ConciergePatient, tier: str) -> None:
+    """Patient missed the balance / renewal grace deadline → à la carte."""
+    label = _tier_label(tier)
+    body = (
+        f'  <p style="font-size:15px;margin:0 0 14px">Your SoulMD membership has transitioned to à la carte. Your portal remains open and sessions can still be booked individually at published rates:</p>'
+        f'  <ul style="font-size:14px;color:#1a2a4a;line-height:1.85;padding-left:20px;margin:0 0 18px">'
+        f'    <li>Medical consultation (30 min) — $300</li>'
+        f'    <li>Extended visit (per 15 min) — $150</li>'
+        f'    <li>Guided meditation (30 min) — $44</li>'
+        f'    <li>Urgent same-day consult — $444</li>'
+        f'    <li>Lab result review — $75</li>'
+        f'  </ul>'
+        f'  <p style="font-size:15px;margin:0 0 14px">If you\'d like to re-enroll in annual membership at the {label} tier (or any tier), simply reply to this email or write to <a href="mailto:{SUPPORT_EMAIL}" style="color:#4a7ad0;text-decoration:none">{SUPPORT_EMAIL}</a>. I review re-enrollment requests personally.</p>'
+        f'  <p style="margin:0 0 24px"><a href="mailto:{SUPPORT_EMAIL}?subject=Re-enroll%20in%20SoulMD%20Concierge" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Re-enroll</a></p>'
+    )
+    _concierge_send(
+        p.email,
+        "Your SoulMD membership has transitioned to à la carte",
+        _concierge_email_shell(f"Dear {_esc(_first_name(p.name))}", body),
+    )
 
 
 # Hoisted out of the f-strings below so the expression part stays free of
