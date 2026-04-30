@@ -7689,16 +7689,55 @@ def _require_job_secret(x_job_secret: str | None):
     new appointment-reminders job) or JOB_SECRET (legacy, used by the
     oracle/visit-counter jobs already deployed). Either may be sent in
     the X-Job-Secret header. Unknown / missing → 404 so the endpoints'
-    existence isn't advertised."""
+    existence isn't advertised.
+
+    Logs the auth outcome to stdout (Railway logs) on every call so a
+    misconfigured cron job can be diagnosed without redeploying. The log
+    line never includes the actual secret values — only lengths and
+    booleans."""
     cron_secret = _clean_env(os.getenv("CRON_SECRET", ""))
     job_secret  = _clean_env(os.getenv("JOB_SECRET", ""))
-    if not x_job_secret:
+    provided = x_job_secret or ""
+    if not provided:
+        print(
+            f"[cron-auth] reject: missing X-Job-Secret header "
+            f"(CRON_SECRET set={bool(cron_secret)}, JOB_SECRET set={bool(job_secret)})"
+        )
         raise HTTPException(status_code=404, detail="Not found")
-    if cron_secret and hmac.compare_digest(x_job_secret, cron_secret):
+    if cron_secret and hmac.compare_digest(provided, cron_secret):
+        print(f"[cron-auth] ok: matched CRON_SECRET (len={len(provided)})")
         return
-    if job_secret and hmac.compare_digest(x_job_secret, job_secret):
+    if job_secret and hmac.compare_digest(provided, job_secret):
+        print(f"[cron-auth] ok: matched JOB_SECRET (len={len(provided)})")
         return
+    print(
+        f"[cron-auth] reject: header mismatch "
+        f"(provided_len={len(provided)}, "
+        f"CRON_SECRET set={bool(cron_secret)}/len={len(cron_secret)}, "
+        f"JOB_SECRET set={bool(job_secret)}/len={len(job_secret)})"
+    )
     raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.post("/internal/jobs/_ping")
+def job_secret_ping(x_job_secret: str | None = Header(default=None)):
+    """Diagnostic endpoint paired with the cron auth helper. Sends back
+    `{"ok": true}` when the X-Job-Secret matches CRON_SECRET (or legacy
+    JOB_SECRET) — confirming both that the FastAPI app has redeployed
+    and that the env var is wired up. Same 404-on-failure shape as
+    every other /internal/jobs/* route, so unauthed callers can't use
+    it to fingerprint the deploy."""
+    _require_job_secret(x_job_secret)
+    return {
+        "ok": True,
+        "ts": datetime.utcnow().isoformat() + "Z",
+        "endpoints": [
+            "appointment-reminders",
+            "oracle-morning",
+            "oracle-evening",
+            "reset-visit-counters",
+        ],
+    }
 
 
 @app.post("/internal/jobs/oracle-morning")
