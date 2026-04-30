@@ -383,7 +383,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
         }}>
           <div style={{textAlign:'center'}}>
             <img
-              src="/images/dr-anderson.jpg"
+              src="/images/dr-anderson.jpeg"
               alt="N. Anderson, MD"
               style={{
                 width:'220px',
