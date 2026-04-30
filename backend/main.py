@@ -8862,7 +8862,13 @@ def _send_concierge_welcome_link(patient_email: str, patient_name: str | None) -
         # 24-hour TTL per concierge welcome-email spec (vs the 15-min
         # default used by the public /auth/magic-link sender).
         token = create_magic_token(patient_email, expires_minutes=60 * 24)
-        link = f"https://soulmd.us/?token={token}"
+        # rt=/patient is the post-auth redirect target — handleAuth in
+        # App.tsx reads ?rt and sends the patient straight to the
+        # concierge PWA + 6-step onboarding gate, instead of the default
+        # SoulMD dashboard. Applies to every concierge welcome path
+        # (Stripe webhook, owner approval, comp provision) since they
+        # all funnel through this helper.
+        link = f"https://soulmd.us/?token={token}&rt=/patient"
         html = (
             f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
             f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
