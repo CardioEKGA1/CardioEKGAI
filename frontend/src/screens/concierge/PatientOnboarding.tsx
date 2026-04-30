@@ -471,7 +471,7 @@ const GFE_BODY = (
       <li>Ascend membership: <b>$1,111 / month</b> ($13,000 / year)</li>
       <li>À la carte session: $300 (medical / coaching, 30 min)</li>
       <li>Extended visit (per add'l 15 min): $150</li>
-      <li>Guided meditation (30 min): $44</li>
+      <li>Guided meditation (live 1:1 with Dr. Anderson, 30 min): $44</li>
       <li>Urgent same-day consult: $444</li>
       <li>Lab result review + async message: $75</li>
     </ul>

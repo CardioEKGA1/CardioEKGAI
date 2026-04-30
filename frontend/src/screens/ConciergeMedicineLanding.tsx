@@ -38,7 +38,7 @@ const TIERS: Tier[] = [
     meditations: 1,
     included: [
       '2 visits / month (up to 30 min each)',
-      '1 guided meditation / month',
+      '1 guided meditation / month (live 1:1 with Dr. Anderson, 30 min)',
       'Secure direct messaging with Dr. Anderson',
       'Daily oracle card and energy log',
       'Access to the meditation & coaching library',
@@ -55,7 +55,7 @@ const TIERS: Tier[] = [
     meditations: 2,
     included: [
       '3 visits / month (up to 30 min each)',
-      '2 guided meditations / month',
+      '2 guided meditations / month (live 1:1 with Dr. Anderson, 30 min each)',
       'Lab-review turnaround within 48 hours',
       'Priority messaging',
       'Everything in Awaken',
@@ -73,9 +73,9 @@ const TIERS: Tier[] = [
     meditations: 4,
     included: [
       '5 visits / month (up to 30 min each)',
-      '4 guided meditations / month',
-      'Same-day scheduling',
-      'Monthly integrative review with Dr. Anderson',
+      '4 guided meditations / month (live 1:1 with Dr. Anderson, 30 min each)',
+      'Guaranteed same-day visit (subject to availability — honored 98% of the time)',
+      'Monthly integrative wellness review (curated email from Dr. Anderson with insights from your logs)',
       'Urgent same-day consult included (normally $444)',
       'Everything in Align',
     ],
@@ -88,7 +88,7 @@ const TIERS: Tier[] = [
 const ALA_CARTE: { label: string; price: string }[] = [
   { label: 'Medical consultation (30 min)',           price: '$300' },
   { label: 'Extended visit (additional 15 min)',      price: '$150' },
-  { label: 'Guided meditation (30 min)',              price: '$44'  },
+  { label: 'Guided meditation (live 1:1 with Dr. Anderson, 30 min)', price: '$44'  },
   { label: 'Urgent same-day consult',                 price: '$444' },
   { label: 'Lab result review + async message',       price: '$75'  },
 ];

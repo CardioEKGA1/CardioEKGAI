@@ -105,19 +105,19 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
     {
       id: 'awaken', label: 'Awaken', monthly: 444, yearly: 5000,
       tagline: 'Begin the practice',
-      bullets: ['2 visits / month (max 30 min)', '1 guided meditation / month', 'Secure direct messaging with Dr. Anderson'],
+      bullets: ['2 visits / month (max 30 min)', '1 guided meditation / month (live 1:1 with Dr. Anderson, 30 min)', 'Secure direct messaging with Dr. Anderson'],
       accent: '#7ab0f0',
     },
     {
       id: 'align',  label: 'Align',  monthly: 888, yearly: 10000,
       tagline: 'Deepen the work',
-      bullets: ['3 visits / month (max 30 min)', '2 guided meditations / month', 'Lab-review turnaround within 48h'],
+      bullets: ['3 visits / month (max 30 min)', '2 guided meditations / month (live 1:1 with Dr. Anderson, 30 min each)', 'Lab-review turnaround within 48h'],
       accent: TEAL, featured: true,
     },
     {
       id: 'ascend', label: 'Ascend', monthly: 1111, yearly: 13000,
       tagline: 'Fully integrated care',
-      bullets: ['5 visits / month (max 30 min)', '4 guided meditations / month', 'Same-day scheduling', 'Monthly integrative review'],
+      bullets: ['5 visits / month (max 30 min)', '4 guided meditations / month (live 1:1 with Dr. Anderson, 30 min each)', 'Guaranteed same-day visit (subject to availability — honored 98% of the time)', 'Monthly integrative wellness review (curated email from Dr. Anderson with insights from your logs)'],
       accent: '#1a2a4a',
     },
   ];
@@ -125,7 +125,7 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
   const alaCarte = [
     ['Medical consultation (max 30 min)', '$300'],
     ['Extended visit (per additional 15 min)', '$150'],
-    ['Guided meditation (30 min)', '$44'],
+    ['Guided meditation (live 1:1 with Dr. Anderson, 30 min)', '$44'],
     ['Urgent same-day consult', '$444'],
     ['Lab result review + async message', '$75'],
   ];

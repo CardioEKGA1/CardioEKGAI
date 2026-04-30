@@ -5298,7 +5298,7 @@ CONCIERGE_TIER_PRICE = {
 CONCIERGE_ALA_CARTE = [
     {"slug": "consult_30",       "label": "Medical consultation (30 min)",      "cents":  30000},
     {"slug": "extended_15",      "label": "Extended visit (add'l 15 min)",      "cents":  15000},
-    {"slug": "guided_meditation","label": "Guided meditation (30 min)",         "cents":   4400},
+    {"slug": "guided_meditation","label": "Guided meditation (live 1:1, 30 min)","cents":   4400},
     {"slug": "urgent_same_day",  "label": "Urgent same-day consult",            "cents":  44400},
     {"slug": "lab_review",       "label": "Lab result review + async message", "cents":   7500},
 ]
@@ -6806,7 +6806,7 @@ def patient_bookings_create(
     # Ping the physician so they can confirm promptly.
     owner = db.query(User).filter(User.email.ilike(CONCIERGE_OWNER_EMAIL)).first()
     if owner:
-        svc_label = {"medical_visit": "Visit", "guided_meditation": "Guided meditation", "urgent_same_day": "Urgent same-day"}.get(data.service_type, data.service_type)
+        svc_label = {"medical_visit": "Visit", "guided_meditation": "Guided meditation (live 1:1)", "urgent_same_day": "Urgent same-day"}.get(data.service_type, data.service_type)
         send_push_to_user(owner.id, f"New booking · {p.name}", f"{svc_label} · {starts.strftime('%a %b %d %I:%M %p')} MST", url="/concierge", db=db)
     return {
         "id": appt.id,
@@ -10217,7 +10217,7 @@ def _send_downgrade_email(p: ConciergePatient, tier: str) -> None:
         f'  <ul style="font-size:14px;color:#1a2a4a;line-height:1.85;padding-left:20px;margin:0 0 18px">'
         f'    <li>Medical consultation (30 min) — $300</li>'
         f'    <li>Extended visit (per 15 min) — $150</li>'
-        f'    <li>Guided meditation (30 min) — $44</li>'
+        f'    <li>Guided meditation (live 1:1 with Dr. Anderson, 30 min) — $44</li>'
         f'    <li>Urgent same-day consult — $444</li>'
         f'    <li>Lab result review — $75</li>'
         f'  </ul>'

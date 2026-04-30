@@ -68,7 +68,7 @@ const TIERS: Tier[] = [
     monthly: '$444', annual: 'or $5,000/year',
     features: [
       '2 visits (30 min)',
-      '1 guided meditation',
+      '1 guided meditation (live 1:1 with Dr. Anderson, 30 min)',
       'Direct physician messaging',
     ],
   },
@@ -77,7 +77,7 @@ const TIERS: Tier[] = [
     monthly: '$888', annual: 'or $10,000/year',
     features: [
       '3 visits (30 min)',
-      '2 guided meditations',
+      '2 guided meditations (live 1:1 with Dr. Anderson, 30 min each)',
       'Direct physician messaging',
     ],
   },
@@ -86,9 +86,9 @@ const TIERS: Tier[] = [
     monthly: '$1,111', annual: 'or $13,000/year',
     features: [
       '5 visits/month (30 min each)',
-      '4 guided meditations/month',
-      'Same-day scheduling',
-      'Monthly integrative wellness review',
+      '4 guided meditations/month (live 1:1 with Dr. Anderson, 30 min each)',
+      'Guaranteed same-day visit (subject to availability — honored 98% of the time)',
+      'Monthly integrative wellness review (curated email from Dr. Anderson with insights from your logs)',
       <>Access to Annual SoulMD Retreat<Footnote n={1}/></>,
       <>Access to Mystical Features<Footnote n={2}/> (psychic/mediumship &amp; more)</>,
     ],
@@ -489,6 +489,19 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
             color: MUTED, fontStyle:'italic',
           }}>
             À la carte consultations available from $888. No long-term commitment required.
+          </div>
+
+          <div style={{
+            textAlign:'center', marginTop:'18px',
+            maxWidth:'640px', margin:'18px auto 0',
+            fontFamily: SANS, fontSize:'12px',
+            color: MUTED, lineHeight:1.7,
+          }}>
+            <span style={{fontWeight:600, color: NAVY}}>Note on meditations.</span>{' '}
+            "Guided meditation" allotments above are <em>live 1:1 sessions</em> with Dr. Anderson.
+            Prescribed meditations — written or recorded scripts that Dr. Anderson sends to your patient
+            portal between visits — are separate, do not count against your monthly allotment, and arrive
+            as often as your care plan calls for them.
           </div>
 
         </div>

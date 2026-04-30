@@ -918,9 +918,9 @@ const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|nul
       <Card style={{marginBottom:'12px'}}>
         <Label>Upgrade or change tier</Label>
         <div style={{display:'grid', gridTemplateColumns:'1fr', gap:'6px', marginTop:'10px'}}>
-          <TierRow label="Awaken" monthly="$444/mo" yearly="$5,000/yr" desc="2 visits · 1 meditation"/>
-          <TierRow label="Align"  monthly="$888/mo" yearly="$10,000/yr" desc="3 visits · 2 meditations"/>
-          <TierRow label="Ascend" monthly="$1,111/mo" yearly="$13,000/yr" desc="5 visits · 4 meditations · same-day · integrative review"/>
+          <TierRow label="Awaken" monthly="$444/mo" yearly="$5,000/yr" desc="2 visits · 1 live 1:1 guided meditation"/>
+          <TierRow label="Align"  monthly="$888/mo" yearly="$10,000/yr" desc="3 visits · 2 live 1:1 guided meditations"/>
+          <TierRow label="Ascend" monthly="$1,111/mo" yearly="$13,000/yr" desc="5 visits · 4 live 1:1 guided meditations · guaranteed same-day · monthly integrative wellness review"/>
         </div>
         <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'10px', textAlign:'center'}}>Changes take effect on next billing cycle unless you choose prorated upgrade.</div>
       </Card>
