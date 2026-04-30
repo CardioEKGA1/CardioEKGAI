@@ -425,7 +425,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
               lineHeight:1.5, margin:'0 0 28px',
               padding:0, borderLeft:'none',
             }}>
-              — Medicine trained my mind. Life taught me the rest. —
+              Rooted in evidence. Guided by the Universe.
             </blockquote>
 
             <p style={{
