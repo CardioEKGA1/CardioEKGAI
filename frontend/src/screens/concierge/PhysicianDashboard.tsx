@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import SoulMDLogo from '../../SoulMDLogo';
 import PatientsSection from './PatientsSection';
+import InquiriesSection from './InquiriesSection';
 import MessagesSection from './MessagesSection';
 import AppointmentsSection from './AppointmentsSection';
 import MeditationsSection from './MeditationsSection';
@@ -15,7 +16,7 @@ import BillingSection from './BillingSection';
 interface Props { API: string; token: string; onBack: () => void; }
 
 type Section =
-  | 'home' | 'members' | 'conversations' | 'appointments'
+  | 'home' | 'members' | 'inquiries' | 'conversations' | 'appointments'
   | 'insights' | 'protocols' | 'coaching' | 'resources' | 'billing';
 
 const PURPLE = '#534AB7';
@@ -29,6 +30,7 @@ const SIDEBAR_BG = '#FFFFFF';
 const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'home',          label: 'Home',          icon: '✦' },
   { id: 'members',       label: 'Members',       icon: '◉' },
+  { id: 'inquiries',     label: 'Inquiries',     icon: '✉︎' },
   { id: 'conversations', label: 'Conversations', icon: '◌' },
   { id: 'appointments',  label: 'Appointments',  icon: '◱' },
   { id: 'insights',      label: 'Insights',      icon: '✧' },
@@ -199,6 +201,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
         <main style={{flex:1, padding:`clamp(14px,3vw,28px) clamp(14px,3vw,28px) ${isMobile ? '92px' : 'clamp(14px,3vw,28px)'}`, maxWidth:'1280px', width:'100%', margin:'0 auto', boxSizing:'border-box'}}>
           {section === 'home'          && <PhysicianHome API={API} token={token} accent={PURPLE}/>}
           {section === 'members'       && <PatientsSection API={API} token={token} accent={PURPLE}/>}
+          {section === 'inquiries'     && <InquiriesSection API={API} token={token} accent={PURPLE}/>}
           {section === 'conversations' && <MessagesSection API={API} token={token} accent={PURPLE}/>}
           {section === 'appointments'  && <AppointmentsSection API={API} token={token} accent={PURPLE}/>}
           {section === 'protocols'     && <LabReviewSection API={API} token={token} accent={PURPLE}/>}

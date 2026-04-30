@@ -1412,6 +1412,64 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     if event_type == "checkout.session.completed":
         customer_id = obj.get("customer")
         metadata = obj.get("metadata") or {}
+
+        # Concierge inquiry approval flow: when an approve-and-checkout
+        # session completes, provision the ConciergePatient row, link
+        # the Stripe customer/subscription, mark the inquiry as enrolled,
+        # and email the patient their welcome magic-link. This branches
+        # *before* the regular user-resolution path because concierge
+        # patients don't exist as User rows.
+        inquiry_id_meta = metadata.get("concierge_inquiry_id")
+        if inquiry_id_meta and obj.get("mode") == "subscription":
+            try:
+                inquiry = db.query(ConciergeInquiry).filter(ConciergeInquiry.id == int(inquiry_id_meta)).first()
+            except (ValueError, TypeError):
+                inquiry = None
+            if inquiry:
+                concierge_tier = (metadata.get("concierge_tier") or "awaken").lower()
+                if concierge_tier not in {"awaken", "align", "ascend"}:
+                    concierge_tier = "awaken"
+                existing_patient = db.query(ConciergePatient).filter(
+                    func.lower(ConciergePatient.email) == (inquiry.email or "").lower()
+                ).first()
+                stripe_sub_id_concierge = obj.get("subscription")
+                if existing_patient:
+                    # Re-enrolling a previously-revoked or lapsed patient.
+                    existing_patient.is_approved = True
+                    if not existing_patient.approved_at:
+                        existing_patient.approved_at = datetime.utcnow()
+                    existing_patient.stripe_customer_id = customer_id or existing_patient.stripe_customer_id
+                    existing_patient.stripe_subscription_id = stripe_sub_id_concierge or existing_patient.stripe_subscription_id
+                    existing_patient.subscription_status = "active"
+                    existing_patient.membership_tier = concierge_tier
+                    existing_patient.updated_at = datetime.utcnow()
+                else:
+                    db.add(ConciergePatient(
+                        name=inquiry.name or inquiry.email.split("@")[0],
+                        email=inquiry.email,
+                        phone=inquiry.phone,
+                        dob=inquiry.dob,
+                        membership_tier=concierge_tier,
+                        intake_data={
+                            "reason_for_visit": inquiry.health_history or inquiry.message or "",
+                            "heard_from": inquiry.heard_from,
+                            "insurance_acknowledged": bool(inquiry.insurance_acknowledged),
+                            "source_inquiry_id": inquiry.id,
+                        },
+                        is_approved=True,
+                        approved_at=datetime.utcnow(),
+                        stripe_customer_id=customer_id,
+                        stripe_subscription_id=stripe_sub_id_concierge,
+                        subscription_status="active",
+                    ))
+                inquiry.status = "enrolled"
+                db.commit()
+                # Welcome magic link — 24h TTL, lands at soulmd.us/?token=...
+                # which routes through handleAuth → /patient via the
+                # post-auth redirect set by PatientLogin/onboarding.
+                _send_concierge_welcome_link(inquiry.email, inquiry.name)
+                return {"status": "concierge_enrolled", "inquiry_id": inquiry.id}
+
         tool_slug = metadata.get("tool_slug") or "ekgscan"
         tier = metadata.get("tier") or "monthly"
         email = obj.get("customer_email") or (obj.get("customer_details") or {}).get("email")
@@ -3260,6 +3318,118 @@ def concierge_revoke_patient(
     db.commit()
     db.refresh(p)
     return _patient_dict(p)
+
+
+# ───── Concierge Inquiries (physician dashboard tab) ──────────────────
+# Pending inquiries land in the ConciergeInquiry table via the public
+# /concierge-medicine/inquire endpoint. The owner reviews them in the
+# Inquiries tab and either approves (which generates a Stripe Checkout
+# link and emails it) or declines (DELETE removes the row entirely).
+
+def _inquiry_dict(r: "ConciergeInquiry") -> dict:
+    return {
+        "id": r.id,
+        "name": r.name, "email": r.email, "phone": r.phone,
+        "tier_interest": r.tier_interest,
+        "message": r.message or "",
+        "dob": r.dob,
+        "health_history": r.health_history or "",
+        "heard_from": r.heard_from,
+        "insurance_acknowledged": bool(r.insurance_acknowledged),
+        "status": r.status or "pending",
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+@app.get("/concierge/inquiries")
+def concierge_list_inquiries(
+    status: str = "all",
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """List concierge membership inquiries. status filter: pending |
+    responded | enrolled | declined | all (default all)."""
+    q = db.query(ConciergeInquiry)
+    s = (status or "all").lower()
+    if s != "all":
+        q = q.filter(ConciergeInquiry.status == s)
+    rows = q.order_by(ConciergeInquiry.created_at.desc()).limit(500).all()
+    return {"inquiries": [_inquiry_dict(r) for r in rows]}
+
+
+class _InquiryApproveRequest(BaseModel):
+    tier: str             # awaken | align | ascend
+    cycle: str = "monthly"  # monthly | yearly
+
+
+@app.post("/concierge/inquiries/{inquiry_id}/approve-and-checkout")
+def concierge_inquiry_approve_and_checkout(
+    inquiry_id: int,
+    data: _InquiryApproveRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Approve an inquiry: create a Stripe Checkout Session for the
+    chosen tier+cycle, email the payment link to the inquirer, and mark
+    the inquiry as `responded`. Webhook (checkout.session.completed)
+    finalizes the patient activation when the payment lands."""
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe not configured (STRIPE_SECRET_KEY missing).")
+    inquiry = db.query(ConciergeInquiry).filter(ConciergeInquiry.id == inquiry_id).first()
+    if not inquiry:
+        raise HTTPException(status_code=404, detail="Inquiry not found")
+    tier = (data.tier or "").strip().lower()
+    cycle = (data.cycle or "monthly").strip().lower()
+    if tier not in {"awaken", "align", "ascend"}:
+        raise HTTPException(status_code=400, detail="tier must be awaken | align | ascend")
+    if cycle not in {"monthly", "yearly"}:
+        raise HTTPException(status_code=400, detail="cycle must be monthly | yearly")
+    price_id = _resolve_tier_price_id(tier, cycle)
+    try:
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            customer_email=inquiry.email,
+            success_url="https://soulmd.us/patient?paid=1",
+            cancel_url="https://soulmd.us/concierge-medicine",
+            metadata={
+                # Webhook uses these to provision the patient row.
+                "concierge_inquiry_id": str(inquiry.id),
+                "concierge_tier": tier,
+                "concierge_cycle": cycle,
+            },
+            subscription_data={
+                "metadata": {
+                    "concierge_inquiry_id": str(inquiry.id),
+                    "tier": tier,
+                    "cycle": cycle,
+                },
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Stripe checkout creation failed: {type(e).__name__}: {str(e)[:200]}")
+
+    inquiry.status = "responded"
+    db.commit()
+    _send_concierge_payment_link(inquiry.email, inquiry.name, session.url, tier, cycle)
+    return {"ok": True, "checkout_url": session.url, "inquiry_id": inquiry.id}
+
+
+@app.delete("/concierge/inquiries/{inquiry_id}")
+def concierge_inquiry_delete(
+    inquiry_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Decline / dismiss an inquiry. Removes the row entirely; the
+    inquirer is not notified."""
+    inquiry = db.query(ConciergeInquiry).filter(ConciergeInquiry.id == inquiry_id).first()
+    if not inquiry:
+        raise HTTPException(status_code=404, detail="Inquiry not found")
+    db.delete(inquiry)
+    db.commit()
+    return {"ok": True, "deleted_inquiry_id": inquiry_id}
 
 
 @app.delete("/concierge/patients/{patient_id}")
@@ -7504,6 +7674,49 @@ def _notify_concierge_owner_of_access_request(email: str) -> None:
         )
     except Exception as e:
         print(f"access-request notification failed: {e}")
+
+
+def _send_concierge_payment_link(
+    email: str,
+    name: str | None,
+    checkout_url: str,
+    tier: str,
+    cycle: str,
+) -> None:
+    """Email a fresh Stripe Checkout link to a prospective concierge
+    patient after Dr. Anderson approves their inquiry. Best-effort:
+    failures are logged so the inquiry approval call still succeeds."""
+    if not SENDGRID_API_KEY:
+        print(f"SendGrid disabled — payment link not emailed to {email}")
+        return
+    label = {"awaken": "Awaken", "align": "Align", "ascend": "Ascend"}.get(tier, (tier or "").title())
+    cycle_label = "monthly membership" if (cycle or "monthly") == "monthly" else "annual membership"
+    first = (name or "").strip().split()[0] if name else "friend"
+    try:
+        html = (
+            f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
+            f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
+            f'  <h1 style="font-size:22px;font-weight:400;letter-spacing:0.02em;color:#1a2a4a;margin:0 0 22px">Your invitation is ready.</h1>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dear {_esc(first)},</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dr. Anderson has reviewed your inquiry and would like to invite you to join the SoulMD Concierge practice at the <b>{_esc(label)}</b> tier ({cycle_label}).</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 28px">Complete your enrollment securely:</p>'
+            f'  <p style="margin:0 0 28px"><a href="{checkout_url}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Complete Enrollment</a></p>'
+            f'  <p style="font-size:13px;color:#6B7280;margin:0 0 28px;font-style:italic">Once payment is confirmed you will receive a separate sign-in link to access your patient portal.</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 4px">With care,</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 2px;font-style:italic">Dr. Neysi Anderson</p>'
+            f'  <p style="font-size:12px;color:#6B7280;margin:0">SoulMD Concierge Medicine</p>'
+            f'</div>'
+        )
+        msg = Mail(
+            from_email=FROM_EMAIL,
+            to_emails=email,
+            subject=f"Your SoulMD Concierge enrollment — {label}",
+            html_content=html,
+        )
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY).send(msg)
+    except Exception as e:
+        print(f"concierge payment link failed for {email}: {e}")
 
 
 def _send_concierge_welcome_link(patient_email: str, patient_name: str | None) -> None:

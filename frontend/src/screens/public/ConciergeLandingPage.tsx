@@ -6,11 +6,18 @@
 // (the magic-link sign-in that gates the membership onboarding flow);
 // the only exception is "View Membership Tiers" which smooth-scrolls
 // to the tier section.
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import SoulMDLogo from '../../SoulMDLogo';
 import ChoKuRei from '../concierge/ChoKuRei';
 
 interface Props { API: string; onHome: () => void; }
+
+const TIER_OPTIONS: {value: string; label: string}[] = [
+  { value: 'awaken', label: 'Awaken — $444/mo' },
+  { value: 'align',  label: 'Align — $888/mo' },
+  { value: 'ascend', label: 'Ascend — $1,111/mo' },
+  { value: 'unsure', label: 'À la carte / Not sure yet' },
+];
 
 // ───── Design tokens ──────────────────────────────────────────────────
 const BG_BASE   = '#FDFBF8';
@@ -121,8 +128,13 @@ const PhotoPlaceholder: React.FC<{size?: number; label?: string}> = ({ size = 16
   </div>
 );
 
-const NavyButton: React.FC<{href: string; children: React.ReactNode; full?: boolean}> = ({ href, children, full }) => (
-  <a href={href} style={{
+const NavyButton: React.FC<{
+  href?: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+  full?: boolean;
+}> = ({ href, onClick, children, full }) => {
+  const baseStyle: React.CSSProperties = {
     display: full ? 'block' : 'inline-block',
     width: full ? '100%' : 'auto',
     padding:'16px 40px',
@@ -135,13 +147,17 @@ const NavyButton: React.FC<{href: string; children: React.ReactNode; full?: bool
     textDecoration:'none',
     borderRadius:'2px',
     textAlign:'center',
+    border:'none',
+    cursor:'pointer',
     transition:'opacity 220ms ease',
-  }}
-  onMouseEnter={e => (e.currentTarget.style.opacity = '0.86')}
-  onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
-    {children}
-  </a>
-);
+  };
+  const enter = (e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.opacity = '0.86'; };
+  const leave = (e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.opacity = '1'; };
+  if (href) {
+    return <a href={href} style={baseStyle} onMouseEnter={enter} onMouseLeave={leave}>{children}</a>;
+  }
+  return <button type="button" onClick={onClick} style={baseStyle} onMouseEnter={enter} onMouseLeave={leave}>{children}</button>;
+};
 
 const GoldOutlineButton: React.FC<{onClick?: () => void; href?: string; children: React.ReactNode}> = ({ onClick, href, children }) => {
   const baseStyle: React.CSSProperties = {
@@ -167,7 +183,7 @@ const GoldOutlineButton: React.FC<{onClick?: () => void; href?: string; children
 };
 
 // ───── Page ───────────────────────────────────────────────────────────
-const ConciergeLandingPage: React.FC<Props> = (_props) => {
+const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
   useEffect(() => {
     document.title = 'SoulMD™ — Concierge Medicine by N. Anderson, MD';
     // Smooth scroll for in-page anchors. Reset on unmount so other
@@ -180,6 +196,54 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
   const scrollToTiers = () => {
     const el = document.getElementById('membership');
     if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
+  };
+  const scrollToInquire = (tier?: string) => {
+    if (tier) setForm(f => ({ ...f, tier }));
+    const el = document.getElementById('inquire');
+    if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
+  };
+
+  // Inquiry form state.
+  const [form, setForm] = useState({
+    name: '', email: '', phone: '', tier: 'unsure', message: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submitInquiry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    setErr('');
+    if (!form.name.trim() || !form.email.trim() || !form.email.includes('@')) {
+      setErr('Please enter your name and a valid email.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API}/concierge-medicine/inquire`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim() || undefined,
+          tier_interest: form.tier,
+          // Backend persists this into health_history (its primary
+          // narrative column); legacy `message` is also kept.
+          health_history: form.message.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({} as any));
+        throw new Error(d.detail || 'Could not submit inquiry.');
+      }
+      setSubmitted(true);
+    } catch (e: any) {
+      setErr(e.message || 'Could not submit inquiry.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -238,7 +302,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
             display:'flex', flexWrap:'wrap', gap:'14px',
             justifyContent:'center', alignItems:'center',
           }}>
-            <NavyButton href="/patient">Request Membership</NavyButton>
+            <NavyButton onClick={() => scrollToInquire()}>Request Membership</NavyButton>
             <GoldOutlineButton onClick={scrollToTiers}>View Membership Tiers</GoldOutlineButton>
           </div>
 
@@ -355,7 +419,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
             gap:'24px',
             alignItems:'stretch',
           }}>
-            {TIERS.map(t => <TierCard key={t.id} tier={t}/>)}
+            {TIERS.map(t => <TierCard key={t.id} tier={t} onChoose={(id) => scrollToInquire(id)}/>)}
           </div>
 
           <div style={{
@@ -563,9 +627,9 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
           }}>
             Limited memberships available.
           </div>
-          <NavyButton href="/patient">Request Your Membership</NavyButton>
+          <NavyButton onClick={() => scrollToInquire()}>Request Your Membership</NavyButton>
           <div style={{marginTop:'24px'}}>
-            <a href="/patient" style={{
+            <a href="mailto:support@soulmd.us?subject=Complimentary%20concierge%20call" style={{
               fontFamily: SANS, fontSize:'13px',
               color: NAVY, opacity: 0.7,
               textDecoration:'none',
@@ -576,6 +640,125 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
               or schedule a complimentary 15-min call →
             </a>
           </div>
+        </div>
+      </section>
+
+      {/* ───── SECTION 6b — INQUIRY FORM ───────────────────────────── */}
+      <section id="inquire" style={{
+        background: BG_BASE,
+        padding:'clamp(80px, 12vw, 120px) clamp(20px,5vw,32px)',
+      }}>
+        <div style={{maxWidth:'620px', margin:'0 auto'}}>
+          <div style={{textAlign:'center', marginBottom:'40px'}}>
+            <Eyebrow>Membership Inquiry</Eyebrow>
+            <h2 style={{
+              fontFamily: SERIF, fontSize:'clamp(26px, 4.5vw, 36px)',
+              fontWeight: 400, letterSpacing:'0.02em',
+              color: NAVY, margin:'0 0 16px', lineHeight: 1.25,
+            }}>
+              Begin Your Inquiry
+            </h2>
+            <p style={{
+              fontFamily: SANS, fontSize:'15px',
+              color: MUTED, margin:0, lineHeight: 1.7,
+              maxWidth:'480px', marginInline:'auto',
+            }}>
+              Share a few details. Dr. Anderson personally reviews every request and, when there is alignment, will reach out with an enrollment link for the tier she recommends.
+            </p>
+          </div>
+
+          {submitted ? (
+            <div style={{
+              background:'#FFFFFF',
+              border:`1px solid ${GOLD}`,
+              borderRadius:'4px',
+              padding:'40px 32px',
+              textAlign:'center',
+              boxShadow:'0 2px 24px rgba(26,42,74,0.06)',
+            }}>
+              <div style={{fontFamily: SERIF, fontSize:'28px', color: GOLD, marginBottom:'12px'}}>✦</div>
+              <div style={{fontFamily: SERIF, fontSize:'22px', color: NAVY, marginBottom:'14px', letterSpacing:'0.02em'}}>
+                Thank you, {form.name.trim().split(/\s+/)[0] || 'friend'}.
+              </div>
+              <p style={{fontFamily: SANS, fontSize:'14px', color: MUTED, lineHeight:1.8, margin:0, maxWidth:'420px', marginInline:'auto'}}>
+                Your inquiry has been received. Dr. Anderson will review it personally and reach out by email with next steps.
+              </p>
+            </div>
+          ) : (
+            <form
+              onSubmit={submitInquiry}
+              style={{
+                background:'#FFFFFF',
+                border:`1px solid ${HAIRLINE}`,
+                borderRadius:'4px',
+                padding:'36px 32px',
+                boxShadow:'0 2px 24px rgba(26,42,74,0.06)',
+              }}>
+              <FormField label="Full name *">
+                <input
+                  type="text" autoComplete="name" required
+                  value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
+                  style={inquireInputStyle} placeholder="Your name"
+                />
+              </FormField>
+              <FormField label="Email *">
+                <input
+                  type="email" autoComplete="email" required
+                  value={form.email} onChange={e => setForm(f => ({...f, email: e.target.value}))}
+                  style={inquireInputStyle} placeholder="you@example.com"
+                />
+              </FormField>
+              <FormField label="Phone (optional)">
+                <input
+                  type="tel" autoComplete="tel"
+                  value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))}
+                  style={inquireInputStyle} placeholder="+1 ..."
+                />
+              </FormField>
+              <FormField label="Tier interest">
+                <select
+                  value={form.tier} onChange={e => setForm(f => ({...f, tier: e.target.value}))}
+                  style={{...inquireInputStyle, appearance:'auto'}}>
+                  {TIER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </FormField>
+              <FormField label="Tell Dr. Anderson about your health and why you'd like to join">
+                <textarea
+                  value={form.message} onChange={e => setForm(f => ({...f, message: e.target.value}))}
+                  rows={6} placeholder="Share as much or as little as you feel comfortable with."
+                  style={{...inquireInputStyle, minHeight:'140px', resize:'vertical', lineHeight:1.6, fontFamily:'inherit'}}
+                />
+              </FormField>
+
+              {err && (
+                <div style={{
+                  background:'rgba(224,80,80,0.08)',
+                  border:'1px solid rgba(224,80,80,0.3)',
+                  borderRadius:'4px', padding:'10px 14px',
+                  color:'#a02020', fontSize:'12.5px',
+                  marginBottom:'16px',
+                }}>{err}</div>
+              )}
+
+              <button type="submit" disabled={submitting} style={{
+                width:'100%', padding:'16px 40px',
+                background: NAVY, color:'#FFFFFF',
+                fontFamily: SERIF, fontSize:'14px',
+                letterSpacing:'0.08em', textTransform:'uppercase',
+                border:'none', borderRadius:'2px',
+                cursor: submitting ? 'wait' : 'pointer',
+                opacity: submitting ? 0.7 : 1,
+              }}>
+                {submitting ? 'Sending…' : 'Submit Inquiry'}
+              </button>
+              <div style={{
+                marginTop:'18px', fontSize:'11.5px', color: MUTED,
+                textAlign:'center', fontStyle:'italic', lineHeight:1.7,
+              }}>
+                Direct-pay practice · Not insurance
+              </div>
+            </form>
+          )}
         </div>
       </section>
 
@@ -632,8 +815,30 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
   );
 };
 
+// ───── Inquiry form helpers ──────────────────────────────────────────
+const inquireInputStyle: React.CSSProperties = {
+  width:'100%', padding:'12px 14px',
+  background:'#FAFAFE',
+  border:`1px solid ${HAIRLINE}`,
+  borderRadius:'2px',
+  fontFamily: SANS, fontSize:'14px',
+  color: NAVY,
+  outline:'none', boxSizing:'border-box',
+};
+
+const FormField: React.FC<{label: string; children: React.ReactNode}> = ({ label, children }) => (
+  <div style={{marginBottom:'16px'}}>
+    <div style={{
+      fontFamily: SERIF, fontSize:'10px',
+      letterSpacing:'0.18em', textTransform:'uppercase',
+      color: MUTED, fontWeight: 600, marginBottom:'6px',
+    }}>{label}</div>
+    {children}
+  </div>
+);
+
 // ───── Tier card (Section 4) ──────────────────────────────────────────
-const TierCard: React.FC<{tier: Tier}> = ({ tier }) => {
+const TierCard: React.FC<{tier: Tier; onChoose: (tierId: string) => void}> = ({ tier, onChoose }) => {
   const featured = !!tier.featured;
   return (
     <div style={{position:'relative', display:'flex', flexDirection:'column'}}>
@@ -704,7 +909,7 @@ const TierCard: React.FC<{tier: Tier}> = ({ tier }) => {
           ))}
         </ul>
 
-        <NavyButton href="/patient" full>
+        <NavyButton onClick={() => onChoose(tier.id)} full>
           Begin with {tier.name}
         </NavyButton>
       </div>
