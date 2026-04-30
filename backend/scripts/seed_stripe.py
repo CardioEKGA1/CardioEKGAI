@@ -35,9 +35,8 @@ CATALOG = [
     ("xrayread",     "XrayRead",         "Structured radiology report from any X-ray image",                       2499, 17999),
     ("palliativemd", "PalliativeMD",     "AI-guided palliative care — goals of care, prognosis, family meetings",  2499, 17999),
     # Suite
-    # Suite — full access to every tool. Monthly repriced to $111.11;
-    # yearly is $1,199.
-    ("suite",            "SoulMD Suite",            "All 10 clinical AI tools — unlimited LabRead & CliniScore · one subscription",     11111, 119900),
+    # Suite — full access to every tool. Monthly $111.11; yearly $999.99.
+    ("suite",            "SoulMD Suite",            "All 10 clinical AI tools — unlimited LabRead & CliniScore · one subscription",     11111,  99999),
     # LabRead and CliniScore are free (5/day) with unlimited access via Suite —
     # no standalone Stripe price at this time.
 
