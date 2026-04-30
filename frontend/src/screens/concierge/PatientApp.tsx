@@ -27,7 +27,7 @@ interface PatientPayload {
   meditations_allowed: number;
 }
 
-type Tab = 'home' | 'book' | 'messages' | 'labs' | 'account';
+type Tab = 'home' | 'book' | 'messages' | 'meditations' | 'labs' | 'account';
 
 // Soft-circle avatar icon for Account — rendered as SVG rather than emoji so
 // it reads as an avatar chip regardless of platform emoji set.
@@ -41,11 +41,12 @@ const AvatarIcon: React.FC<{active: boolean}> = ({ active }) => (
 
 type TabDef = { id: Tab; label: string; icon: React.ReactNode };
 const TABS: TabDef[] = [
-  { id: 'home',     label: 'Home',     icon: <span style={{fontSize:'19px'}}>✨</span> },
-  { id: 'book',     label: 'Book',     icon: <span style={{fontSize:'19px'}}>📅</span> },
-  { id: 'messages', label: 'Messages', icon: <span style={{fontSize:'19px'}}>💬</span> },
-  { id: 'labs',     label: 'Labs',     icon: <span style={{fontSize:'19px'}}>🧪</span> },
-  { id: 'account',  label: 'Account',  icon: null /* rendered per-button so active state flows in */ },
+  { id: 'home',        label: 'Home',        icon: <span style={{fontSize:'19px'}}>✨</span> },
+  { id: 'book',        label: 'Book',        icon: <span style={{fontSize:'19px'}}>📅</span> },
+  { id: 'meditations', label: 'Meditations', icon: <span style={{fontSize:'19px'}}>🌸</span> },
+  { id: 'messages',    label: 'Messages',    icon: <span style={{fontSize:'19px'}}>💬</span> },
+  { id: 'labs',        label: 'Labs',        icon: <span style={{fontSize:'19px'}}>🧪</span> },
+  { id: 'account',     label: 'Account',     icon: null /* rendered per-button so active state flows in */ },
 ];
 
 // Opal palette.
@@ -190,11 +191,12 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
 
         {/* Tab body */}
         <div style={{marginTop:'14px'}}>
-          {tab === 'home'     && <HomeTab API={API} token={token} patient={patient} todaysCard={todaysCard} onTodaysCardChanged={loadToday} meditations={myMeditations} modules={myModules} isSuperuser={!!isSuperuser} onOpenEnergyLog={() => setShowEnergyLog(true)} onOpenMeditation={(id) => setOpenMeditationId(id)} onOpenModule={(id) => setOpenModuleId(id)} onGo={setTab}/>}
-          {tab === 'book'     && <BookTab API={API} token={token} patient={patient}/>}
-          {tab === 'messages' && <MessagesTab API={API} token={token} onOpenMeditation={(id) => setOpenMeditationId(id)}/>}
-          {tab === 'labs'     && <LabsTab API={API} token={token}/>}
-          {tab === 'account'  && <AccountTab API={API} token={token} patient={patient} onSignOut={onBack} onOpenEnergyLog={() => setShowEnergyLog(true)}/>}
+          {tab === 'home'        && <HomeTab API={API} token={token} patient={patient} todaysCard={todaysCard} onTodaysCardChanged={loadToday} meditations={myMeditations} modules={myModules} isSuperuser={!!isSuperuser} onOpenEnergyLog={() => setShowEnergyLog(true)} onOpenMeditation={(id) => setOpenMeditationId(id)} onOpenModule={(id) => setOpenModuleId(id)} onGo={setTab}/>}
+          {tab === 'book'        && <BookTab API={API} token={token} patient={patient}/>}
+          {tab === 'meditations' && <PrescribedMeditationsTab API={API} token={token}/>}
+          {tab === 'messages'    && <MessagesTab API={API} token={token} onOpenMeditation={(id) => setOpenMeditationId(id)}/>}
+          {tab === 'labs'        && <LabsTab API={API} token={token}/>}
+          {tab === 'account'     && <AccountTab API={API} token={token} patient={patient} onSignOut={onBack} onOpenEnergyLog={() => setShowEnergyLog(true)}/>}
         </div>
       </div>
 
@@ -1459,5 +1461,175 @@ const PaymentSuccessBanner: React.FC = () => {
     </div>
   );
 };
+
+
+// ───── Prescribed Meditations Tab ─────────────────────────────────────
+// Patient-facing read-only view of meditations Dr. Anderson has
+// personally prescribed to this specific patient. The library itself
+// is NEVER exposed at /patient/* — these endpoints filter by
+// patient_id resolved from the JWT, and the empty-state copy explicitly
+// reinforces the prescription model.
+interface PrescribedMeditationRow {
+  id: number;
+  meditation_id: number;
+  title: string;
+  category: string | null;
+  duration_min: number;
+  script: string;
+  physician_note: string;
+  assigned_at: string | null;
+  played_at: string | null;
+  completed_at: string | null;
+  is_completed: boolean;
+  frequency: string;
+}
+
+const PrescribedMeditationsTab: React.FC<{API: string; token: string}> = ({ API, token }) => {
+  const [active, setActive] = useState<PrescribedMeditationRow[]>([]);
+  const [completed, setCompleted] = useState<PrescribedMeditationRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch(`${API}/patient/meditations`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { active: [], completed: [] })
+      .then(d => { setActive(d.active || []); setCompleted(d.completed || []); })
+      .finally(() => setLoading(false));
+  }, [API, token]);
+  useEffect(() => { load(); }, [load]);
+
+  const open = (id: number) => {
+    setOpenId(id);
+    fetch(`${API}/patient/meditations/${id}/play`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  };
+
+  const markComplete = (id: number) => {
+    fetch(`${API}/patient/meditations/${id}/complete`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(() => { setOpenId(null); load(); })
+      .catch(() => {});
+  };
+
+  if (loading) {
+    return <div style={{padding:'40px 0', textAlign:'center', color: DEEPP, fontSize:'13px'}}>Loading…</div>;
+  }
+
+  if (active.length === 0 && completed.length === 0) {
+    return (
+      <div style={{padding:'56px 24px', textAlign:'center'}}>
+        <div style={{fontSize:'40px', marginBottom:'14px'}}>🌸</div>
+        <div style={{fontSize:'15px', color: DEEPP, lineHeight:1.65, maxWidth:'320px', margin:'0 auto'}}>
+          Your meditations will appear here when Dr. Anderson prescribes one for you.
+        </div>
+      </div>
+    );
+  }
+
+  const openRow = openId != null ? (
+    [...active, ...completed].find(r => r.id === openId)
+  ) : null;
+
+  return (
+    <div style={{padding:'4px 4px 24px', display:'flex', flexDirection:'column', gap:'18px'}}>
+      {active.length > 0 && (
+        <div>
+          <div style={{fontSize:'11px', fontWeight:800, letterSpacing:'1.4px', color: DEEPP, opacity:0.75, textTransform:'uppercase', marginBottom:'10px'}}>Active</div>
+          <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+            {active.map(r => (
+              <PrescribedMeditationCard key={r.id} row={r} onBegin={() => open(r.id)} onComplete={() => markComplete(r.id)}/>
+            ))}
+          </div>
+        </div>
+      )}
+      {completed.length > 0 && (
+        <div>
+          <div style={{fontSize:'11px', fontWeight:800, letterSpacing:'1.4px', color: DEEPP, opacity:0.55, textTransform:'uppercase', marginBottom:'10px'}}>Completed</div>
+          <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+            {completed.map(r => (
+              <PrescribedMeditationCard key={r.id} row={r} onBegin={() => open(r.id)} onComplete={() => {}} dimmed/>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {openRow && (
+        <div onClick={() => setOpenId(null)} style={{position:'fixed', inset:0, zIndex:2200, background:'rgba(20,15,40,0.55)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', padding:'16px'}}>
+          <div onClick={e => e.stopPropagation()} style={{background:'white', borderRadius:'18px', maxWidth:'520px', width:'100%', maxHeight:'82vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 20px 50px rgba(0,0,0,0.25)'}}>
+            <div style={{padding:'18px 22px', borderBottom:'1px solid rgba(107,78,124,0.12)'}}>
+              <div style={{fontSize:'17px', fontWeight:800, color: '#1F1B3A', marginBottom:'4px'}}>{openRow.title}</div>
+              <div style={{fontSize:'11.5px', color: DEEPP, opacity:0.7}}>
+                {openRow.category || '—'} · {openRow.duration_min || 0} min
+              </div>
+            </div>
+            <div style={{padding:'18px 22px', overflowY:'auto', flex:1, fontSize:'14px', color:'#1F1B3A', lineHeight:1.7, whiteSpace:'pre-wrap'}}>
+              {openRow.physician_note && (
+                <div style={{background:'#FAF7EE', border:'0.5px solid #C9A84C44', borderRadius:'10px', padding:'12px 14px', fontSize:'13px', fontStyle:'italic', color:'#5a4a30', marginBottom:'18px'}}>
+                  "{openRow.physician_note}" — Dr. Anderson
+                </div>
+              )}
+              {openRow.script || 'Script not available.'}
+            </div>
+            <div style={{padding:'14px 22px', borderTop:'1px solid rgba(107,78,124,0.12)', display:'flex', gap:'10px'}}>
+              <button onClick={() => setOpenId(null)} style={{flex:1, padding:'12px', borderRadius:'10px', border:'1px solid rgba(107,78,124,0.25)', background:'white', color: DEEPP, fontSize:'13px', fontWeight:700, cursor:'pointer', fontFamily:'inherit'}}>Close</button>
+              {!openRow.is_completed && (
+                <button onClick={() => markComplete(openRow.id)} style={{flex:1, padding:'12px', borderRadius:'10px', border:'none', background: TEAL, color:'white', fontSize:'13px', fontWeight:800, cursor:'pointer', fontFamily:'inherit'}}>Mark Complete ✓</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PrescribedMeditationCard: React.FC<{
+  row: PrescribedMeditationRow;
+  onBegin: () => void;
+  onComplete: () => void;
+  dimmed?: boolean;
+}> = ({ row, onBegin, onComplete, dimmed }) => {
+  const date = row.assigned_at ? new Date(row.assigned_at).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' }) : '';
+  return (
+    <div style={{
+      background: CARD_BG, backdropFilter:'blur(8px)',
+      borderRadius:'14px', padding:'16px 16px 14px',
+      border: CARD_BORDER, boxShadow: CARD_SHADOW,
+      opacity: dimmed ? 0.7 : 1,
+    }}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'10px', marginBottom:'8px'}}>
+        <div style={{minWidth:0, flex:1}}>
+          <div style={{fontSize:'14.5px', fontWeight:800, color:'#1F1B3A', marginBottom:'2px', wordBreak:'break-word'}}>{row.title}</div>
+          <div style={{fontSize:'11px', color: DEEPP, opacity:0.7}}>
+            {row.category || '—'}{date && ` · ${date}`}
+          </div>
+        </div>
+        {row.is_completed && (
+          <span style={{fontSize:'10px', fontWeight:800, padding:'3px 9px', borderRadius:'999px', background:'rgba(46,140,90,0.15)', color:'#2e8c5a', whiteSpace:'nowrap'}}>Completed ✓</span>
+        )}
+      </div>
+      {row.physician_note && (
+        <div style={{background:'#FAF7EE', border:'0.5px solid #C9A84C44', borderRadius:'10px', padding:'10px 12px', fontSize:'12.5px', fontStyle:'italic', color:'#5a4a30', marginBottom:'12px', lineHeight:1.55}}>
+          "{row.physician_note}" — Dr. Anderson
+        </div>
+      )}
+      <div style={{display:'flex', gap:'8px'}}>
+        <button onClick={onBegin} style={{flex:1, padding:'10px', borderRadius:'10px', border:'none', background: row.is_completed ? 'rgba(107,78,124,0.12)' : TEAL, color: row.is_completed ? DEEPP : 'white', fontSize:'12.5px', fontWeight:800, cursor:'pointer', fontFamily:'inherit'}}>
+          {row.is_completed ? 'Re-read' : 'Begin'}
+        </button>
+        {!row.is_completed && (
+          <button onClick={onComplete} style={{flex:1, padding:'10px', borderRadius:'10px', border:'1px solid rgba(107,78,124,0.25)', background:'white', color: DEEPP, fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'inherit'}}>
+            Mark Complete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 
 export default PatientApp;

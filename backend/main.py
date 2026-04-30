@@ -5702,6 +5702,8 @@ class MeditationUpdateRequest(BaseModel):
 
 class MeditationAssignRequest(BaseModel):
     patient_id: int
+    physician_note: str | None = None
+    frequency: str | None = None  # one_time | daily | custom (defaults to one_time)
 
 
 def _meditation_dict(m: ConciergeMeditation, assignments_by_med: dict | None = None) -> dict:
@@ -5778,13 +5780,31 @@ def concierge_meditations_delete(med_id: int, _: User = Depends(verify_concierge
 
 
 @app.post("/concierge/meditations/{med_id}/assign")
-def concierge_meditations_assign(med_id: int, data: MeditationAssignRequest, _: User = Depends(verify_concierge_owner), db: Session = Depends(get_db)):
+def concierge_meditations_assign(
+    med_id: int,
+    data: MeditationAssignRequest,
+    current_user: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Physician prescribes a meditation to a patient. Stores the
+    physician's optional personal note + frequency on the assignment
+    row, fires the in-portal push, and emails the patient via SendGrid
+    so the prescription lands even if the PWA is closed.
+
+    Idempotent: a same-day re-prescribe of the same meditation to the
+    same patient is collapsed to the existing row (returns
+    duplicate=true)."""
     m = db.query(ConciergeMeditation).filter(ConciergeMeditation.id == med_id).first()
     if not m:
         raise HTTPException(status_code=404, detail="Meditation not found")
     p = db.query(ConciergePatient).filter(ConciergePatient.id == data.patient_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Patient not found")
+    note = (data.physician_note or "").strip()
+    freq = (data.frequency or "one_time").strip().lower()
+    if freq not in {"one_time", "daily", "custom"}:
+        freq = "one_time"
+
     # Idempotent-ish: don't double-assign the same meditation on the same day.
     recent = db.query(ConciergeMeditationAssignment).filter(
         ConciergeMeditationAssignment.meditation_id == med_id,
@@ -5793,12 +5813,155 @@ def concierge_meditations_assign(med_id: int, data: MeditationAssignRequest, _: 
     ).first()
     if recent:
         return {"id": recent.id, "assigned_at": recent.assigned_at.isoformat(), "duplicate": True}
-    a = ConciergeMeditationAssignment(meditation_id=med_id, patient_id=p.id)
+
+    now = datetime.utcnow()
+    next_send = now + timedelta(days=1) if freq == "daily" else None
+    a = ConciergeMeditationAssignment(
+        meditation_id=med_id, patient_id=p.id,
+        physician_id=getattr(current_user, "id", None),
+        physician_note=note,
+        frequency=freq,
+        next_send_at=next_send,
+        is_completed=False,
+        notification_sent=False,
+        assigned_at=now,
+    )
     db.add(a); db.commit(); db.refresh(a)
-    # Optional push to patient
+
+    # In-portal push.
     if p.user_id:
-        send_push_to_user(p.user_id, "Dr. Anderson shared a meditation 🧘", m.title, url="/concierge", db=db)
+        send_push_to_user(p.user_id, "Dr. Anderson shared a meditation 🧘", m.title, url="/patient", db=db)
+
+    # SendGrid email — warm, spiritual tone per spec, reply-to public
+    # support@ inbox so private replies don't leak Dr. Anderson's
+    # private address.
+    try:
+        first = _first_name(p.name)
+        note_html = (
+            f'<div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:14px 16px;font-size:13.5px;line-height:1.65;color:#2a3a5a;margin:0 0 18px;font-style:italic">{_esc(note)}</div>'
+            if note else ""
+        )
+        body = (
+            f'  <p style="font-size:15px;margin:0 0 14px">I have a meditation for you ✨</p>'
+            f'  <p style="font-size:15px;margin:0 0 14px"><b>{_esc(m.title)}</b></p>'
+            f'  {note_html}'
+            f'  <p style="margin:0 0 24px"><a href="https://soulmd.us/patient" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Open in Portal</a></p>'
+        )
+        _concierge_send(
+            p.email,
+            "Dr. Anderson has a meditation for you ✨",
+            _concierge_email_shell(f"Dear {_esc(first)}", body),
+        )
+        a.notification_sent = True
+        db.commit()
+    except Exception as e:
+        print(f"meditation prescribe email failed for patient #{p.id}: {e}")
+
     return {"id": a.id, "assigned_at": a.assigned_at.isoformat(), "duplicate": False}
+
+
+# ─── Patient-side: read-only access to prescribed meditations ─────────
+# Patients NEVER browse the full library. They only see what's been
+# prescribed to them. These endpoints enforce that boundary at the
+# auth + query layer — every read filters by patient_id resolved from
+# the JWT, no library list endpoint is exposed under /patient/*.
+
+@app.get("/patient/meditations")
+def patient_meditations_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Returns this patient's prescribed meditations. Active first
+    (is_completed=False), completed below. Each row includes the
+    meditation script so the PWA can display it inline (audio when
+    ElevenLabs lands later)."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p:
+        raise HTTPException(status_code=403, detail="No concierge patient record on file.")
+    rows = db.query(ConciergeMeditationAssignment).filter(
+        ConciergeMeditationAssignment.patient_id == p.id,
+    ).order_by(
+        ConciergeMeditationAssignment.is_completed.asc(),
+        ConciergeMeditationAssignment.assigned_at.desc(),
+    ).limit(200).all()
+    if not rows:
+        return {"active": [], "completed": []}
+    med_ids = list({r.meditation_id for r in rows})
+    meds = {m.id: m for m in db.query(ConciergeMeditation).filter(ConciergeMeditation.id.in_(med_ids)).all()}
+
+    def _row_dict(r: ConciergeMeditationAssignment) -> dict:
+        m = meds.get(r.meditation_id)
+        return {
+            "id": r.id,
+            "meditation_id": r.meditation_id,
+            "title": m.title if m else "Meditation",
+            "category": m.category if m else None,
+            "duration_min": m.duration_min if m else 0,
+            "script": m.script if m else "",
+            "physician_note": r.physician_note or "",
+            "assigned_at": r.assigned_at.isoformat() if r.assigned_at else None,
+            "played_at": r.played_at.isoformat() if r.played_at else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            "is_completed": bool(r.is_completed),
+            "frequency": r.frequency or "one_time",
+        }
+
+    return {
+        "active":    [_row_dict(r) for r in rows if not r.is_completed],
+        "completed": [_row_dict(r) for r in rows if     r.is_completed],
+    }
+
+
+@app.post("/patient/meditations/{assignment_id}/play")
+def patient_meditation_play(
+    assignment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stamps played_at on first open. Idempotent — second call is a
+    no-op so we keep the first-touch timestamp."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p:
+        raise HTTPException(status_code=403, detail="No concierge patient record on file.")
+    a = db.query(ConciergeMeditationAssignment).filter(
+        ConciergeMeditationAssignment.id == assignment_id,
+        ConciergeMeditationAssignment.patient_id == p.id,
+    ).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Meditation not found.")
+    if not a.played_at:
+        a.played_at = datetime.utcnow()
+        db.commit()
+    return {"ok": True, "played_at": a.played_at.isoformat() if a.played_at else None}
+
+
+@app.post("/patient/meditations/{assignment_id}/complete")
+def patient_meditation_complete(
+    assignment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Patient marked the meditation complete. Toggles is_completed +
+    stamps completed_at."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p:
+        raise HTTPException(status_code=403, detail="No concierge patient record on file.")
+    a = db.query(ConciergeMeditationAssignment).filter(
+        ConciergeMeditationAssignment.id == assignment_id,
+        ConciergeMeditationAssignment.patient_id == p.id,
+    ).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Meditation not found.")
+    a.is_completed = True
+    a.completed_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "completed_at": a.completed_at.isoformat()}
 
 
 @app.delete("/concierge/meditations/assignments/{assign_id}")

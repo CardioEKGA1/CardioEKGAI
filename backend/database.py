@@ -404,11 +404,24 @@ class ConciergeMeditation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class ConciergeMeditationAssignment(Base):
+    """Source of truth for "Dr. Anderson prescribed meditation X to
+    patient Y". The patient meditations tab reads from here ONLY —
+    nobody but the physician can write to this table. Per spec the
+    patient never browses the library directly; they only see what's
+    been assigned to them."""
     __tablename__ = "concierge_meditation_assignments"
     id = Column(Integer, primary_key=True, index=True)
-    meditation_id = Column(Integer, index=True)
-    patient_id = Column(Integer, index=True)
-    assigned_at = Column(DateTime, default=datetime.utcnow)
+    meditation_id = Column(Integer, index=True, nullable=False)
+    patient_id = Column(Integer, index=True, nullable=False)
+    physician_id = Column(Integer, index=True, nullable=True)   # users.id of the prescribing physician
+    physician_note = Column(String, default="")                 # personal note shown on the patient card
+    frequency = Column(String, default="one_time", index=True)  # one_time | daily | custom
+    next_send_at = Column(DateTime, nullable=True, index=True)  # for daily / custom auto-rotation cron (future)
+    played_at = Column(DateTime, nullable=True)                 # first time the patient opened the script
+    completed_at = Column(DateTime, nullable=True)              # patient marked complete
+    is_completed = Column(Boolean, default=False, index=True)
+    notification_sent = Column(Boolean, default=False)          # in-portal/email sent on prescribe
+    assigned_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 class ConciergeHabit(Base):
     __tablename__ = "concierge_habits"
@@ -805,6 +818,19 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR"))
         conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS age_verified BOOLEAN DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS age_verified_at TIMESTAMP"))
+
+        # ─── Patient meditation prescriptions ────────────────────────
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS physician_id INTEGER"))
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS physician_note VARCHAR DEFAULT ''"))
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS frequency VARCHAR DEFAULT 'one_time'"))
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS next_send_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS played_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS is_completed BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS notification_sent BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditation_assignments_is_completed ON concierge_meditation_assignments(is_completed)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditation_assignments_frequency ON concierge_meditation_assignments(frequency)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditation_assignments_next_send_at ON concierge_meditation_assignments(next_send_at)"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 
