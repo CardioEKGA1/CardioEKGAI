@@ -22,8 +22,8 @@ const TERMS: { title: string; body: string }[] = [
     body: 'This platform is not appropriate for medical emergencies. If you are experiencing chest pain, stroke symptoms, severe bleeding, thoughts of self-harm, or any other emergency, call 911 or go to your nearest emergency department.',
   },
   {
-    title: 'Beta — not HIPAA compliant yet',
-    body: 'SoulMD Concierge is in beta. Our platform is not yet HIPAA compliant. Please do not share identifying patient information (names, SSNs, dates, photos) in messages or intake fields until we announce full HIPAA compliance.',
+    title: 'HIPAA & records',
+    body: 'Video consultations conducted via Zoom for Healthcare are HIPAA-compliant. Medical records are maintained in paper format during the platform\'s beta phase until full electronic health record integration is complete. The patient portal itself is in beta — please avoid sharing highly sensitive identifiers (full SSN, financial account numbers) in portal messages until full electronic-records integration is announced.',
   },
   {
     title: 'AI-generated content is for wellness guidance only',

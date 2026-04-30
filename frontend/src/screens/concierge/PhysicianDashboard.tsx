@@ -193,7 +193,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
           <div style={{maxWidth:'1280px', margin:'0 auto', background:'rgba(232,168,64,0.1)', border:'1px solid rgba(232,168,64,0.35)', borderRadius:'10px', padding:'8px 12px', display:'flex', alignItems:'flex-start', gap:'8px'}}>
             <span style={{fontSize:'13px', lineHeight:1.3, flexShrink:0}}>⚠️</span>
             <div style={{fontSize:'11px', color:'#8a5a10', lineHeight:1.55}}>
-              <strong style={{color:'#6e4208'}}>Direct-pay · Not insurance · Not HIPAA compliant yet (beta).</strong> Do not enter identifying patient information during beta. For emergencies call 911.
+              <strong style={{color:'#6e4208'}}>Direct-pay · Not insurance.</strong> Video consultations via Zoom for Healthcare are HIPAA-compliant. Medical records are maintained in paper format during the platform's beta phase until full electronic health record integration is complete. For emergencies, call 911.
             </div>
           </div>
         </div>

@@ -243,7 +243,7 @@ const ConciergeMedicineLanding: React.FC<Props> = ({ onBack }) => {
 
         {/* Footer disclaimer */}
         <div style={{marginTop:'28px', fontSize:'11px', color: PURPLE_SOFT, textAlign:'center', lineHeight:1.7, maxWidth:'620px', margin:'28px auto 0', opacity:0.8}}>
-          Direct-pay medical practice. Not insurance. Currently in beta and not yet HIPAA compliant — do not enter identifying patient information during beta. For emergencies, call 911.
+          Direct-pay medical practice. Not insurance. Video consultations conducted via Zoom for Healthcare are HIPAA-compliant; medical records are maintained in paper format during the platform's beta phase until full electronic health record integration is complete. For emergencies, call 911.
         </div>
       </main>
     </div>

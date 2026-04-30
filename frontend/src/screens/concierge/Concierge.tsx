@@ -219,7 +219,7 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
         <div style={{background:'rgba(255,255,255,0.6)', border:'1px solid rgba(232,168,64,0.35)', borderRadius:'12px', padding:'10px 14px', display:'flex', alignItems:'flex-start', gap:'8px', marginBottom:'10px'}}>
           <span style={{fontSize:'14px', flexShrink:0}}>⚠️</span>
           <div style={{fontSize:'10px', color:'#8a5a10', lineHeight:1.5}}>
-            <b style={{color:'#6e4208'}}>Direct-pay · Not insurance · Not HIPAA compliant yet (beta).</b> Do not enter identifying patient information in intake messages. For emergencies call 911.
+            <b style={{color:'#6e4208'}}>Direct-pay · Not insurance.</b> Video consultations via Zoom for Healthcare are HIPAA-compliant. Medical records are maintained in paper format during the platform's beta phase until full electronic health record integration is complete. For emergencies, call 911.
           </div>
         </div>
 
@@ -237,7 +237,7 @@ const HipaaAckGate: React.FC<{onAck: () => void; onBack: () => void}> = ({ onAck
       <div style={{fontSize:'24px', marginBottom:'8px'}}>⚠️</div>
       <div style={{fontSize:'18px', fontWeight:800, color:'#4a2d6b', marginBottom:'10px'}}>Before you continue</div>
       <p style={{fontSize:'13px', color:'#6b4e7c', lineHeight:1.7, margin:'0 0 14px 0'}}>
-        <strong>SoulMD Concierge is a direct-pay medical practice. Not insurance. Not HIPAA compliant yet</strong> — do not enter identifying patient information during beta. For emergencies call 911.
+        <strong>SoulMD Concierge is a direct-pay medical practice. Not insurance.</strong> Video consultations via Zoom for Healthcare are HIPAA-compliant. Medical records are maintained in paper format during the platform's beta phase until full electronic health record integration is complete. For emergencies, call 911.
       </p>
       <div style={{display:'flex', gap:'10px', justifyContent:'flex-end', flexWrap:'wrap'}}>
         <button onClick={onBack} style={{background:'rgba(255,255,255,0.9)', border:'1px solid rgba(107,78,124,0.2)', borderRadius:'10px', padding:'10px 16px', fontSize:'13px', fontWeight:700, color:'#6b4e7c', cursor:'pointer'}}>Back to SoulMD</button>

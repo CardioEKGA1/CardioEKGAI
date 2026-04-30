@@ -451,7 +451,8 @@ const Field: React.FC<{label: string; children: React.ReactNode}> = ({ label, ch
 
 const TELEHEALTH_BODY = (
   <>
-    <p>Telehealth involves the use of secure video and audio technology to deliver health care services from a remote location. SoulMD Concierge uses Zoom for Healthcare, an end-to-end encrypted platform that meets HIPAA security standards.</p>
+    <p>Telehealth involves the use of secure video and audio technology to deliver health care services from a remote location.</p>
+    <p><b>HIPAA &amp; records.</b> Video consultations conducted via Zoom for Healthcare are HIPAA-compliant. Medical records are maintained in paper format during the platform's beta phase until full electronic health record integration is complete.</p>
     <p><b>What to expect:</b> visits last up to 30 minutes (or longer for extended visits). You should join from a private, well-lit space with a stable internet connection.</p>
     <p><b>Limitations:</b> telehealth is not appropriate for medical emergencies. If you are experiencing chest pain, shortness of breath, suicidal thoughts, or any life-threatening symptom, call 911 immediately.</p>
     <p><b>Confidentiality:</b> sessions are not recorded. Information shared during a telehealth session is treated with the same confidentiality as in-person care.</p>

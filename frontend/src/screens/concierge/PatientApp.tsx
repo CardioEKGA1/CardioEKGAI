@@ -319,7 +319,7 @@ const BetaDisclaimer: React.FC = () => {
     <div style={{background:'rgba(255,255,255,0.65)', border:'1px solid rgba(232,168,64,0.4)', borderRadius:'12px', padding:'8px 10px 8px 12px', display:'flex', alignItems:'flex-start', gap:'8px'}}>
       <span style={{fontSize:'14px', flexShrink:0, lineHeight:1.4}}>⚠️</span>
       <div style={{fontSize:'10px', color:'#8a5a10', lineHeight:1.5, flex:1}}>
-        <strong style={{color:'#6e4208'}}>Direct-pay · Not insurance · Not HIPAA compliant yet (beta).</strong> Do not enter identifying patient information. Emergencies — call 911.
+        <strong style={{color:'#6e4208'}}>Direct-pay · Not insurance.</strong> Video consultations via Zoom for Healthcare are HIPAA-compliant. Medical records are kept in paper format during this beta phase until electronic-records integration is complete. Emergencies — call 911.
       </div>
       <button onClick={dismiss} aria-label="Dismiss beta notice"
         style={{background:'transparent', border:'none', color:'#8a5a10', cursor:'pointer', fontSize:'18px', lineHeight:1, padding:'0 2px', marginLeft:'4px', flexShrink:0, fontFamily:'inherit'}}>×</button>
@@ -981,9 +981,9 @@ const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|nul
       </Card>
 
       <Card style={{marginBottom:'12px'}}>
-        <Label>HIPAA consent</Label>
+        <Label>HIPAA &amp; records</Label>
         <div style={{fontSize:'12px', color:DEEPP, lineHeight:1.6, marginTop:'6px'}}>
-          Full HIPAA compliance — including Business Associate Agreements — will be implemented before clinical launch. During beta, do not enter identifying information.
+          Video consultations conducted via Zoom for Healthcare are HIPAA-compliant. Medical records are maintained in paper format during the platform's beta phase until full electronic health record integration is complete.
         </div>
       </Card>
 
