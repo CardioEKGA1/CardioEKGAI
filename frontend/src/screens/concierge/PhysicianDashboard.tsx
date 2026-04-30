@@ -208,7 +208,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
           {section === 'coaching'      && <CoachingSection API={API} token={token} accent={PURPLE}/>}
           {section === 'resources'     && <MeditationsSection API={API} token={token} accent={PURPLE}/>}
           {section === 'billing'       && <BillingSection API={API} token={token} accent={PURPLE}/>}
-          {section === 'insights'      && <InsightsPlaceholder/>}
+          {section === 'insights'      && <BillingInsights API={API} token={token}/>}
         </main>
 
         {isMobile && (
@@ -334,12 +334,108 @@ const MoreSheet: React.FC<{section: Section; onChange: (s: Section) => void; onC
   );
 };
 
-const InsightsPlaceholder: React.FC = () => (
-  <div style={{padding:'56px 20px', textAlign:'center', background:'#FFFFFF', borderRadius:'16px', border:`0.5px solid ${BORDER}`}}>
-    <div style={{fontSize:'40px', marginBottom:'10px', opacity:0.6}}>✧</div>
-    <div style={{fontSize:'18px', fontWeight:800, color: INK, marginBottom:'6px'}}>Insights</div>
-    <div style={{fontSize:'13px', color: INK_SOFT, maxWidth:'460px', margin:'0 auto', lineHeight:1.6}}>Population-level AI insights across your members — metabolic trends, habit adherence, retention signals. Coming in Phase 2.</div>
-  </div>
-);
+// ───── Billing Insights tab ───────────────────────────────────────────
+// Reads /concierge/billing/insights and renders the five lifecycle
+// metrics from the spec. Keeps the same visual chrome as the other
+// section cards so it slots into the dashboard without restyling.
+interface InsightsPayload {
+  ok: boolean;
+  by_status: Record<string, number>;
+  monthly_to_annual_conversion_rate: number | null;
+  patients_in_grace: number;
+  downgrades_this_month: number;
+  upcoming_renewals_next_30d: number;
+  upcoming_renewals_preview: { id: number; name: string; tier: string; due_at: string | null }[];
+  projected_annual_revenue_cents: number;
+}
+
+const BillingInsights: React.FC<{API: string; token: string}> = ({ API, token }) => {
+  const [data, setData] = useState<InsightsPayload | null>(null);
+  const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API}/concierge/billing/insights`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+      .then((d: InsightsPayload) => { if (alive) setData(d); })
+      .catch(e => { if (alive) setErr(typeof e === 'string' ? e : 'Could not load insights.'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [API, token]);
+
+  if (loading) {
+    return <div style={{padding:'40px', textAlign:'center', color: INK_SOFT}}>Loading insights…</div>;
+  }
+  if (err || !data) {
+    return <div style={{padding:'40px', textAlign:'center', color:'#a02020'}}>{err || 'No data.'}</div>;
+  }
+
+  const conv = data.monthly_to_annual_conversion_rate;
+  const convStr = conv === null ? '—' : `${Math.round(conv * 100)}%`;
+  const revStr = `$${(data.projected_annual_revenue_cents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+  const Metric: React.FC<{label: string; value: string; sub?: string; tone?: 'green'|'amber'|'navy'|'plum'}> = ({ label, value, sub, tone='navy' }) => {
+    const palette = {
+      green: { bg:'rgba(46,140,90,0.10)', fg:'#2e8c5a' },
+      amber: { bg:'rgba(232,168,64,0.18)', fg:'#8a5a10' },
+      navy:  { bg:'rgba(83,74,183,0.10)',  fg: PURPLE },
+      plum:  { bg:'rgba(107,78,124,0.15)', fg:'#6B4E7C' },
+    }[tone];
+    return (
+      <div style={{background:'#FFFFFF', borderRadius:'14px', border:`0.5px solid ${BORDER}`, padding:'18px 20px'}}>
+        <div style={{fontSize:'10.5px', color: INK_SOFT, fontWeight:700, letterSpacing:'1.2px', textTransform:'uppercase', marginBottom:'6px'}}>{label}</div>
+        <div style={{display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'4px'}}>
+          <div style={{fontSize:'28px', fontWeight:800, color: INK, lineHeight:1, letterSpacing:'-0.5px'}}>{value}</div>
+          {sub && <div style={{fontSize:'11.5px', color: palette.fg, fontWeight:700, padding:'2px 8px', borderRadius:'999px', background: palette.bg}}>{sub}</div>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:'18px'}}>
+      <div>
+        <div style={{fontSize:'20px', fontWeight:800, color: INK, marginBottom:'4px'}}>Billing Insights</div>
+        <div style={{fontSize:'13px', color: INK_SOFT}}>3-month-trial → annual lifecycle health.</div>
+      </div>
+
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'12px'}}>
+        <Metric label="Monthly → Annual conversion" value={convStr} tone="green"/>
+        <Metric label="Patients in grace" value={String(data.patients_in_grace)} tone={data.patients_in_grace > 0 ? 'amber' : 'navy'}/>
+        <Metric label="Downgrades this month" value={String(data.downgrades_this_month)} tone={data.downgrades_this_month > 0 ? 'plum' : 'navy'}/>
+        <Metric label="Renewals next 30 days" value={String(data.upcoming_renewals_next_30d)} tone={data.upcoming_renewals_next_30d > 0 ? 'amber' : 'navy'}/>
+        <Metric label="Projected annual revenue" value={revStr} sub="if all renew" tone="green"/>
+      </div>
+
+      <div style={{background:'#FFFFFF', borderRadius:'14px', border:`0.5px solid ${BORDER}`, padding:'18px 20px'}}>
+        <div style={{fontSize:'13px', fontWeight:700, color: INK, marginBottom:'12px'}}>Members by lifecycle</div>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:'8px 16px'}}>
+          {Object.entries(data.by_status).map(([k, v]) => (
+            <div key={k} style={{display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'12.5px', padding:'4px 0'}}>
+              <span style={{color: INK_SOFT}}>{k.replace(/_/g, ' ')}</span>
+              <span style={{fontWeight:800, color: INK}}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {data.upcoming_renewals_preview.length > 0 && (
+        <div style={{background:'#FFFFFF', borderRadius:'14px', border:`0.5px solid ${BORDER}`, padding:'18px 20px'}}>
+          <div style={{fontSize:'13px', fontWeight:700, color: INK, marginBottom:'10px'}}>Upcoming renewals</div>
+          <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
+            {data.upcoming_renewals_preview.map(r => (
+              <div key={r.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'12.5px', borderTop:`0.5px solid ${BORDER}`, paddingTop:'8px'}}>
+                <span style={{color: INK, fontWeight:600}}>{r.name}</span>
+                <span style={{color: INK_SOFT}}>{r.tier} · {r.due_at ? new Date(r.due_at).toLocaleDateString() : '—'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 export default PhysicianDashboard;

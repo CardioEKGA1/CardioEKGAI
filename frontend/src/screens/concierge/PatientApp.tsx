@@ -25,6 +25,17 @@ interface PatientPayload {
   visits_allowed: number;
   meditations_used: number;
   meditations_allowed: number;
+  // 3-month-trial → annual lifecycle. All optional so the legacy
+  // /concierge/me payload (returns the older shape) keeps rendering.
+  membership_status?: 'active_monthly'|'balance_invoice_sent'|'grace_period'|'active_annual'|'renewal_invoice_sent'|'renewal_grace_period'|'downgraded_alacarte'|string;
+  monthly_payment_count?: number;
+  is_first_year?: boolean;
+  remaining_balance_due_at?: string | null;
+  annual_renewal_due_at?: string | null;
+  grace_period_end?: string | null;
+  downgraded_at?: string | null;
+  remaining_balance_checkout_url?: string;
+  renewal_checkout_url?: string;
 }
 
 type Tab = 'home' | 'book' | 'messages' | 'meditations' | 'labs' | 'account';
@@ -902,21 +913,7 @@ const AccountTab: React.FC<{API:string; token:string; patient:PatientPayload|nul
         <div style={{fontSize:'22px', fontWeight:800, color:DEEPP}}>Your account</div>
       </div>
 
-      {patient && (
-        <Card style={{marginBottom:'12px'}}>
-          <Label>Membership</Label>
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginTop:'6px'}}>
-            <div>
-              <div style={{fontSize:'20px', fontWeight:800, color:DEEPP}}>{patient.tier_label}</div>
-              <div style={{fontSize:'12px', color:DEEPP, opacity:0.65, marginTop:'2px'}}>Status: {patient.subscription_status || '—'}</div>
-            </div>
-            <div style={{fontSize:'11px', fontWeight:800, padding:'4px 10px', borderRadius:'999px', background: `${TEAL}22`, color: TEAL, letterSpacing:'0.5px', textTransform:'uppercase'}}>Active</div>
-          </div>
-          {patient.current_period_end && (
-            <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, marginTop:'10px'}}>Renews {new Date(patient.current_period_end).toLocaleDateString()}</div>
-          )}
-        </Card>
-      )}
+      {patient && <MembershipStatusBanner patient={patient}/>}
 
       <Card style={{marginBottom:'12px'}}>
         <Label>Upgrade or change tier</Label>
@@ -1460,6 +1457,141 @@ const PaymentSuccessBanner: React.FC = () => {
       <button onClick={() => setVisible(false)} aria-label="Dismiss" style={{background:'transparent', border:'none', color:'#1d6a3a', fontSize:'18px', cursor:'pointer', padding:0, lineHeight:1}}>×</button>
     </div>
   );
+};
+
+
+// ───── Membership status banner ───────────────────────────────────────
+// Renders the right Account-tab card for the patient's lifecycle
+// state. Drives off PatientPayload.membership_status surfaced from
+// /concierge/me. Keeps a single source-of-truth (the backend enum) so
+// banner copy + CTA can never drift from billing reality.
+const MembershipStatusBanner: React.FC<{patient: PatientPayload}> = ({ patient }) => {
+  const status = patient.membership_status || 'active_monthly';
+  const tier = patient.tier_label;
+  const fmt = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' }) : '';
+  const monthlyCount = patient.monthly_payment_count ?? 0;
+
+  // Status → palette + headline + body + CTA.
+  const layouts: Record<string, {
+    badge: string; badgeBg: string; badgeFg: string;
+    title: string; sub: string; cta?: { label: string; href: string };
+    progress?: { count: number; total: number };
+    cardBg?: string; border?: string;
+  }> = {
+    active_monthly: {
+      badge: `Monthly · ${monthlyCount} of 3 months`,
+      badgeBg: `${TEAL}22`, badgeFg: TEAL,
+      title: tier,
+      sub: 'Your monthly payments apply toward your annual membership at month 3.',
+      progress: { count: monthlyCount, total: 3 },
+    },
+    balance_invoice_sent: {
+      badge: 'Balance Due',
+      badgeBg: 'rgba(232,168,64,0.18)', badgeFg: '#8a5a10',
+      title: tier,
+      sub: `Complete your annual membership by ${fmt(patient.remaining_balance_due_at)}.`,
+      cta: patient.remaining_balance_checkout_url ? { label: 'Complete Now', href: patient.remaining_balance_checkout_url } : undefined,
+      cardBg: 'rgba(255,251,235,0.85)', border: '1px solid rgba(232,168,64,0.45)',
+    },
+    grace_period: {
+      badge: 'Grace Period',
+      badgeBg: 'rgba(232,118,40,0.18)', badgeFg: '#8a3a10',
+      title: tier,
+      sub: `Grace period ends ${fmt(patient.grace_period_end)}. Pay to keep full membership access.`,
+      cta: patient.remaining_balance_checkout_url ? { label: 'Pay Now', href: patient.remaining_balance_checkout_url } : undefined,
+      cardBg: 'rgba(255,242,224,0.85)', border: '1px solid rgba(232,118,40,0.55)',
+    },
+    active_annual: {
+      badge: 'Annual ✓',
+      badgeBg: 'rgba(46,140,90,0.18)', badgeFg: '#2e8c5a',
+      title: tier,
+      sub: patient.annual_renewal_due_at ? `Renews ${fmt(patient.annual_renewal_due_at)}` : 'Annual member',
+      cardBg: 'rgba(238,250,242,0.7)', border: '1px solid rgba(46,140,90,0.35)',
+    },
+    renewal_invoice_sent: {
+      badge: 'Renewal Due',
+      badgeBg: 'rgba(232,118,40,0.18)', badgeFg: '#8a3a10',
+      title: tier,
+      sub: `Renew your annual membership by ${fmt(patient.annual_renewal_due_at)} to continue full access.`,
+      cta: patient.renewal_checkout_url ? { label: 'Renew Now', href: patient.renewal_checkout_url } : undefined,
+      cardBg: 'rgba(255,242,224,0.85)', border: '1px solid rgba(232,118,40,0.55)',
+    },
+    renewal_grace_period: {
+      badge: 'Grace Period',
+      badgeBg: 'rgba(232,118,40,0.18)', badgeFg: '#8a3a10',
+      title: tier,
+      sub: `Grace period ends ${fmt(patient.grace_period_end)}. Renew to keep full access.`,
+      cta: patient.renewal_checkout_url ? { label: 'Renew Now', href: patient.renewal_checkout_url } : undefined,
+      cardBg: 'rgba(255,242,224,0.85)', border: '1px solid rgba(232,118,40,0.55)',
+    },
+    downgraded_alacarte: {
+      badge: 'À La Carte',
+      badgeBg: 'rgba(107,78,124,0.15)', badgeFg: DEEPP,
+      title: tier,
+      sub: 'Your membership is now à la carte. Book sessions individually.',
+      cta: { label: 'Re-enroll', href: 'mailto:support@soulmd.us?subject=Re-enroll%20in%20SoulMD%20Concierge' },
+      cardBg: 'rgba(245,242,250,0.85)', border: '1px solid rgba(107,78,124,0.25)',
+    },
+  };
+  const l = layouts[status] || layouts.active_monthly;
+
+  return (
+    <div style={{
+      ...CARD_STYLE,
+      background: l.cardBg || CARD_BG,
+      border: l.border || CARD_BORDER,
+      marginBottom:'12px',
+    }}>
+      <div style={{fontSize:'10px', letterSpacing:'1.6px', textTransform:'uppercase', color: DEEPP, opacity:0.75, fontWeight:800, marginBottom:'8px'}}>Membership</div>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', gap:'10px'}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:'20px', fontWeight:800, color:DEEPP, letterSpacing:'-0.2px'}}>{l.title}</div>
+          <div style={{fontSize:'12.5px', color: DEEPP, opacity:0.85, marginTop:'4px', lineHeight:1.55}}>{l.sub}</div>
+        </div>
+        <span style={{
+          fontSize:'10.5px', fontWeight:800, padding:'4px 10px', borderRadius:'999px',
+          background: l.badgeBg, color: l.badgeFg,
+          letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap', flexShrink:0,
+        }}>{l.badge}</span>
+      </div>
+      {l.progress && (
+        <div style={{marginTop:'14px'}}>
+          <div style={{display:'flex', gap:'6px'}}>
+            {Array.from({length: l.progress.total}, (_, i) => (
+              <div key={i} style={{
+                flex:1, height:'6px', borderRadius:'999px',
+                background: i < l.progress!.count ? TEAL : 'rgba(107,78,124,0.18)',
+              }}/>
+            ))}
+          </div>
+          <div style={{fontSize:'10.5px', color: DEEPP, opacity:0.65, marginTop:'6px', textAlign:'right'}}>
+            Month {l.progress.count} of {l.progress.total}
+          </div>
+        </div>
+      )}
+      {l.cta && (
+        <a
+          href={l.cta.href}
+          style={{
+            display:'block', textDecoration:'none', textAlign:'center',
+            marginTop:'14px', padding:'12px 16px', borderRadius:'12px',
+            background:'#1a2a4a', color:'#FFFFFF',
+            fontSize:'12.5px', fontWeight:800, letterSpacing:'0.4px',
+          }}
+        >
+          {l.cta.label}
+        </a>
+      )}
+    </div>
+  );
+};
+
+// Shared card chrome reused by the banner so it visually matches the
+// existing Account-tab cards without importing AccountTab's helpers.
+const CARD_STYLE: React.CSSProperties = {
+  background: CARD_BG, backdropFilter:'blur(8px)',
+  borderRadius:'16px', padding:'16px',
+  border: CARD_BORDER, boxShadow: CARD_SHADOW,
 };
 
 

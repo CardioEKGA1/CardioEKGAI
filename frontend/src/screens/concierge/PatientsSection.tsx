@@ -18,9 +18,43 @@ interface Patient {
   is_approved: boolean;
   approved_at: string | null;
   age_verified?: boolean;       // 18+ self-attestation captured during onboarding intake
+  // 3-month-trial → annual lifecycle (optional — older payloads
+  // without these fields still render with no lifecycle badge).
+  membership_status?: string;
+  monthly_payment_count?: number;
+  is_first_year?: boolean;
+  remaining_balance_due_at?: string | null;
+  annual_renewal_due_at?: string | null;
+  grace_period_end?: string | null;
+  downgraded_at?: string | null;
   created_at: string;
   updated_at: string;
 }
+
+// Per-member lifecycle pill. Single source-of-truth for the colour
+// + label combinations the Members card and the Insights tab share.
+const LIFECYCLE_BADGE: Record<string, { label: string; bg: string; fg: string }> = {
+  active_monthly:        { label: 'Monthly',         bg: 'rgba(83,74,183,0.10)',  fg: '#534AB7' },
+  balance_invoice_sent:  { label: 'Balance Due',     bg: 'rgba(232,168,64,0.18)', fg: '#8a5a10' },
+  grace_period:          { label: 'Grace',           bg: 'rgba(232,118,40,0.18)', fg: '#8a3a10' },
+  active_annual:         { label: 'Annual ✓',        bg: 'rgba(46,140,90,0.15)',  fg: '#2e8c5a' },
+  renewal_invoice_sent:  { label: 'Renewal Due',     bg: 'rgba(232,118,40,0.18)', fg: '#8a3a10' },
+  renewal_grace_period:  { label: 'Renewal Grace',   bg: 'rgba(232,118,40,0.18)', fg: '#8a3a10' },
+  downgraded_alacarte:   { label: 'À La Carte',      bg: 'rgba(107,78,124,0.15)', fg: '#6B4E7C' },
+};
+const lifecycleLabel = (p: Patient): string | null => {
+  const ms = p.membership_status;
+  if (!ms) return null;
+  if (ms === 'active_monthly') {
+    const n = p.monthly_payment_count ?? 0;
+    return `Monthly ${Math.min(n, 3)}/3`;
+  }
+  return LIFECYCLE_BADGE[ms]?.label || null;
+};
+const lifecycleColors = (p: Patient): { bg: string; fg: string } => {
+  const ms = p.membership_status || 'active_monthly';
+  return LIFECYCLE_BADGE[ms] || LIFECYCLE_BADGE.active_monthly;
+};
 
 interface IntakeData {
   chief_complaint?: string;
@@ -266,7 +300,19 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
                         <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:`${tier.color}1a`, color:tier.color, fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap'}}>{tier.label}</span>
                       </div>
                       <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'8px', wordBreak:'break-all'}}>{p.email}</div>
-                      <div style={{display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center', marginBottom:'4px'}}>
+                      <div style={{display:'flex', gap:'6px', flexWrap:'wrap', alignItems:'center', marginBottom:'4px'}}>
+                        {(() => {
+                          const label = lifecycleLabel(p);
+                          if (!label) return null;
+                          const c = lifecycleColors(p);
+                          return (
+                            <span title={`Lifecycle: ${p.membership_status}`} style={{
+                              fontSize:'10px', padding:'2px 8px', borderRadius:'999px',
+                              background: c.bg, color: c.fg,
+                              fontWeight:700, letterSpacing:'0.4px', textTransform:'uppercase',
+                            }}>{label}</span>
+                          );
+                        })()}
                         {p.age_verified ? (
                           <span title="Patient confirmed 18+ during onboarding intake" style={{
                             fontSize:'10px', padding:'2px 8px', borderRadius:'999px',

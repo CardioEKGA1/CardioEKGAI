@@ -3472,6 +3472,8 @@ class ConciergePatientUpdate(BaseModel):
     doctor_notes: str | None = None
 
 def _patient_dict(p: ConciergePatient) -> dict:
+    ms = getattr(p, "membership_status", None)
+    ms_value = ms.value if hasattr(ms, "value") else (ms or "active_monthly")
     return {
         "id": p.id,
         "name": p.name,
@@ -3490,6 +3492,24 @@ def _patient_dict(p: ConciergePatient) -> dict:
         "payment_method": getattr(p, "payment_method", "stripe") or "stripe",
         "onboarding_completed_at": p.onboarding_completed_at.isoformat() if getattr(p, "onboarding_completed_at", None) else None,
         "age_verified": bool(getattr(p, "age_verified", False)),
+        # 3-month-trial → annual lifecycle fields. Frontend renders the
+        # Account-tab banner and the Members-tab badge off these.
+        "membership_status": ms_value,
+        "monthly_payment_count": int(getattr(p, "monthly_payment_count", 0) or 0),
+        "is_first_year": bool(getattr(p, "is_first_year", True)),
+        "trial_end_date": p.trial_end_date.isoformat() if getattr(p, "trial_end_date", None) else None,
+        "remaining_balance_due_at": p.remaining_balance_due_at.isoformat() if getattr(p, "remaining_balance_due_at", None) else None,
+        "remaining_balance_invoice_sent_at": p.remaining_balance_invoice_sent_at.isoformat() if getattr(p, "remaining_balance_invoice_sent_at", None) else None,
+        "annual_start_date": p.annual_start_date.isoformat() if getattr(p, "annual_start_date", None) else None,
+        "annual_renewal_due_at": p.annual_renewal_due_at.isoformat() if getattr(p, "annual_renewal_due_at", None) else None,
+        "renewal_invoice_sent_at": p.renewal_invoice_sent_at.isoformat() if getattr(p, "renewal_invoice_sent_at", None) else None,
+        "grace_period_end": p.grace_period_end.isoformat() if getattr(p, "grace_period_end", None) else None,
+        "downgraded_at": p.downgraded_at.isoformat() if getattr(p, "downgraded_at", None) else None,
+        # Stripe Checkout URL for the remaining-balance / renewal invoice,
+        # cached on intake_data when the cron / webhook generated it.
+        # Frontend reads this to render the "Pay Now" CTA.
+        "remaining_balance_checkout_url": (p.intake_data or {}).get("remaining_balance_checkout_url") or "",
+        "renewal_checkout_url":           (p.intake_data or {}).get("renewal_checkout_url") or "",
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -7718,6 +7738,8 @@ def concierge_me(view: str | None = None, current_user: User = Depends(get_curre
         "ascend": {"visits": 5, "meditations": 4},
     }
     allow = allowances.get(p.membership_tier or "awaken", allowances["awaken"])
+    ms = getattr(p, "membership_status", None)
+    ms_value = ms.value if hasattr(ms, "value") else (ms or "active_monthly")
     return {
         "role": "patient",
         "email": current_user.email,
@@ -7734,6 +7756,16 @@ def concierge_me(view: str | None = None, current_user: User = Depends(get_curre
             "meditations_used": p.meditations_used or 0,
             "meditations_allowed": allow["meditations"],
             "test_account": bool(getattr(p, "test_account", False)),
+            # Lifecycle fields for the Account-tab status banner.
+            "membership_status": ms_value,
+            "monthly_payment_count": int(getattr(p, "monthly_payment_count", 0) or 0),
+            "is_first_year": bool(getattr(p, "is_first_year", True)),
+            "remaining_balance_due_at": p.remaining_balance_due_at.isoformat() if getattr(p, "remaining_balance_due_at", None) else None,
+            "annual_renewal_due_at": p.annual_renewal_due_at.isoformat() if getattr(p, "annual_renewal_due_at", None) else None,
+            "grace_period_end": p.grace_period_end.isoformat() if getattr(p, "grace_period_end", None) else None,
+            "downgraded_at": p.downgraded_at.isoformat() if getattr(p, "downgraded_at", None) else None,
+            "remaining_balance_checkout_url": (p.intake_data or {}).get("remaining_balance_checkout_url") or "",
+            "renewal_checkout_url":           (p.intake_data or {}).get("renewal_checkout_url") or "",
         },
     }
 
@@ -8147,6 +8179,114 @@ def push_test(
         raise HTTPException(status_code=401, detail="Sign in required")
     n = send_push_to_user(current_user.id, "SoulMD Concierge", "Notifications are working 🙌", url="/concierge", db=db)
     return {"delivered": n}
+
+
+# ─── Billing Insights (owner-only) ───────────────────────────────────
+# Powers the Insights tab in the physician dashboard. Aggregate-only —
+# no PII leaves this endpoint, just counts and totals.
+
+@app.get("/concierge/billing/insights")
+def concierge_billing_insights(
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Five lifecycle metrics per the P4 spec:
+      • monthly_to_annual_conversion_rate — # active_annual ever
+        divided by # who hit balance_invoice_sent OR active_annual.
+      • patients_in_grace — currently in BALANCE_INVOICE_SENT,
+        GRACE_PERIOD, RENEWAL_INVOICE_SENT, or RENEWAL_GRACE_PERIOD.
+      • downgrades_this_month — count of rows where downgraded_at
+        falls within the current calendar month (UTC).
+      • upcoming_renewals_next_30d — active_annual rows whose
+        annual_renewal_due_at lands inside the next 30-day window.
+      • projected_annual_revenue_if_all_renew — sum of each tier's
+        annual cents over every active patient + balance/grace +
+        renewal-window patient. Comp accounts (payment_method=manual)
+        excluded so MRR projections aren't inflated by test rows.
+    """
+    now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    in_30d = now + timedelta(days=30)
+
+    # All non-comp patients participate in the lifecycle metrics.
+    base_q = db.query(ConciergePatient).filter(
+        ConciergePatient.payment_method != "manual",
+    )
+
+    by_status: dict[str, int] = {}
+    for s in MembershipStatus:
+        by_status[s.value] = base_q.filter(ConciergePatient.membership_status == s).count()
+
+    # Conversion: # who reached active_annual / # who reached the
+    # balance phase OR active_annual. is_first_year=False is the
+    # canonical "completed at least one full year" signal because it
+    # only flips on remaining-balance payment.
+    completed_first_year = base_q.filter(ConciergePatient.is_first_year == False).count()  # noqa: E712
+    in_balance_funnel = (
+        by_status.get(MembershipStatus.BALANCE_INVOICE_SENT.value, 0)
+        + by_status.get(MembershipStatus.GRACE_PERIOD.value, 0)
+        + completed_first_year
+    )
+    conversion_rate = (
+        round(completed_first_year / in_balance_funnel, 4)
+        if in_balance_funnel > 0 else None
+    )
+
+    in_grace = (
+        by_status.get(MembershipStatus.BALANCE_INVOICE_SENT.value, 0)
+        + by_status.get(MembershipStatus.GRACE_PERIOD.value, 0)
+        + by_status.get(MembershipStatus.RENEWAL_INVOICE_SENT.value, 0)
+        + by_status.get(MembershipStatus.RENEWAL_GRACE_PERIOD.value, 0)
+    )
+
+    downgrades_this_month = base_q.filter(
+        ConciergePatient.membership_status == MembershipStatus.DOWNGRADED_ALACARTE,
+        ConciergePatient.downgraded_at.isnot(None),
+        ConciergePatient.downgraded_at >= month_start,
+    ).count()
+
+    upcoming_renewals = base_q.filter(
+        ConciergePatient.membership_status.in_([
+            MembershipStatus.ACTIVE_ANNUAL,
+            MembershipStatus.RENEWAL_INVOICE_SENT,
+            MembershipStatus.RENEWAL_GRACE_PERIOD,
+        ]),
+        ConciergePatient.annual_renewal_due_at.isnot(None),
+        ConciergePatient.annual_renewal_due_at >= now,
+        ConciergePatient.annual_renewal_due_at <= in_30d,
+    ).all()
+    upcoming_count = len(upcoming_renewals)
+
+    # Projected annual revenue if every non-downgraded patient renews
+    # at their tier's annual price. Includes monthly-trial patients on
+    # the assumption they'll convert (matches the conversion-rate
+    # numerator definition).
+    revenue_cents = 0
+    revenue_q = base_q.filter(
+        ConciergePatient.membership_status != MembershipStatus.DOWNGRADED_ALACARTE,
+    ).all()
+    for p in revenue_q:
+        tier = (p.membership_tier or "").lower()
+        revenue_cents += CONCIERGE_TIER_PRICING_CENTS.get(tier, {}).get("annual", 0)
+
+    return {
+        "ok": True,
+        "by_status": by_status,
+        "monthly_to_annual_conversion_rate": conversion_rate,
+        "patients_in_grace": in_grace,
+        "downgrades_this_month": downgrades_this_month,
+        "upcoming_renewals_next_30d": upcoming_count,
+        "upcoming_renewals_preview": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "tier": p.membership_tier,
+                "due_at": p.annual_renewal_due_at.isoformat() if p.annual_renewal_due_at else None,
+            }
+            for p in upcoming_renewals[:10]
+        ],
+        "projected_annual_revenue_cents": revenue_cents,
+    }
 
 
 # ─── Physician Dashboard (owner-only aggregated view) ────────────────────
