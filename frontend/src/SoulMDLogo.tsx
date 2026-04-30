@@ -94,6 +94,13 @@ const SoulMDLogo: React.FC<Props> = ({
           }}>
             <span style={{color: dark ? '#e8f0fc' : '#1a2a4a'}}>Soul</span>
             <span style={{color: '#7ab0f0'}}>MD</span>
+            <span style={{
+              fontSize: '0.45em',
+              verticalAlign: 'super',
+              color: 'inherit',
+              fontFamily: 'inherit',
+              letterSpacing: 0,
+            }}>™</span>
           </div>
           {subtitle && (
             <div style={{

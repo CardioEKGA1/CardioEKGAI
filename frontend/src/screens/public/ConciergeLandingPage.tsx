@@ -66,6 +66,20 @@ const TIERS: Tier[] = [
 ];
 
 // ───── Tiny shared building blocks ────────────────────────────────────
+
+// Superscript ™ that inherits color + font and won't break the type
+// scale of the surrounding word. Spec'd 0.45em superscript matches the
+// SoulMDLogo wordmark treatment.
+const TM: React.FC = () => (
+  <span style={{
+    fontSize: '0.45em',
+    verticalAlign: 'super',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    letterSpacing: 0,
+  }}>™</span>
+);
+
 const Eyebrow: React.FC<{children: React.ReactNode; light?: boolean}> = ({ children, light }) => (
   <div style={{
     fontFamily: SERIF,
@@ -85,7 +99,7 @@ const GoldRule: React.FC<{width?: number}> = ({ width = 40 }) => (
   }}/>
 );
 
-const PhotoPlaceholder: React.FC<{size?: number; label?: string}> = ({ size = 160, label = 'Dr. Anderson' }) => (
+const PhotoPlaceholder: React.FC<{size?: number; label?: string}> = ({ size = 160, label = 'N. Anderson, MD' }) => (
   <div style={{
     width: `${size}px`, height: `${size}px`,
     borderRadius:'50%',
@@ -155,7 +169,7 @@ const GoldOutlineButton: React.FC<{onClick?: () => void; href?: string; children
 // ───── Page ───────────────────────────────────────────────────────────
 const ConciergeLandingPage: React.FC<Props> = (_props) => {
   useEffect(() => {
-    document.title = 'SoulMD — Concierge Medicine by Dr. Neysi Anderson';
+    document.title = 'SoulMD™ — Concierge Medicine by N. Anderson, MD';
     // Smooth scroll for in-page anchors. Reset on unmount so other
     // screens (which may not opt-in) keep their default behavior.
     const prev = document.documentElement.style.scrollBehavior;
@@ -189,7 +203,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
         </div>
 
         <div style={{position:'relative', zIndex:1, textAlign:'center', maxWidth:'720px'}}>
-          <Eyebrow>Salt Lake City, Utah  ·  By Invitation</Eyebrow>
+          <Eyebrow>By Invitation</Eyebrow>
 
           <div style={{marginTop:'8px', marginBottom:'40px'}}>
             <PhotoPlaceholder size={160}/>
@@ -216,7 +230,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
             maxWidth:'480px',
             margin:'24px auto 0',
           }}>
-            Private concierge medicine by Dr. Neysi Anderson, board-certified Internal Medicine physician. Unhurried visits. Integrative care. Direct access to your doctor.
+            Private concierge medicine by N. Anderson, MD, board-certified Internal Medicine physician. Unhurried visits. Integrative care. Direct access to your doctor.
           </p>
 
           <div style={{
@@ -264,7 +278,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
               fontFamily: SANS, fontSize:'clamp(15px, 2vw, 17px)',
               lineHeight: 1.9, color: MUTED, margin:0,
             }}>
-              SoulMD integrates evidence-based Internal Medicine with integrative wellness — guided meditation, energy practices, and whole-person care — because healing is never just physical.
+              SoulMD<TM/> integrates evidence-based Internal Medicine with integrative wellness — guided meditation, energy practices, and whole-person care — because healing is never just physical.
             </p>
           </div>
         </div>
@@ -349,7 +363,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
             fontFamily: SANS, fontSize:'13px',
             color: MUTED, fontStyle:'italic',
           }}>
-            À la carte consultations available from $75. No long-term commitment required.
+            À la carte consultations available from $888. No long-term commitment required.
           </div>
         </div>
       </section>
@@ -368,7 +382,23 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
           alignItems:'center',
         }}>
           <div style={{textAlign:'center'}}>
-            <PhotoPlaceholder size={200}/>
+            <img
+              src="/images/dr-anderson.jpg"
+              alt="N. Anderson, MD"
+              style={{
+                width:'220px',
+                height:'220px',
+                objectFit:'cover',
+                objectPosition:'center top',
+                borderRadius:'50%',
+                border:`1.5px solid ${GOLD}`,
+                outline:'6px solid transparent',
+                // Double-ring gold effect: inner navy band (matching the
+                // section background), then a thin gold outer ring.
+                boxShadow:`0 0 0 8px ${BG_BASE}, 0 0 0 9.5px ${GOLD}`,
+                display:'block',
+              }}
+            />
           </div>
           <div>
             <Eyebrow light>Your Physician</Eyebrow>
@@ -377,36 +407,137 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
               fontWeight: 400, letterSpacing:'0.02em', color:'#FFFFFF',
               margin:'0 0 12px', lineHeight:1.25,
             }}>
-              Dr. Neysi Anderson, MD
+              N. Anderson, MD
             </h2>
             <div style={{
               fontFamily: SERIF, fontSize:'12px',
               letterSpacing:'0.15em', textTransform:'uppercase',
               color: GOLD, marginBottom:'28px',
             }}>
-              Board-Certified · Internal Medicine · Salt Lake City
+              Board-Certified · Internal Medicine
             </div>
+
+            {/* Pull quote — sets the emotional register before the bio. */}
+            <blockquote style={{
+              fontFamily: SERIF, fontStyle:'italic',
+              fontSize:'18px', color: GOLD,
+              lineHeight:1.5, margin:'0 0 28px',
+              padding:0, borderLeft:'none',
+            }}>
+              — Medicine trained my mind. Life taught me the rest. —
+            </blockquote>
+
             <p style={{
               fontFamily: SERIF, fontStyle:'italic',
               fontSize:'clamp(15px, 2vw, 17px)', lineHeight:1.9,
               color:'rgba(255,255,255,0.85)', margin:'0 0 18px',
             }}>
-              I built SoulMD because I believe medicine can be both rigorous and sacred. After years in traditional practice, I chose a different path — one where I know my patients deeply, have time to think clearly, and can integrate the full spectrum of healing.
+              Trained at the University of Utah and UC San Diego, N. Anderson, MD has practiced across more than ten states as a hospitalist physician — from academic medical centers to bedside acute care. She currently practices inpatient medicine with Intermountain Health.
             </p>
             <p style={{
               fontFamily: SERIF, fontStyle:'italic',
               fontSize:'clamp(15px, 2vw, 17px)', lineHeight:1.9,
               color:'rgba(255,255,255,0.85)', margin:'0 0 28px',
             }}>
-              This is not a clinic. It is a relationship.
+              With Divine Guidance, she opened SoulMD<TM/> — a private practice where board-certified medicine meets life coaching, energy healing, and the truth that everything is energy, and we have the power to heal ourselves.
+            </p>
+            <p style={{
+              fontFamily: SERIF, fontStyle:'italic',
+              fontSize:'19px', color: GOLD,
+              lineHeight:1.5, margin:'0 0 32px',
+              letterSpacing:'0.02em',
+            }}>
+              Sometimes, we just need a nudge.
             </p>
             <div style={{
               fontFamily: SERIF, fontStyle:'italic',
               fontSize:'18px', color: GOLD, letterSpacing:'0.02em',
+              marginTop:'32px',
             }}>
-              — Neysi Anderson, MD
+              — N. Anderson, MD
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ───── SECTION 5b — ABOUT ──────────────────────────────────── */}
+      <section style={{
+        background: BG_BASE,
+        padding:'clamp(80px, 12vw, 120px) clamp(20px,5vw,32px)',
+      }}>
+        <div style={{maxWidth:'720px', margin:'0 auto'}}>
+          <div style={{textAlign:'center', marginBottom:'48px'}}>
+            <Eyebrow>About</Eyebrow>
+            <h2 style={{
+              fontFamily: SERIF,
+              fontSize:'clamp(28px, 5vw, 38px)',
+              fontWeight: 400,
+              letterSpacing:'0.02em',
+              color: NAVY,
+              margin:'0 0 48px',
+              lineHeight: 1.25,
+            }}>
+              The Physician Behind SoulMD<TM/>
+            </h2>
+            <div aria-hidden style={{
+              width:'40px', height:'1px',
+              background: GOLD, margin:'0 auto',
+            }}/>
+          </div>
+
+          {/* Body — left-aligned for readability at narrative length. */}
+          <div style={{
+            fontFamily: SERIF,
+            fontSize:'clamp(15px, 2vw, 17px)',
+            lineHeight: 1.95,
+            color:'#4a5568',
+          }}>
+            <p style={{margin:'0 0 24px'}}>
+              N. Anderson, MD is a board-certified Internal Medicine physician whose path has been anything but ordinary.
+            </p>
+            <p style={{margin:'0 0 24px'}}>
+              She completed medical school at UNAN Managua prior to moving to the USA, where she had to start from scratch, eventually training for a second time at the University of Utah and her residency at the University of California, San Diego. She began her career as a hospitalist with UCHealth in Colorado, then expanded her practice across more than ten states through CompHealth, delivering acute inpatient care wherever she was called.
+            </p>
+            <p style={{margin:'0 0 24px'}}>
+              She currently continues that work with Intermountain Health — one of the nation's most respected health systems — where she practices acute medicine at the bedside every day.
+            </p>
+
+            {/* Pivot line — italic + serif + centered, signals the
+                turn from CV to calling. */}
+            <p style={{
+              fontFamily: SERIF, fontStyle:'italic',
+              fontSize:'clamp(17px, 2.4vw, 20px)',
+              color: NAVY, textAlign:'center',
+              margin:'40px 0',
+              letterSpacing:'0.01em',
+            }}>
+              And then there is the other calling.
+            </p>
+
+            <p style={{margin:'0 0 24px'}}>
+              With Divine Guidance, N. Anderson, MD was led to open SoulMD<TM/> Concierge — a private practice built on a belief she has carried her entire career: that healing is never purely physical. That the body, the mind, and the energy field are inseparable. That a physician who sees only the chart is missing the whole person in front of them.
+            </p>
+            <p style={{margin:'0 0 24px'}}>
+              SoulMD<TM/> is where those two worlds finally meet — evidence-based Internal Medicine, life coaching, and energy healing, held together by the conviction that everything is energy, and we have the power to heal ourselves.
+            </p>
+          </div>
+
+          {/* Closing pull quote — gold italic, gold left rule, faint
+              gold gradient wash. Caps the section. */}
+          <blockquote style={{
+            fontFamily: SERIF, fontStyle:'italic',
+            fontSize:'clamp(17px, 2.4vw, 20px)',
+            color: GOLD,
+            lineHeight: 1.6,
+            margin:'48px auto 0',
+            padding:'32px',
+            borderLeft:`2px solid ${GOLD}`,
+            background:`linear-gradient(to right, rgba(201,168,76,0.04), transparent)`,
+            textAlign:'left',
+            maxWidth:'560px',
+          }}>
+            Sometimes, we just need a nudge. And a doctor who believes that too.
+          </blockquote>
         </div>
       </section>
 
@@ -467,7 +598,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
             fontFamily: SERIF, fontSize:'12px', color: MUTED,
             letterSpacing:'0.04em',
           }}>
-            © 2026 SoulMD, LLC · Salt Lake City, UT
+            © 2026 SoulMD<TM/>, LLC
           </div>
           <div style={{justifySelf:'end'}}>
             <a href="/dashboard" style={{
