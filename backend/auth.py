@@ -24,8 +24,12 @@ def create_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def create_magic_token(email: str):
-    expire = datetime.utcnow() + timedelta(minutes=15)
+def create_magic_token(email: str, expires_minutes: int = 15):
+    """Magic-link sign-in token. Default 15-minute TTL for the
+    standard /auth/magic-link send. Concierge welcome links
+    (/concierge/patients/{id}/approve) pass a longer TTL so newly-
+    approved patients have a comfortable window to act on the email."""
+    expire = datetime.utcnow() + timedelta(minutes=expires_minutes)
     return jwt.encode({"sub": email, "purpose": "magic", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 def decode_token(token: str):

@@ -15,6 +15,8 @@ interface Patient {
   intake_data: IntakeData;
   doctor_notes: string;
   last_contact_at: string | null;
+  is_approved: boolean;
+  approved_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +61,10 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Patient | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [actingId, setActingId] = useState<number | null>(null);
+  const [actingMessage, setActingMessage] = useState<string>('');
+  const [revokeTarget, setRevokeTarget] = useState<Patient | null>(null);
+  const [declineTarget, setDeclineTarget] = useState<Patient | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -71,15 +77,76 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = useMemo(() => {
+  const { pending, active } = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return patients;
-    return patients.filter(p =>
+    const matches = (p: Patient) => !q || (
       p.name.toLowerCase().includes(q) ||
       p.email.toLowerCase().includes(q) ||
       (p.phone || '').toLowerCase().includes(q)
     );
+    return {
+      pending: patients.filter(p => !p.is_approved && matches(p)),
+      active:  patients.filter(p =>  p.is_approved && matches(p)),
+    };
   }, [patients, search]);
+
+  const flash = (msg: string) => {
+    setActingMessage(msg);
+    setTimeout(() => setActingMessage(''), 2500);
+  };
+
+  const approve = async (p: Patient) => {
+    setActingId(p.id);
+    try {
+      const res = await fetch(`${API}/concierge/patients/${p.id}/approve`, {
+        method:'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || 'Approve failed');
+      flash(`✓ Approved ${p.name || p.email} — welcome email sent.`);
+      load();
+    } catch (e: any) {
+      alert(e.message || 'Approve failed');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const revoke = async (p: Patient) => {
+    setActingId(p.id);
+    try {
+      const res = await fetch(`${API}/concierge/patients/${p.id}/revoke`, {
+        method:'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || 'Revoke failed');
+      flash(`Revoked ${p.name || p.email} — patient record retained.`);
+      setRevokeTarget(null);
+      load();
+    } catch (e: any) {
+      alert(e.message || 'Revoke failed');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const decline = async (p: Patient) => {
+    setActingId(p.id);
+    try {
+      const res = await fetch(`${API}/concierge/patients/${p.id}`, {
+        method:'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || 'Decline failed');
+      flash(`Declined ${p.name || p.email}.`);
+      setDeclineTarget(null);
+      load();
+    } catch (e: any) {
+      alert(e.message || 'Decline failed');
+    } finally {
+      setActingId(null);
+    }
+  };
 
   if (selected) {
     return <PatientDetail API={API} token={token} accent={accent} patient={selected} onClose={()=>{setSelected(null); load();}} onDeleted={()=>{setSelected(null); load();}}/>;
@@ -89,8 +156,13 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
     <div>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap', marginBottom:'14px'}}>
         <div>
-          <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a'}}>Patients</div>
-          <div style={{fontSize:'12px', color:'#4a7ad0'}}>{patients.length} total · {patients.filter(p=>p.membership_tier==='ascend').length} Ascend · {patients.filter(p=>p.membership_tier==='align').length} Align · {patients.filter(p=>p.membership_tier==='awaken').length} Awaken</div>
+          <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a'}}>Members</div>
+          <div style={{fontSize:'12px', color:'#4a7ad0'}}>
+            {pending.length} pending · {active.length} active
+            {active.length > 0 && (<>
+              {' '}· {active.filter(p=>p.membership_tier==='ascend').length} Ascend · {active.filter(p=>p.membership_tier==='align').length} Align · {active.filter(p=>p.membership_tier==='awaken').length} Awaken
+            </>)}
+          </div>
         </div>
         <button onClick={()=>setShowAdd(true)} style={{background:accent, border:'none', borderRadius:'12px', padding:'10px 18px', fontSize:'13px', fontWeight:700, color:'white', cursor:'pointer', whiteSpace:'nowrap'}}>+ Add patient</button>
       </div>
@@ -104,46 +176,179 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
       />
 
       {error && <div style={{background:'rgba(224,80,80,0.1)', border:'1px solid rgba(224,80,80,0.3)', borderRadius:'10px', padding:'10px 12px', color:'#a02020', fontSize:'12px', marginBottom:'12px'}}>{error}</div>}
+      {actingMessage && <div style={{background:'rgba(201,168,76,0.10)', border:'1px solid rgba(201,168,76,0.4)', borderRadius:'10px', padding:'10px 14px', color:'#7a5a10', fontSize:'12.5px', marginBottom:'12px', fontWeight:700}}>{actingMessage}</div>}
 
       {loading ? (
         <div style={{padding:'40px', textAlign:'center', color:'#4a7ad0', fontSize:'13px'}}>Loading patients…</div>
-      ) : filtered.length === 0 ? (
-        <div style={{...CARD, textAlign:'center', padding:'40px 20px', color:'#4a7ad0'}}>
-          <div style={{fontSize:'36px', marginBottom:'10px', opacity:0.4}}>👥</div>
-          <div style={{fontSize:'14px', fontWeight:700, color:'#1a2a4a', marginBottom:'4px'}}>{patients.length === 0 ? 'No patients yet' : 'No matches'}</div>
-          <div style={{fontSize:'12px'}}>{patients.length === 0 ? 'Add your first concierge patient to begin.' : 'Try a different search.'}</div>
-        </div>
       ) : (
-        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:'12px'}}>
-          {filtered.map(p => {
-            const tier = TIERS.find(t => t.id === p.membership_tier) || TIERS[0];
-            const last = p.last_contact_at ? new Date(p.last_contact_at) : null;
-            const joined = new Date(p.created_at);
-            return (
-              <button
-                key={p.id}
-                onClick={()=>setSelected(p)}
-                style={{...CARD, textAlign:'left', cursor:'pointer', fontFamily:'inherit'}}
-              >
-                <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px'}}>
-                  <div style={{fontSize:'15px', fontWeight:800, color:'#1a2a4a'}}>{p.name}</div>
-                  <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:`${tier.color}1a`, color:tier.color, fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap'}}>{tier.label}</span>
-                </div>
-                <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'8px', wordBreak:'break-all'}}>{p.email}</div>
-                <div style={{display:'flex', gap:'10px', flexWrap:'wrap', fontSize:'11px', color:'#4a7ad0'}}>
-                  <span>Joined {joined.toLocaleDateString()}</span>
-                  {last && <span>· Last contact {last.toLocaleDateString()}</span>}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        <>
+          {/* ───── Pending Requests ───── */}
+          <SectionHeader
+            label="Pending requests"
+            count={pending.length}
+            note="Approve to send welcome magic link · Decline to remove the request entirely."
+          />
+          {pending.length === 0 ? (
+            <div style={{...CARD, textAlign:'center', padding:'18px', color:'#7090a8', fontSize:'12.5px', fontStyle:'italic', marginBottom:'24px'}}>
+              No pending requests right now.
+            </div>
+          ) : (
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:'12px', marginBottom:'24px'}}>
+              {pending.map(p => {
+                const requested = new Date(p.created_at);
+                const busy = actingId === p.id;
+                return (
+                  <div key={p.id} style={{...CARD, borderColor:'rgba(201,168,76,0.45)', background:'linear-gradient(180deg, rgba(255,250,236,0.85), rgba(255,255,255,0.85))'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px', marginBottom:'6px'}}>
+                      <div style={{fontSize:'14px', fontWeight:800, color:'#1a2a4a', minWidth:0, wordBreak:'break-word'}}>{p.name || <span style={{color:'#A88830', fontStyle:'italic', fontWeight:600}}>(no name)</span>}</div>
+                      <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:'rgba(201,168,76,0.15)', color:'#7a5a10', fontWeight:800, letterSpacing:'0.6px', textTransform:'uppercase', whiteSpace:'nowrap'}}>Pending</span>
+                    </div>
+                    <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'10px', wordBreak:'break-all'}}>{p.email}</div>
+                    <div style={{fontSize:'11px', color:'#7090a8', marginBottom:'12px'}}>Requested {requested.toLocaleString()}</div>
+                    <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
+                      <button
+                        disabled={busy}
+                        onClick={()=>approve(p)}
+                        style={{
+                          background:'#C9A84C', border:'none', color:'white',
+                          borderRadius:'10px', padding:'8px 16px',
+                          fontSize:'12.5px', fontWeight:800, letterSpacing:'0.4px',
+                          cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1,
+                          fontFamily:'inherit', boxShadow:'0 4px 12px rgba(201,168,76,0.28)',
+                        }}>
+                        {busy ? 'Approving…' : 'Approve'}
+                      </button>
+                      <button
+                        disabled={busy}
+                        onClick={()=>setDeclineTarget(p)}
+                        style={{
+                          background:'transparent', border:'1px solid rgba(192,64,64,0.4)',
+                          color:'#c04040', borderRadius:'10px', padding:'8px 14px',
+                          fontSize:'12.5px', fontWeight:700, cursor: busy ? 'wait' : 'pointer',
+                          fontFamily:'inherit',
+                        }}>
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ───── Active Members ───── */}
+          <SectionHeader
+            label="Active members"
+            count={active.length}
+            note="Click a member to open their full record."
+          />
+          {active.length === 0 ? (
+            <div style={{...CARD, textAlign:'center', padding:'40px 20px', color:'#4a7ad0'}}>
+              <div style={{fontSize:'36px', marginBottom:'10px', opacity:0.4}}>👥</div>
+              <div style={{fontSize:'14px', fontWeight:700, color:'#1a2a4a', marginBottom:'4px'}}>{patients.length === 0 ? 'No members yet' : 'No active members match your search'}</div>
+              <div style={{fontSize:'12px'}}>{patients.length === 0 ? 'Add a patient and approve to begin.' : 'Try a different search.'}</div>
+            </div>
+          ) : (
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:'12px'}}>
+              {active.map(p => {
+                const tier = TIERS.find(t => t.id === p.membership_tier) || TIERS[0];
+                const last = p.last_contact_at ? new Date(p.last_contact_at) : null;
+                const approved = p.approved_at ? new Date(p.approved_at) : null;
+                const busy = actingId === p.id;
+                return (
+                  <div key={p.id} style={{...CARD}}>
+                    <button
+                      onClick={()=>setSelected(p)}
+                      style={{background:'transparent', border:'none', padding:0, textAlign:'left', cursor:'pointer', fontFamily:'inherit', width:'100%'}}>
+                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px', gap:'8px'}}>
+                        <div style={{fontSize:'15px', fontWeight:800, color:'#1a2a4a', minWidth:0, wordBreak:'break-word'}}>{p.name}</div>
+                        <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:`${tier.color}1a`, color:tier.color, fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap'}}>{tier.label}</span>
+                      </div>
+                      <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'8px', wordBreak:'break-all'}}>{p.email}</div>
+                      <div style={{display:'flex', gap:'10px', flexWrap:'wrap', fontSize:'11px', color:'#4a7ad0'}}>
+                        {approved && <span>Approved {approved.toLocaleDateString()}</span>}
+                        {last && <span>· Last contact {last.toLocaleDateString()}</span>}
+                      </div>
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={(e)=>{e.stopPropagation(); setRevokeTarget(p);}}
+                      style={{
+                        marginTop:'10px',
+                        background:'transparent', border:'1px solid rgba(112,144,168,0.35)',
+                        color:'#7090a8', borderRadius:'8px', padding:'6px 12px',
+                        fontSize:'11.5px', fontWeight:700,
+                        cursor: busy ? 'wait' : 'pointer', fontFamily:'inherit',
+                      }}>
+                      Revoke access
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {showAdd && <AddPatientModal API={API} token={token} accent={accent} onClose={()=>setShowAdd(false)} onCreated={()=>{setShowAdd(false); load();}}/>}
+
+      {revokeTarget && (
+        <ConfirmModal
+          title="Revoke patient access?"
+          body={<>This will block <b>{revokeTarget.name || revokeTarget.email}</b> from signing in to the patient portal. Their clinical record (messages, intake, notes, billing) is preserved and can be re-approved later.</>}
+          confirmLabel={actingId === revokeTarget.id ? 'Revoking…' : 'Revoke access'}
+          confirmStyle={{background:'#7090a8'}}
+          onCancel={()=>setRevokeTarget(null)}
+          onConfirm={()=>revoke(revokeTarget)}
+          busy={actingId === revokeTarget.id}
+        />
+      )}
+
+      {declineTarget && (
+        <ConfirmModal
+          title="Decline this request?"
+          body={<>This permanently removes the request from <b>{declineTarget.email}</b>. They will not be notified.</>}
+          confirmLabel={actingId === declineTarget.id ? 'Declining…' : 'Decline & remove'}
+          confirmStyle={{background:'#c04040'}}
+          onCancel={()=>setDeclineTarget(null)}
+          onConfirm={()=>decline(declineTarget)}
+          busy={actingId === declineTarget.id}
+        />
+      )}
     </div>
   );
 };
+
+const SectionHeader: React.FC<{label:string; count:number; note?:string}> = ({ label, count, note }) => (
+  <div style={{margin:'4px 0 10px'}}>
+    <div style={{display:'flex', alignItems:'baseline', gap:'10px'}}>
+      <div style={{fontSize:'13px', fontWeight:800, color:'#1a2a4a', letterSpacing:'0.6px', textTransform:'uppercase'}}>{label}</div>
+      <div style={{fontSize:'11px', color:'#7090a8', fontWeight:700}}>· {count}</div>
+    </div>
+    {note && <div style={{fontSize:'11.5px', color:'#7090a8', marginTop:'2px'}}>{note}</div>}
+  </div>
+);
+
+const ConfirmModal: React.FC<{
+  title: string;
+  body: React.ReactNode;
+  confirmLabel: string;
+  confirmStyle?: React.CSSProperties;
+  onCancel: ()=>void;
+  onConfirm: ()=>void;
+  busy?: boolean;
+}> = ({ title, body, confirmLabel, confirmStyle, onCancel, onConfirm, busy }) => (
+  <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>
+    <div style={{background:'white', borderRadius:'18px', padding:'24px', maxWidth:'420px', width:'100%', boxShadow:'0 16px 50px rgba(26,42,74,0.3)'}}>
+      <div style={{fontSize:'16px', fontWeight:800, color:'#1a2a4a', marginBottom:'8px'}}>{title}</div>
+      <div style={{fontSize:'13px', color:'#4a5e6a', marginBottom:'18px', lineHeight:1.6}}>{body}</div>
+      <div style={{display:'flex', gap:'10px', justifyContent:'flex-end'}}>
+        <button onClick={onCancel} disabled={busy} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
+        <button onClick={onConfirm} disabled={busy} style={{border:'none', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:700, color:'white', cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1, ...confirmStyle}}>{confirmLabel}</button>
+      </div>
+    </div>
+  </div>
+);
 
 // ───── Add Patient Modal ─────────────────────────────────────────────────────
 

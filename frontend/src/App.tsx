@@ -377,11 +377,12 @@ const App: React.FC = () => {
   // SoulMD user who happened to sign in here → send them to the clinical
   // dashboard instead.
   //
-  //   not enrolled           → /dashboard
-  //   superuser              → /concierge?view=patient (skip onboarding)
-  //   enrolled, no terms     → /patient/terms
-  //   enrolled, no intake    → /patient/intake
-  //   enrolled, fully done   → /concierge?view=patient
+  //   not enrolled                   → /dashboard
+  //   superuser                      → /concierge?view=patient (skip onboarding)
+  //   enrolled, not approved         → stay on /patient (form stays visible)
+  //   enrolled+approved, no terms    → /patient/terms
+  //   enrolled+approved, no intake   → /patient/intake
+  //   enrolled+approved, fully done  → /concierge?view=patient
   useEffect(() => {
     if (screen !== 'patient_login' || !user || !token) return;
     let cancelled = false;
@@ -393,11 +394,50 @@ const App: React.FC = () => {
         if (cancelled || !data) return;
         if (!data.enrolled)              { navigate('dashboard'); return; }
         if (data.is_superuser)           { window.location.href = '/concierge?view=patient'; return; }
+        // Approval gate: a concierge_patients row exists but Dr. Anderson
+        // hasn't approved (or has revoked) this patient. Surface the
+        // "access restricted" banner via the existing PatientLogin
+        // sessionStorage channel so they understand why they're stuck
+        // here. We do NOT navigate away — they're already on the right
+        // page.
+        if (!data.is_approved) {
+          try { sessionStorage.setItem('soulmd_patient_login_message', 'Access restricted to approved members.'); } catch {}
+          // Force a remount of PatientLogin so the banner reads
+          // sessionStorage again. Cheap: just nudge the URL hash.
+          if (window.location.hash !== '#restricted') {
+            window.location.hash = 'restricted';
+          }
+          return;
+        }
         if (!data.terms_accepted)        navigate('patient_terms');
         else if (!data.intake_completed) navigate('patient_intake');
         else                             window.location.href = '/concierge?view=patient';
       })
       .catch(() => { /* network blip — leave them on the page; they can retry */ });
+    return () => { cancelled = true; };
+  }, [screen, user, token, navigate]);
+
+  // Patient PWA route guard. /concierge with view=patient (or any
+  // non-owner accessing /concierge) must verify the user is still
+  // physician-approved before rendering. Owner bypasses entirely.
+  // Revoked patients get bounced back to /patient with a one-shot
+  // "Access restricted" banner.
+  useEffect(() => {
+    if (screen !== 'concierge' || !user || !token) return;
+    if (user.is_superuser) return;
+    let cancelled = false;
+    fetch(`${API}/concierge/patient/onboarding-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        if (!data.is_approved) {
+          try { sessionStorage.setItem('soulmd_patient_login_message', 'Access restricted to approved members.'); } catch {}
+          navigate('patient_login');
+        }
+      })
+      .catch(() => { /* leave them be on transient failure */ });
     return () => { cancelled = true; };
   }, [screen, user, token, navigate]);
 
@@ -510,7 +550,7 @@ const App: React.FC = () => {
         <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', color:'#8a6e50', fontSize:'14px'}}>Loading…</div>
       )}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
-      {screen==='patient_login' && !user && <PatientLogin API={API}/>}
+      {screen==='patient_login' && !user && <PatientLogin API={API} onRequestMembership={() => navigate('landing')}/>}
       {screen==='patient_terms' && token && (
         <PatientTerms
           API={API}

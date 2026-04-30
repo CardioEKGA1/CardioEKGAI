@@ -434,6 +434,10 @@ def _record_magic_link_send() -> None:
 class MagicLinkRequest(BaseModel):
     email: str
     is_clinician: bool | None = None
+    # Set by the /patient login screen so the magic-link endpoint can
+    # gate the send on physician-approved concierge enrollment. Other
+    # surfaces (general SoulMD/EKGScan sign-in) leave this unset.
+    is_patient_login: bool | None = None
 
 class TokenVerify(BaseModel):
     token: str
@@ -862,9 +866,9 @@ def _lookup_concierge_patient_for_user(user: User, db: Session) -> "ConciergePat
 
 def verify_concierge_member(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Allow access if the user is the practice owner OR has a ConciergePatient
-    row linked to their account. Used by the patient-app endpoints. Returns
-    a tuple-like object on the request state — the caller should use
-    concierge_role_for() to branch."""
+    row linked to their account AND that row is physician-approved. Used by
+    the patient-app endpoints. Returns the user object — the caller should
+    use concierge_role_for() to branch on owner vs patient."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
     if _is_concierge_owner(current_user):
@@ -872,6 +876,11 @@ def verify_concierge_member(current_user: User = Depends(get_current_user), db: 
     p = _lookup_concierge_patient_for_user(current_user, db)
     if not p:
         raise HTTPException(status_code=404, detail="Not found")
+    # Approval gate — revoked or never-approved patients lose PWA access
+    # without losing their clinical record. 403 not 404 because the row
+    # exists; the policy is the issue, not the resource.
+    if not bool(getattr(p, "is_approved", False)):
+        raise HTTPException(status_code=403, detail="Access restricted to approved members.")
     return current_user
 
 def check_and_update_spend(user, db):
@@ -970,6 +979,24 @@ def magic_link(request: Request, data: MagicLinkRequest, db: Session = Depends(g
         email_hash_candidates = hash_email_candidates(email)
         client_ip = request.client.host if request.client else ""
         ip_hash_v = hash_ip(client_ip)
+
+        # Concierge patient-portal gate. When the request originated from
+        # /patient (the patient PWA login screen), the email must belong
+        # to a physician-approved ConciergePatient row before we send a
+        # link. Owner/superuser bypasses unconditionally so Dr. Anderson
+        # can sign in to her own PWA. Failed gate: silent 200 + admin
+        # notification (never reveal whether the email exists).
+        if data.is_patient_login and not _is_superuser_email(email):
+            patient_row = db.query(ConciergePatient).filter(
+                func.lower(ConciergePatient.email) == email
+            ).first()
+            is_approved = bool(patient_row and getattr(patient_row, "is_approved", False))
+            if not is_approved:
+                _record_magic_link_send()  # count it so the rate cap applies
+                db.add(MagicLinkAttempt(email_hash=email_hash, ip_hash=ip_hash_v, is_new_account=False, was_blocked=False))
+                db.commit()
+                _notify_concierge_owner_of_access_request(email)
+                return {"message": "Check your email for a sign-in link."}
 
         # Per-email rate limit: 3 attempts / hour (silent cap to avoid revealing the limit)
         one_hour_ago = datetime.utcnow() - timedelta(hours=1)
@@ -3001,6 +3028,8 @@ def _patient_dict(p: ConciergePatient) -> dict:
         "last_contact_at": p.last_contact_at.isoformat() if p.last_contact_at else None,
         "terms_accepted_at": p.terms_accepted_at.isoformat() if getattr(p, "terms_accepted_at", None) else None,
         "intake_completed_at": p.intake_completed_at.isoformat() if getattr(p, "intake_completed_at", None) else None,
+        "is_approved": bool(getattr(p, "is_approved", False)),
+        "approved_at": p.approved_at.isoformat() if getattr(p, "approved_at", None) else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -3191,6 +3220,47 @@ def concierge_update_patient(
     db.commit()
     db.refresh(p)
     return _patient_dict(p)
+
+@app.patch("/concierge/patients/{patient_id}/approve")
+def concierge_approve_patient(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Stamp a concierge patient as physician-approved and email them
+    a 24-hour welcome magic link. Idempotent — re-approving a patient
+    re-sends the welcome link (useful if the first email was lost)."""
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    p.is_approved = True
+    if not p.approved_at:
+        p.approved_at = datetime.utcnow()
+    p.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(p)
+    _send_concierge_welcome_link(p.email, p.name)
+    return _patient_dict(p)
+
+
+@app.patch("/concierge/patients/{patient_id}/revoke")
+def concierge_revoke_patient(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Revoke a concierge patient's portal access. Keeps the patient
+    record (and all clinical history) intact — only flips the gate."""
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    p.is_approved = False
+    p.approved_at = None
+    p.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(p)
+    return _patient_dict(p)
+
 
 @app.delete("/concierge/patients/{patient_id}")
 def concierge_delete_patient(
@@ -4646,9 +4716,14 @@ def patient_onboarding_status(
     p = _lookup_concierge_patient_for_user(current_user, db)
     if not p and is_super:
         p = _get_or_create_patient_row(current_user, db)
+    # Owner is always considered approved; for everyone else, surface
+    # the row's actual approval state so App.tsx can route to either
+    # the patient PWA or the "access restricted" holding screen.
+    is_approved = bool(is_super or (p and getattr(p, "is_approved", False)))
     return {
         "enrolled": p is not None,
         "is_superuser": is_super,
+        "is_approved": is_approved,
         "terms_accepted": (p.terms_accepted_at is not None) if p else False,
         "intake_completed": (p.intake_completed_at is not None) if p else False,
     }
@@ -7406,6 +7481,70 @@ def _esc(s: str | None) -> str:
         return ""
     return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
               .replace("\"", "&quot;").replace("'", "&#39;").replace("\n", "<br>"))
+
+
+def _notify_concierge_owner_of_access_request(email: str) -> None:
+    """Fired when a non-approved email tries to sign in via /patient.
+    Tells Dr. Anderson someone's knocking; she can then add + approve
+    them from the dashboard Members tab. Best-effort — never raises."""
+    try:
+        _send_anderson_notification(
+            subject="New Patient Access Request — SoulMD Concierge",
+            body_html=(
+                f'<div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a2a4a;line-height:1.7">'
+                f'  <h2 style="margin:0 0 14px;font-size:18px">New Patient Access Request</h2>'
+                f'  <p style="margin:0 0 14px;font-size:13.5px;color:#3a4a6a">A prospective patient requested access to the SoulMD Concierge patient portal.</p>'
+                f'  <p style="margin:6px 0;font-size:13.5px"><b>Email:</b> <a href="mailto:{_esc(email)}" style="color:#534AB7">{_esc(email)}</a></p>'
+                f'  <p style="margin:6px 0;font-size:13.5px"><b>Time:</b> {_now_stamp()}</p>'
+                f'  <p style="margin:18px 0 6px;font-size:13.5px">To approve this patient, visit:</p>'
+                f'  <p style="margin:0 0 18px;font-size:13.5px"><a href="https://soulmd.us/concierge" style="color:#C9A84C;font-weight:700;text-decoration:none">soulmd.us/concierge → Members tab</a></p>'
+                f'  <p style="margin:24px 0 0;font-size:11px;color:#8aa0c0">— SoulMD System</p>'
+                f'</div>'
+            ),
+        )
+    except Exception as e:
+        print(f"access-request notification failed: {e}")
+
+
+def _send_concierge_welcome_link(patient_email: str, patient_name: str | None) -> None:
+    """Sends the welcome magic link to a freshly approved concierge
+    patient. Plain text leaning, single navy CTA — keeps the
+    'sacred, personal' tone the brief asked for. Best-effort."""
+    if not SENDGRID_API_KEY:
+        print(f"SendGrid disabled — skipping welcome link for {patient_email}")
+        return
+    try:
+        first = (patient_name or "").strip().split()[0] if patient_name else ""
+        salutation = f"Dear {_esc(first or patient_name or 'friend')}"
+        # 24-hour TTL per concierge welcome-email spec (vs the 15-min
+        # default used by the public /auth/magic-link sender).
+        token = create_magic_token(patient_email, expires_minutes=60 * 24)
+        link = f"https://soulmd.us/?token={token}"
+        html = (
+            f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
+            f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
+            f'  <h1 style="font-size:22px;font-weight:400;letter-spacing:0.02em;color:#1a2a4a;margin:0 0 22px">Welcome — your access is ready.</h1>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">{salutation},</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dr. Anderson has approved your access to the SoulMD Concierge patient portal.</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 28px">Click below to sign in:</p>'
+            f'  <p style="margin:0 0 28px"><a href="{link}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Enter the Portal</a></p>'
+            f'  <p style="font-size:13px;color:#6B7280;margin:0 0 28px;font-style:italic">This link expires in 24 hours.</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 4px">With care,</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 2px;font-style:italic">Dr. Neysi Anderson</p>'
+            f'  <p style="font-size:12px;color:#6B7280;margin:0">SoulMD Concierge Medicine</p>'
+            f'</div>'
+        )
+        msg = Mail(
+            from_email=FROM_EMAIL,
+            to_emails=patient_email,
+            subject="Welcome to SoulMD Concierge — Your Access is Ready",
+            html_content=html,
+        )
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
+        sg.send(msg)
+    except Exception as e:
+        print(f"concierge welcome link failed for {patient_email}: {e}")
 
 
 # Hoisted out of the f-strings below so the expression part stays free of

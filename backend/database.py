@@ -137,6 +137,13 @@ class ConciergePatient(Base):
     # completes the intake form at /patient/{terms,intake}.
     terms_accepted_at = Column(DateTime, nullable=True)
     intake_completed_at = Column(DateTime, nullable=True)
+    # Physician-approval gate: a patient row may exist (created by the owner
+    # via /concierge/patients OR provisioned from a /patient sign-in
+    # request) but the patient cannot receive a magic link or reach the
+    # patient PWA until is_approved=True. Approval also stamps approved_at
+    # and triggers the welcome magic-link email.
+    is_approved = Column(Boolean, default=False, index=True)
+    approved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -508,6 +515,18 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS test_account BOOLEAN DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP"))
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS intake_completed_at TIMESTAMP"))
+        # Physician-approval gate. Existing rows default to FALSE; the
+        # owner approves new patients from the dashboard Members tab.
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_is_approved ON concierge_patients(is_approved)"))
+        # Pre-approve the test patient so dev sign-in continues to work
+        # uninterrupted. Idempotent — only stamps approved_at if NULL.
+        conn.execute(text(
+            "UPDATE concierge_patients "
+            "SET is_approved = TRUE, approved_at = COALESCE(approved_at, NOW()) "
+            "WHERE LOWER(email) = 'spicymolecule@gmail.com'"
+        ))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_test_account ON concierge_patients(test_account)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_customer_id ON concierge_patients(stripe_customer_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_subscription_id ON concierge_patients(stripe_subscription_id)"))

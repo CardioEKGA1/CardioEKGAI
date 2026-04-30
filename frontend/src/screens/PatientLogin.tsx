@@ -1,30 +1,49 @@
 // © 2026 SoulMD, LLC. All rights reserved.
-// /patient — patient-branded sign-in. Sends a magic link and stashes a
-// post-auth redirect to /patient so the onboarding gate in App.tsx can
-// route through Terms → Intake → Patient PWA after the round-trip.
+// /patient — patient-branded sign-in. Submits the magic-link request
+// with is_patient_login=true so the backend can gate the send on
+// physician approval (and silently notify Dr. Anderson when an
+// unapproved email tries). Whether or not a link is actually sent,
+// we always show the same neutral "Request Received" holding card —
+// the page never reveals account state. A separate banner is shown
+// when App.tsx redirects an authed-but-revoked patient back here.
 import React, { useEffect, useState } from 'react';
 import SoulMDLogo from '../SoulMDLogo';
 import { PATIENT_BG, NAVY, PURPLE, PURPLE_SOFT, SERIF, SparkleLayer, SparkleDivider } from './patient/shared';
 
-interface Props { API: string; }
+interface Props { API: string; onRequestMembership?: () => void; }
 
 // The onboarding gate lives at /patient (see App.tsx) — it reads the
 // onboarding status and routes to /patient/terms, /patient/intake, or
 // /concierge?view=patient as appropriate.
 const POST_AUTH_REDIRECT = '/patient';
+// App.tsx writes this when it boots an authed-but-unapproved patient
+// off the PWA. PatientLogin reads + clears it on mount.
+const RESTRICTED_KEY = 'soulmd_patient_login_message';
 
-const PatientLogin: React.FC<Props> = ({ API }) => {
+const GOLD = '#C9A84C';
+const GOLD_DEEP = '#A88830';
+const NAVY_DARK = '#1a2a4a';
+const MUTED = '#6B7280';
+
+const PatientLogin: React.FC<Props> = ({ API, onRequestMembership }) => {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
+  const [restrictedMessage, setRestrictedMessage] = useState('');
 
   // Stash the post-auth destination as soon as this screen mounts so the
-  // redirect survives the magic-link round-trip. handleAuth reads
-  // sessionStorage first; localStorage is the longer-lived fallback.
+  // redirect survives the magic-link round-trip.
   useEffect(() => {
     try { sessionStorage.setItem('soulmd_post_auth_redirect', POST_AUTH_REDIRECT); } catch {}
     try { localStorage.setItem('post_auth_redirect', POST_AUTH_REDIRECT); } catch {}
+    try {
+      const msg = sessionStorage.getItem(RESTRICTED_KEY);
+      if (msg) {
+        setRestrictedMessage(msg);
+        sessionStorage.removeItem(RESTRICTED_KEY);
+      }
+    } catch {}
   }, []);
 
   const submit = async () => {
@@ -34,19 +53,30 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
     try {
       try { sessionStorage.setItem('soulmd_post_auth_redirect', POST_AUTH_REDIRECT); } catch {}
       try { localStorage.setItem('post_auth_redirect', POST_AUTH_REDIRECT); } catch {}
-      const res = await fetch(`${API}/auth/magic-link`, {
+      // is_patient_login=true tells the backend to apply the
+      // physician-approval gate. Unapproved emails get a silent 200
+      // (we still flip to the holding card) and Dr. Anderson is
+      // notified out-of-band so she can approve the request.
+      await fetch(`${API}/auth/magic-link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: trimmed }),
+        body: JSON.stringify({ email: trimmed, is_patient_login: true }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || 'Could not send sign-in link.');
+      // Always flip to the holding card — never reveal whether the
+      // email was approved, rate-limited, or unknown.
       setSent(true);
     } catch (e: any) {
-      setError(e.message || 'Could not send sign-in link.');
+      // Network/CORS errors only — backend errors are intentionally
+      // squashed into 200s so we never leak account state.
+      setError('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const goRequestMembership = () => {
+    if (onRequestMembership) onRequestMembership();
+    else window.location.href = '/';
   };
 
   const canSubmit = !!email.trim();
@@ -70,19 +100,66 @@ const PatientLogin: React.FC<Props> = ({ API }) => {
 
           <SparkleDivider/>
 
+          {restrictedMessage && !sent && (
+            <div style={{
+              width:'100%', marginBottom:'16px',
+              background:'rgba(201,168,76,0.08)',
+              border:`1px solid ${GOLD}`,
+              borderRadius:'14px',
+              padding:'14px 16px',
+              textAlign:'center',
+              fontFamily: SERIF, fontStyle:'italic',
+              fontSize:'13.5px', color: NAVY_DARK, lineHeight:1.6,
+            }}>
+              {restrictedMessage}
+            </div>
+          )}
+
           <div style={{width:'100%', background:'rgba(255,255,255,0.78)', backdropFilter:'blur(14px)', WebkitBackdropFilter:'blur(14px)', borderRadius:'22px', padding:'28px 24px', boxShadow:'0 20px 40px rgba(83,74,183,0.12)', border:'0.5px solid rgba(255,255,255,0.9)'}}>
             {sent ? (
               <div style={{textAlign:'center', padding:'8px 0 4px'}}>
-                <div style={{fontSize:'34px', marginBottom:'6px'}}>✨</div>
-                <div style={{fontFamily: SERIF, fontSize:'22px', fontWeight:600, color: NAVY, marginBottom:'10px'}}>Check your email for your sign-in link</div>
-                <div style={{fontSize:'13px', color: PURPLE_SOFT, lineHeight:1.6}}>
-                  We sent a sign-in link to <b style={{color: NAVY}}>{email.trim()}</b>. The link expires in 15 minutes.
+                <div style={{
+                  fontFamily: SERIF, fontSize:'28px', color: GOLD,
+                  marginBottom:'10px', letterSpacing:'0.04em',
+                }}>✦</div>
+                <div style={{
+                  fontFamily: SERIF, fontSize:'22px', fontWeight:600,
+                  color: NAVY_DARK, marginBottom:'14px', letterSpacing:'0.02em',
+                }}>
+                  Request Received
+                </div>
+                <div style={{
+                  fontFamily: SERIF, fontSize:'14px',
+                  color: NAVY_DARK, lineHeight:1.85, opacity:0.85,
+                  maxWidth:'320px', margin:'0 auto',
+                }}>
+                  If your email is associated with an active SoulMD membership, you'll receive a sign-in link within minutes.
+                </div>
+                <div style={{
+                  margin:'24px auto 4px', height:'1px', width:'40px',
+                  background: GOLD,
+                }}/>
+                <div style={{
+                  marginTop:'18px',
+                  fontFamily: SERIF, fontSize:'13px',
+                  color: MUTED, lineHeight:1.7,
+                }}>
+                  New to SoulMD? →
                 </div>
                 <button
-                  onClick={() => { setSent(false); setEmail(''); setError(''); }}
-                  style={{marginTop:'22px', background:'transparent', border:`0.5px solid ${PURPLE}40`, color: PURPLE, borderRadius:'12px', padding:'10px 18px', fontSize:'12px', fontWeight:700, cursor:'pointer', fontFamily:'inherit'}}
-                >
-                  Use a different email
+                  onClick={goRequestMembership}
+                  style={{
+                    marginTop:'12px',
+                    background:'transparent',
+                    border:`1px solid ${GOLD}`,
+                    color: GOLD_DEEP,
+                    fontFamily: SERIF,
+                    fontSize:'13px', letterSpacing:'0.08em',
+                    textTransform:'uppercase', fontWeight:600,
+                    padding:'12px 24px', borderRadius:'2px',
+                    cursor:'pointer',
+                  }}>
+                  Request Membership
                 </button>
               </div>
             ) : (
