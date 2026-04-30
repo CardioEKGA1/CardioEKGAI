@@ -129,6 +129,37 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", "support@soulmd.us")
 # email footer, error message, and contact link — never the practice
 # owner's private address. Override per environment via Railway env.
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@soulmd.us").strip() or "support@soulmd.us"
+
+# ─── Concierge billing — 3-month-trial → annual policy ────────────────
+# Per-tier monthly rate, annual rate, and the one-time remaining-balance
+# Stripe price ID for year-1 patients who completed three monthly
+# payments. Amounts in cents. Annual = monthly_3 + remaining, by spec.
+# Edit only at the source of truth — every webhook/cron/email path
+# reads from these two dicts so the math stays consistent.
+CONCIERGE_TIER_PRICING_CENTS = {
+    "awaken": {"monthly":   44400, "annual":  500000, "remaining_after_3mo":  366800},
+    "align":  {"monthly":   88800, "annual": 1000000, "remaining_after_3mo":  733600},
+    "ascend": {"monthly":  111100, "annual": 1300000, "remaining_after_3mo":  966700},
+}
+
+def _stripe_price_remaining(tier: str) -> str:
+    """Returns the live Stripe one-time price ID for the remaining-balance
+    invoice on a given tier. Reads STRIPE_PRICE_CONCIERGE_<TIER>_REMAINING
+    from env (set by the operator after running the seeder). Empty string
+    when unset — callers must check before invoking Stripe."""
+    return _clean_env(os.getenv(f"STRIPE_PRICE_CONCIERGE_{tier.upper()}_REMAINING", ""))
+
+def _tier_label(tier: str) -> str:
+    return {"awaken": "Awaken", "align": "Align", "ascend": "Ascend"}.get((tier or "").lower(), (tier or "").title())
+
+def _fmt_dollars(cents: int) -> str:
+    """$1,234 (whole-dollar) or $1,234.56 (with cents) — matches the
+    pricing-page typographic style. Not used for monthly tier prices
+    (they're never broken)."""
+    if cents % 100 == 0:
+        return f"${cents // 100:,}"
+    return f"${cents/100:,.2f}"
+
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 SUPERUSER_EMAIL = os.getenv("SUPERUSER_EMAIL", "").strip().lower()
 # Multi-email superuser list. Any of these emails is treated as
