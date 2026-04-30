@@ -8263,6 +8263,7 @@ def job_secret_ping(x_job_secret: str | None = Header(default=None)):
             "oracle-morning",
             "oracle-evening",
             "reset-visit-counters",
+            "membership-lifecycle",
         ],
     }
 
@@ -8435,6 +8436,251 @@ def job_appointment_reminders(
             "t_plus_2h":   len(appts_followup),
         },
     }
+
+
+@app.post("/internal/jobs/membership-lifecycle")
+def job_membership_lifecycle(
+    x_job_secret: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """3-month-trial → annual lifecycle sweep. Designed to be hit every
+    15 minutes (cron-job.org → POST /internal/jobs/membership-lifecycle
+    with X-Job-Secret: $CRON_SECRET).
+
+    Idempotent: each warning fires at most once per window via dedicated
+    timestamp checks. Each downgrade fires at most once via membership_
+    status transition.
+
+    Sweeps:
+      1. Existing-patient catch-up: active_monthly + created_at > 90d ago
+         and monthly_payment_count >= 3 → trigger remaining-balance flow
+         immediately (matches webhook behavior so live patients past the
+         policy date don't sit indefinitely).
+      2. Balance-due warnings: 7 / 3 / 1 day before remaining_balance_due_at.
+      3. Balance-due expired: grace_period_end < now AND status ∈
+         {balance_invoice_sent, grace_period} → DOWNGRADED_ALACARTE.
+      4. Renewal warnings (year 2+): 30 / 14 / 7 / 1 day before
+         annual_renewal_due_at. The 30-day mark also opens the window
+         (sets renewal_invoice_sent_at + status RENEWAL_INVOICE_SENT).
+      5. Renewal expired: annual_renewal_due_at + 14d < now AND status ∈
+         {renewal_invoice_sent, renewal_grace_period} → DOWNGRADED_ALACARTE.
+    """
+    _require_job_secret(x_job_secret)
+    now = datetime.utcnow()
+    counters = {
+        "balance_triggered_existing": 0,
+        "balance_warnings_sent": 0,
+        "balance_downgrades": 0,
+        "renewal_invoices_opened": 0,
+        "renewal_warnings_sent": 0,
+        "renewal_downgrades": 0,
+    }
+
+    # ── 1. Existing-patient catch-up ──────────────────────────────────
+    # Patients enrolled before the policy was wired who already have
+    # >= 3 monthly payments on the books. Trigger the balance flow now.
+    # We trust monthly_payment_count if non-zero, else fall back to
+    # "created_at older than 90 days" as the heuristic per spec option (a).
+    candidates = db.query(ConciergePatient).filter(
+        ConciergePatient.membership_status == MembershipStatus.ACTIVE_MONTHLY,
+        ConciergePatient.is_first_year == True,  # noqa: E712
+        ConciergePatient.payment_method != "manual",  # comp accounts skip the policy
+    ).all()
+    for p in candidates:
+        already_three = (p.monthly_payment_count or 0) >= 3
+        old_enough = p.created_at and (now - p.created_at).days >= 90
+        if not (already_three or old_enough):
+            continue
+        tier = (p.membership_tier or "").lower()
+        if tier not in {"awaken", "align", "ascend"}:
+            continue
+        try:
+            _transition_to_balance_invoice(p, tier, db)
+            counters["balance_triggered_existing"] += 1
+        except Exception as e:
+            print(f"[lifecycle] existing-patient balance trigger failed for #{p.id}: {e}")
+
+    # ── 2. Balance-due warnings (7 / 3 / 1) ───────────────────────────
+    # Stamps a per-window flag in intake_data.balance_warnings_sent so
+    # we never re-email the same window. Cron at 15-min cadence means
+    # we hit each day at most ~96 times; the dedup is essential.
+    pending = db.query(ConciergePatient).filter(
+        ConciergePatient.membership_status.in_([MembershipStatus.BALANCE_INVOICE_SENT, MembershipStatus.GRACE_PERIOD]),
+        ConciergePatient.remaining_balance_due_at.isnot(None),
+    ).all()
+    for p in pending:
+        days_left = (p.remaining_balance_due_at - now).days
+        if days_left < 0:
+            continue
+        # Round-up so a 6.4-day-remaining patient counts as 7 in the
+        # first window they cross.
+        # Window mapping: send at exactly 7, 3, 1 day boundaries. We
+        # send when days_left is in {7,3,1} AND that window hasn't been
+        # marked sent.
+        if days_left not in (7, 3, 1):
+            continue
+        sent = set((p.intake_data or {}).get("balance_warnings_sent") or [])
+        key = f"d{days_left}"
+        if key in sent:
+            continue
+        tier = (p.membership_tier or "").lower()
+        url = (p.intake_data or {}).get("remaining_balance_checkout_url") or ""
+        if tier not in {"awaken", "align", "ascend"} or not url:
+            continue
+        try:
+            _send_balance_warning_email(p, tier, days_left, url)
+            sent.add(key)
+            data = dict(p.intake_data or {})
+            data["balance_warnings_sent"] = sorted(sent)
+            p.intake_data = data
+            p.updated_at = now
+            db.commit()
+            counters["balance_warnings_sent"] += 1
+        except Exception as e:
+            print(f"[lifecycle] balance warning failed for #{p.id} d{days_left}: {e}")
+
+    # ── 3. Balance-due expired → DOWNGRADED_ALACARTE ──────────────────
+    expired = db.query(ConciergePatient).filter(
+        ConciergePatient.membership_status.in_([MembershipStatus.BALANCE_INVOICE_SENT, MembershipStatus.GRACE_PERIOD]),
+        ConciergePatient.grace_period_end.isnot(None),
+        ConciergePatient.grace_period_end < now,
+    ).all()
+    for p in expired:
+        tier = (p.membership_tier or "").lower()
+        try:
+            p.membership_status = MembershipStatus.DOWNGRADED_ALACARTE
+            p.downgraded_at = now
+            p.updated_at = now
+            db.commit()
+            if tier in {"awaken", "align", "ascend"}:
+                _send_downgrade_email(p, tier)
+            _send_anderson_notification(
+                subject=f"Patient downgraded → à la carte: {p.name or p.email}",
+                body_html=(
+                    f'<div style="font-family:-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:20px;color:#1a2a4a;line-height:1.7">'
+                    f'<h2 style="margin:0 0 12px;font-size:17px">Membership downgrade</h2>'
+                    f'<p style="margin:6px 0;font-size:13px"><b>Patient:</b> {_esc(p.name)} &lt;{_esc(p.email)}&gt;</p>'
+                    f'<p style="margin:6px 0;font-size:13px"><b>Tier was:</b> {_esc(p.membership_tier or "—")}</p>'
+                    f'<p style="margin:6px 0;font-size:13px"><b>Reason:</b> Remaining balance not paid within 14-day grace.</p>'
+                    f'<p style="margin:6px 0;font-size:13px"><b>Stamped:</b> {_now_stamp()}</p>'
+                    f'</div>'
+                ),
+            )
+            counters["balance_downgrades"] += 1
+        except Exception as e:
+            print(f"[lifecycle] balance downgrade failed for #{p.id}: {e}")
+
+    # ── 4. Renewal invoice + warnings (year 2+) ───────────────────────
+    annuals = db.query(ConciergePatient).filter(
+        ConciergePatient.membership_status.in_([MembershipStatus.ACTIVE_ANNUAL, MembershipStatus.RENEWAL_INVOICE_SENT, MembershipStatus.RENEWAL_GRACE_PERIOD]),
+        ConciergePatient.annual_renewal_due_at.isnot(None),
+        ConciergePatient.payment_method != "manual",
+    ).all()
+    for p in annuals:
+        days_left = (p.annual_renewal_due_at - now).days
+        tier = (p.membership_tier or "").lower()
+        if tier not in {"awaken", "align", "ascend"}:
+            continue
+        # 30-day mark opens the renewal window if not already opened.
+        if days_left <= 30 and p.membership_status == MembershipStatus.ACTIVE_ANNUAL and not p.renewal_invoice_sent_at:
+            try:
+                # Build a renewal Checkout Session for the full annual price.
+                price_id_full_annual = _stripe_price_full_annual(tier)
+                if stripe.api_key and price_id_full_annual:
+                    session = stripe.checkout.Session.create(
+                        mode="payment",
+                        line_items=[{"price": price_id_full_annual, "quantity": 1}],
+                        customer=p.stripe_customer_id or None,
+                        customer_email=None if p.stripe_customer_id else p.email,
+                        client_reference_id=str(p.id),
+                        success_url="https://soulmd.us/patient?renewed=1",
+                        cancel_url="https://soulmd.us/patient",
+                        metadata={
+                            "concierge_kind": "annual_renewal",
+                            "concierge_patient_id": str(p.id),
+                            "concierge_tier": tier,
+                        },
+                    )
+                    url = session.url
+                else:
+                    url = ""
+                p.membership_status = MembershipStatus.RENEWAL_INVOICE_SENT
+                p.renewal_invoice_sent_at = now
+                # Renewal grace = 14 days AFTER renewal date.
+                p.grace_period_end = p.annual_renewal_due_at + timedelta(days=14)
+                data = dict(p.intake_data or {})
+                if url:
+                    data["renewal_checkout_url"] = url
+                data["renewal_warnings_sent"] = []
+                p.intake_data = data
+                p.updated_at = now
+                db.commit()
+                if url:
+                    _send_renewal_invoice_email(p, tier, url)
+                counters["renewal_invoices_opened"] += 1
+            except Exception as e:
+                print(f"[lifecycle] renewal open failed for #{p.id}: {e}")
+
+        # Renewal warnings at 14 / 7 / 1 days.
+        if p.membership_status in (MembershipStatus.RENEWAL_INVOICE_SENT, MembershipStatus.RENEWAL_GRACE_PERIOD) and days_left in (14, 7, 1) and days_left >= 0:
+            sent = set((p.intake_data or {}).get("renewal_warnings_sent") or [])
+            key = f"d{days_left}"
+            if key in sent:
+                continue
+            url = (p.intake_data or {}).get("renewal_checkout_url") or ""
+            if not url:
+                continue
+            try:
+                _send_renewal_warning_email(p, tier, days_left, url)
+                sent.add(key)
+                data = dict(p.intake_data or {})
+                data["renewal_warnings_sent"] = sorted(sent)
+                p.intake_data = data
+                p.updated_at = now
+                db.commit()
+                counters["renewal_warnings_sent"] += 1
+            except Exception as e:
+                print(f"[lifecycle] renewal warning failed for #{p.id} d{days_left}: {e}")
+
+    # ── 5. Renewal expired → DOWNGRADED_ALACARTE ──────────────────────
+    overdue = db.query(ConciergePatient).filter(
+        ConciergePatient.membership_status.in_([MembershipStatus.RENEWAL_INVOICE_SENT, MembershipStatus.RENEWAL_GRACE_PERIOD]),
+        ConciergePatient.grace_period_end.isnot(None),
+        ConciergePatient.grace_period_end < now,
+    ).all()
+    for p in overdue:
+        tier = (p.membership_tier or "").lower()
+        try:
+            p.membership_status = MembershipStatus.DOWNGRADED_ALACARTE
+            p.downgraded_at = now
+            p.updated_at = now
+            db.commit()
+            if tier in {"awaken", "align", "ascend"}:
+                _send_downgrade_email(p, tier)
+            _send_anderson_notification(
+                subject=f"Patient downgraded → à la carte (renewal lapse): {p.name or p.email}",
+                body_html=(
+                    f'<div style="font-family:-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:20px;color:#1a2a4a;line-height:1.7">'
+                    f'<h2 style="margin:0 0 12px;font-size:17px">Renewal lapsed</h2>'
+                    f'<p style="margin:6px 0;font-size:13px"><b>Patient:</b> {_esc(p.name)} &lt;{_esc(p.email)}&gt;</p>'
+                    f'<p style="margin:6px 0;font-size:13px"><b>Tier was:</b> {_esc(p.membership_tier or "—")}</p>'
+                    f'<p style="margin:6px 0;font-size:13px"><b>Stamped:</b> {_now_stamp()}</p>'
+                    f'</div>'
+                ),
+            )
+            counters["renewal_downgrades"] += 1
+        except Exception as e:
+            print(f"[lifecycle] renewal downgrade failed for #{p.id}: {e}")
+
+    return {"ok": True, **counters}
+
+
+def _stripe_price_full_annual(tier: str) -> str:
+    """Reads the existing recurring-yearly Stripe price ID for the tier,
+    set by the original seed_stripe.py run. Env var name pattern:
+    STRIPE_PRICE_CONCIERGE_<TIER>_YEARLY (matches the seeder's
+    capitalization). Returns "" when unset."""
+    return _clean_env(os.getenv(f"STRIPE_PRICE_CONCIERGE_{tier.upper()}_YEARLY", ""))
 
 
 @app.post("/internal/jobs/reset-visit-counters")
