@@ -9801,6 +9801,30 @@ def _send_concierge_payment_link(
         print(f"concierge payment link failed for {email}: {e}")
 
 
+def _send_concierge_signin_link(patient_email: str, patient_name: str | None) -> None:
+    """Returning-patient magic link. Shorter 15-minute TTL than the
+    welcome link so a stolen email gives a smaller window of access.
+    Same warm tone, simpler copy ('welcome back')."""
+    if not SENDGRID_API_KEY:
+        print(f"SendGrid disabled — skipping sign-in link for {patient_email}")
+        return
+    try:
+        first = _first_name(patient_name)
+        token = create_magic_token(patient_email, expires_minutes=15)
+        link = f"https://soulmd.us/?token={token}&rt=/patient"
+        body = (
+            f'  <p style="font-size:15px;margin:0 0 14px">Welcome back. Your portal access link is below — it expires in 15 minutes for your security.</p>'
+            f'  <p style="margin:0 0 24px"><a href="{link}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Enter the Portal</a></p>'
+        )
+        _concierge_send(
+            patient_email,
+            "Your SoulMD Concierge sign-in link",
+            _concierge_email_shell(f"Dear {_esc(first)}", body),
+        )
+    except Exception as e:
+        print(f"concierge signin link failed for {patient_email}: {e}")
+
+
 def _send_concierge_welcome_link(patient_email: str, patient_name: str | None) -> None:
     """Sends the welcome magic link to a freshly approved concierge
     patient. Plain text leaning, single navy CTA — keeps the
@@ -10199,6 +10223,153 @@ def _strip_html(s: str | None, max_len: int = 4000) -> str:
     out = re.sub(r"<[^>]*>", "", s)            # strip tags
     out = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", out)  # control chars (keep \t \n \r)
     return out.strip()[:max_len]
+
+
+# ───── Returning-patient sign-in (Patient Sign In on landing) ─────────
+# Public endpoint that the top-right "Patient Sign In" pill on the
+# landing page posts an email to. Routes by ConciergePatient state
+# WITHOUT ever revealing whether the email exists in the clinical-suite
+# user table — the response shape is intentionally generic so an
+# attacker can't enumerate accounts. All five branches log to the
+# existing ConciergeInquiryLog table for abuse monitoring.
+
+class _ConciergeSigninRequest(BaseModel):
+    email: str
+    # Honeypot + timing — same shape as the inquiry form so the bot
+    # protections apply uniformly to every public POST.
+    website: str | None = None
+    form_loaded_at_ms: int | None = None
+
+
+_SIGNIN_RATE_PER_HOUR = 3
+def _signin_rate_limited(db: Session, email: str, ip: str) -> bool:
+    """Magic-link request cap: 3 per email per hour OR 3 per IP per
+    hour, whichever fires first. Counts past attempts (any outcome)
+    via ConciergeInquiryLog rows tagged with detail='signin'."""
+    cutoff = datetime.utcnow() - timedelta(hours=1)
+    eh = _email_hash(email)
+    if eh:
+        n_email = db.query(ConciergeInquiryLog).filter(
+            ConciergeInquiryLog.email_hash == eh,
+            ConciergeInquiryLog.outcome == "signin_request",
+            ConciergeInquiryLog.created_at >= cutoff,
+        ).count()
+        if n_email >= _SIGNIN_RATE_PER_HOUR:
+            return True
+    if ip:
+        n_ip = db.query(ConciergeInquiryLog).filter(
+            ConciergeInquiryLog.ip_address == ip,
+            ConciergeInquiryLog.outcome == "signin_request",
+            ConciergeInquiryLog.created_at >= cutoff,
+        ).count()
+        if n_ip >= _SIGNIN_RATE_PER_HOUR:
+            return True
+    return False
+
+
+@app.post("/concierge-medicine/signin")
+def public_concierge_signin(
+    data: _ConciergeSigninRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Five-state response, all 200s with a `code` field so the
+    frontend can render the right UX without leaking which state the
+    email is in via HTTP status. Sends the magic link only on the
+    success states (active_*, balance_invoice_sent, grace_period,
+    downgraded_alacarte) per spec."""
+    email_raw = (data.email or "").strip()
+    email = _normalize_email(email_raw)
+
+    # Honeypot + timing — silent fake-success so bots can't probe.
+    if (data.website or "").strip():
+        _log_inquiry_attempt(db, request, email, "honeypot", "signin/website")
+        return {"ok": True, "code": "link_sent"}
+    if data.form_loaded_at_ms is not None:
+        try:
+            now_ms = int(datetime.utcnow().timestamp() * 1000)
+            if now_ms - int(data.form_loaded_at_ms) < 3000:
+                _log_inquiry_attempt(db, request, email, "honeypot", "signin/too_fast")
+                return {"ok": True, "code": "link_sent"}
+        except (TypeError, ValueError):
+            pass
+
+    ok, _ = _validate_email_strict(email)
+    if not ok:
+        _log_inquiry_attempt(db, request, email, "invalid_email", "signin")
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+
+    ip = _client_ip(request)
+    if _signin_rate_limited(db, email, ip):
+        _log_inquiry_attempt(db, request, email, "rate_limited", "signin")
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again in an hour.")
+
+    p = db.query(ConciergePatient).filter(
+        func.lower(ConciergePatient.email) == email
+    ).first()
+
+    # Always log the attempt before branching so the rate limiter sees
+    # this request even on the no-account branch.
+    def _log_signin(outcome_detail: str) -> None:
+        try:
+            db.add(ConciergeInquiryLog(
+                email_hash=_email_hash(email) or None,
+                ip_address=ip or None,
+                user_agent=(request.headers.get("user-agent") or "")[:500] or None,
+                outcome="signin_request",
+                detail=outcome_detail[:200],
+            ))
+            db.commit()
+        except Exception as e:
+            print(f"signin log write failed: {e}")
+
+    # 1. No ConciergePatient row → no account.
+    if not p:
+        _log_signin("no_account")
+        return {"ok": True, "code": "no_account"}
+
+    # 2. Pending physician approval (row exists, is_approved=False).
+    if not bool(getattr(p, "is_approved", False)):
+        _log_signin("pending_review")
+        return {"ok": True, "code": "pending_review"}
+
+    # 3. Inactive — no Stripe sub AND not a manual/comp account.
+    sub_status = (p.subscription_status or "").lower()
+    is_manual  = (getattr(p, "payment_method", "stripe") or "stripe") == "manual"
+    has_active_sub = sub_status in {"active", "past_due", "trialing"} or is_manual
+    if not has_active_sub:
+        _log_signin("inactive")
+        return {"ok": True, "code": "payment_required"}
+
+    # 4 + 5. Active states (active_monthly, active_annual,
+    # balance_invoice_sent, grace_period, downgraded_alacarte) → send
+    # the magic link. RENEWAL_INVOICE_SENT and RENEWAL_GRACE_PERIOD
+    # also count as active for portal access purposes.
+    try:
+        ms = p.membership_status
+        ms_value = ms.value if hasattr(ms, "value") else (ms or "")
+    except Exception:
+        ms_value = ""
+    portal_ok = ms_value in {
+        MembershipStatus.ACTIVE_MONTHLY.value,
+        MembershipStatus.ACTIVE_ANNUAL.value,
+        MembershipStatus.BALANCE_INVOICE_SENT.value,
+        MembershipStatus.GRACE_PERIOD.value,
+        MembershipStatus.DOWNGRADED_ALACARTE.value,
+        MembershipStatus.RENEWAL_INVOICE_SENT.value,
+        MembershipStatus.RENEWAL_GRACE_PERIOD.value,
+        "",  # legacy patients pre-lifecycle migration default in
+    }
+    if not portal_ok:
+        # Defensive — should be unreachable since we cover every enum
+        # state above. Treated as inactive so we don't email someone
+        # in an unknown state.
+        _log_signin(f"unknown_state:{ms_value}")
+        return {"ok": True, "code": "payment_required"}
+
+    _log_signin("link_sent")
+    _send_concierge_signin_link(p.email, p.name)
+    return {"ok": True, "code": "link_sent"}
 
 
 @app.post("/concierge-medicine/inquire")

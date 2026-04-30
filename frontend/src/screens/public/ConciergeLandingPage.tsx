@@ -274,8 +274,38 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
     }
   };
 
+  // Patient Sign In modal state. Lives at the page level so the
+  // top-right pill can open it from anywhere without prop drilling.
+  const [signinOpen, setSigninOpen] = useState(false);
+
   return (
     <div style={{background: BG_BASE, color: NAVY, fontFamily: SANS, lineHeight: 1.8}}>
+      {/* Patient Sign In — fixed top-right pill. Opal outline so it
+          doesn't compete with primary CTAs. Hover fills with opal,
+          text stays navy. */}
+      <button
+        onClick={() => setSigninOpen(true)}
+        style={{
+          position:'fixed', top:'clamp(14px, 2.5vw, 22px)',
+          right:'clamp(14px, 2.5vw, 22px)', zIndex: 1000,
+          background:'rgba(255,255,255,0.85)',
+          border:`1px solid ${OPAL}`,
+          color: NAVY,
+          fontFamily: SANS, fontSize:'13px', fontWeight: 600,
+          letterSpacing:'0.02em',
+          padding:'9px 18px', borderRadius:'999px',
+          cursor:'pointer', backdropFilter:'blur(8px)',
+          transition:'background-color 180ms ease, color 180ms ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = OPAL; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.85)'; }}
+      >
+        Patient Sign In
+      </button>
+      {signinOpen && (
+        <PatientSigninModal API={API} onClose={() => setSigninOpen(false)} onScrollToTiers={scrollToTiers}/>
+      )}
+
       {/* ───── SECTION 1 — HERO ────────────────────────────────────── */}
       <section style={{
         position:'relative',
@@ -1383,6 +1413,219 @@ const FlipInput: React.FC<{
     {errorText && <span style={{fontSize:'10.5px', color:'#a02020', marginTop:'2px', textTransform:'none', letterSpacing:0, fontWeight:400}}>{errorText}</span>}
   </label>
 );
+
+// ───── Patient Sign In modal ──────────────────────────────────────────
+// Triggered by the fixed top-right pill on the landing page. Posts the
+// email to /concierge-medicine/signin which returns one of five `code`
+// values; we render the matching warm message for each. The endpoint
+// itself never reveals whether the email exists in the clinical-suite
+// User table (separate gate) — only whether it has a ConciergePatient
+// row in a portal-eligible state.
+const PatientSigninModal: React.FC<{
+  API: string;
+  onClose: () => void;
+  onScrollToTiers: () => void;
+}> = ({ API, onClose, onScrollToTiers }) => {
+  const [email, setEmail] = useState('');
+  const [website, setWebsite] = useState('');                  // honeypot
+  const [loadedAt] = useState<number>(() => Date.now());
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<string>('');            // success | no_account | pending_review | payment_required | error
+  const [errMsg, setErrMsg] = useState('');
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    setErrMsg('');
+    if (!email.trim() || !email.includes('@')) {
+      setErrMsg('Please enter a valid email address.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API}/concierge-medicine/signin`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          email: email.trim(),
+          website,
+          form_loaded_at_ms: loadedAt,
+        }),
+      });
+      const d = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        setErrMsg(d.detail || 'Could not send sign-in link.');
+      } else {
+        setResult(d.code || 'link_sent');
+      }
+    } catch {
+      setErrMsg('Network error — please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Body content per result state. Each is keyed off the backend code.
+  const Body: React.FC = () => {
+    if (result === 'link_sent') {
+      return (
+        <div style={{textAlign:'center', padding:'8px 4px'}}>
+          <div style={{fontFamily: SERIF, fontSize:'28px', color: GOLD, marginBottom:'14px'}}>✦</div>
+          <div style={{fontFamily: SERIF, fontSize:'17px', color: NAVY, lineHeight:1.55, marginBottom:'18px'}}>
+            Check your email — your link is on the way. ✨
+          </div>
+          <button onClick={onClose} style={signinSecondaryBtnStyle}>Close</button>
+        </div>
+      );
+    }
+    if (result === 'no_account') {
+      return (
+        <div style={{textAlign:'center', padding:'4px 0'}}>
+          <div style={{fontFamily: SERIF, fontSize:'17px', color: NAVY, lineHeight:1.6, marginBottom:'14px'}}>
+            It looks like you don't have an account yet.
+          </div>
+          <div style={{fontFamily: SANS, fontSize:'13px', color: MUTED, lineHeight:1.65, marginBottom:'20px'}}>
+            Choose a membership to get started.
+          </div>
+          <button
+            onClick={() => { onClose(); setTimeout(onScrollToTiers, 80); }}
+            style={signinPrimaryBtnStyle}
+          >
+            View Membership Tiers
+          </button>
+        </div>
+      );
+    }
+    if (result === 'pending_review') {
+      return (
+        <div style={{textAlign:'center', padding:'4px 0'}}>
+          <div style={{fontFamily: SERIF, fontSize:'17px', color: NAVY, lineHeight:1.6, marginBottom:'14px'}}>
+            Your application is being reviewed.
+          </div>
+          <div style={{fontFamily: SANS, fontSize:'13px', color: MUTED, lineHeight:1.65, marginBottom:'18px'}}>
+            Dr. Anderson will be in touch personally.<br/>
+            Questions? <a href="mailto:support@soulmd.us" style={{color: NAVY, fontWeight:600}}>support@soulmd.us</a>
+          </div>
+          <button onClick={onClose} style={signinSecondaryBtnStyle}>Close</button>
+        </div>
+      );
+    }
+    if (result === 'payment_required') {
+      return (
+        <div style={{textAlign:'center', padding:'4px 0'}}>
+          <div style={{fontFamily: SERIF, fontSize:'17px', color: NAVY, lineHeight:1.6, marginBottom:'14px'}}>
+            Please complete your membership payment to access your portal.
+          </div>
+          <button
+            onClick={() => { onClose(); setTimeout(onScrollToTiers, 80); }}
+            style={signinPrimaryBtnStyle}
+          >
+            View Membership Tiers
+          </button>
+        </div>
+      );
+    }
+    return (
+      <form onSubmit={submit} style={{display:'flex', flexDirection:'column', gap:'14px'}}>
+        <div style={{textAlign:'center'}}>
+          <div style={{fontFamily: SERIF, fontSize:'24px', fontWeight: 400, color: NAVY, letterSpacing:'0.01em', marginBottom:'4px'}}>
+            Welcome Back
+          </div>
+          <div style={{fontFamily: SANS, fontSize:'13px', color: MUTED, lineHeight:1.6}}>
+            Enter your email to receive a sign-in link.
+          </div>
+        </div>
+        <input
+          type="email" autoComplete="email" required
+          value={email} onChange={e => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          style={{
+            width:'100%', padding:'12px 14px',
+            border:`1px solid ${OPAL}`, borderRadius:'4px',
+            background:'#FFFFFF', fontSize:'14px', color: NAVY,
+            outline:'none', boxSizing:'border-box', fontFamily: SANS,
+          }}
+        />
+        {/* Honeypot (off-screen) */}
+        <div aria-hidden style={{position:'absolute', left:'-9999px', width:'1px', height:'1px', overflow:'hidden'}}>
+          <input type="text" tabIndex={-1} autoComplete="off" value={website} onChange={e => setWebsite(e.target.value)}/>
+        </div>
+        {errMsg && (
+          <div style={{background:'rgba(224,80,80,0.08)', border:'1px solid rgba(224,80,80,0.3)', borderRadius:'2px', padding:'8px 10px', color:'#a02020', fontSize:'12px'}}>
+            {errMsg}
+          </div>
+        )}
+        <button
+          type="submit" disabled={submitting}
+          style={{
+            ...signinPrimaryBtnStyle,
+            cursor: submitting ? 'wait' : 'pointer',
+            opacity: submitting ? 0.7 : 1,
+          }}
+        >
+          {submitting ? 'Sending…' : 'Send My Link'}
+        </button>
+      </form>
+    );
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position:'fixed', inset:0, zIndex:2000,
+        background:'rgba(20,15,40,0.45)', backdropFilter:'blur(6px)',
+        display:'flex', alignItems:'center', justifyContent:'center',
+        padding:'16px',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          position:'relative', overflow:'hidden',
+          background:'#FFFFFF',
+          borderRadius:'4px',
+          padding:'40px 32px 32px',
+          width:'100%', maxWidth:'440px',
+          border:`1px solid ${OPAL}`,
+          boxShadow:'0 24px 60px rgba(20,15,40,0.18)',
+        }}
+      >
+        {/* Cho Ku Rei watermark sits behind the form content. */}
+        <div aria-hidden style={{position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)', opacity:0.04, pointerEvents:'none'}}>
+          <ChoKuRei size={360} color={NAVY} opacity={1}/>
+        </div>
+        <button
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position:'absolute', top:'14px', right:'16px',
+            background:'transparent', border:'none', color: MUTED,
+            fontSize:'22px', cursor:'pointer', lineHeight:1, padding:0,
+            fontFamily: SERIF,
+          }}
+        >×</button>
+        <div style={{position:'relative', zIndex:1}}>
+          <Body/>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const signinPrimaryBtnStyle: React.CSSProperties = {
+  width:'100%', padding:'13px 18px',
+  background:'#1a2a4a', color:'#FFFFFF',
+  fontFamily: 'Georgia, serif', fontSize:'12px',
+  letterSpacing:'0.1em', textTransform:'uppercase',
+  border:'none', borderRadius:'2px', cursor:'pointer',
+};
+const signinSecondaryBtnStyle: React.CSSProperties = {
+  background:'transparent', border:'none', padding:'8px 12px',
+  fontFamily:'Georgia, serif', fontSize:'12px',
+  letterSpacing:'0.08em', textTransform:'uppercase',
+  color:'#1a2a4a', cursor:'pointer',
+};
+
 
 // ───── Bottom-of-page disclaimers ─────────────────────────────────────
 // Last block on the page, below the legal footer. Quiet legal/footnote
