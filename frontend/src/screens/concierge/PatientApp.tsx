@@ -7,6 +7,7 @@ import ChoKuRei from './ChoKuRei';
 import { ensureOracleKeyframes } from './OracleCard';
 import EnergyLog from './EnergyLog';
 import MeditationPlayer from './MeditationPlayer';
+import PatientOnboarding from './PatientOnboarding';
 import CoachingModuleReader from './CoachingModuleReader';
 import OracleDailyCard from './OracleDailyCard';
 import PostMeditationJournal from './PostMeditationJournal';
@@ -131,7 +132,43 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
   // plumbing below is kept disabled so we can flip it back on for a future
   // ritual-mode experience without another refactor.
 
-  if (loading) return <LoadingShell/>;
+  // 6-step onboarding gate. Owner/superuser bypasses entirely (otherwise
+  // testing the PWA forces them through the flow on every fresh login).
+  // We poll the dedicated full-status endpoint which surfaces consents
+  // signed + intake submitted + onboarding completion timestamp.
+  const [onboardingState, setOnboardingState] = useState<{
+    loaded: boolean; needsOnboarding: boolean; signedConsents: string[]; intakeSubmitted: boolean;
+  }>({ loaded: false, needsOnboarding: false, signedConsents: [], intakeSubmitted: false });
+  const reloadOnboarding = useCallback(() => {
+    fetch(`${API}/concierge/patient/onboarding-full-status`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) { setOnboardingState({ loaded: true, needsOnboarding: false, signedConsents: [], intakeSubmitted: false }); return; }
+        const skip = !!d.is_superuser || !!d.onboarding_completed;
+        setOnboardingState({
+          loaded: true,
+          needsOnboarding: !skip,
+          signedConsents: d.consents_signed || [],
+          intakeSubmitted: !!d.intake_submitted,
+        });
+      })
+      .catch(() => setOnboardingState({ loaded: true, needsOnboarding: false, signedConsents: [], intakeSubmitted: false }));
+  }, [API, token]);
+  useEffect(() => { reloadOnboarding(); }, [reloadOnboarding]);
+
+  if (loading || !onboardingState.loaded) return <LoadingShell/>;
+
+  if (onboardingState.needsOnboarding) {
+    return (
+      <PatientOnboarding
+        API={API} token={token}
+        patientName={patient?.name || ''}
+        signedConsents={onboardingState.signedConsents}
+        intakeAlreadySubmitted={onboardingState.intakeSubmitted}
+        onComplete={reloadOnboarding}
+      />
+    );
+  }
 
   return (
     <div style={{position:'relative', minHeight:'100vh', background: BG_GRADIENT, fontFamily:'-apple-system,BlinkMacSystemFont,system-ui,sans-serif', paddingBottom:'calc(76px + env(safe-area-inset-bottom, 0px))'}}>
@@ -464,224 +501,292 @@ const QuickTile: React.FC<{icon:string; label:string; onClick:()=>void; tint:str
   </button>
 );
 
-// ───── BOOK TAB ─────────────────────────────────────────────────────────────
+// ───── BOOK TAB — request → physician confirms ─────────────────────────────
+//
+// Request-based scheduling: patient submits up to 3 preferred times; Dr.
+// Anderson confirms one of them (or counter-proposes) from the physician
+// dashboard. No open calendar; no real-time availability.
 
-type Service = 'medical_visit' | 'guided_meditation' | 'urgent_same_day';
-const SERVICES: {id: Service; label: string; icon: string; color: string; price: string}[] = [
-  { id: 'medical_visit',     label: 'Medical Visit',      icon: '🩺', color: TEAL,  price: 'Included or $300' },
-  { id: 'guided_meditation', label: 'Guided Meditation',  icon: '🧘', color: ROSE,  price: 'Included or $44' },
-  { id: 'urgent_same_day',   label: 'Urgent Same-Day',    icon: '⚡', color: DEEPP, price: '$444 (Ascend free)' },
-];
-
-interface Booking { id: number; service_type: string; starts_at: string; duration_min: number; status: string; notes: string; }
+interface SessionType { id: number; slug: string; name: string; duration_minutes: number; tier_required: string | null; is_async: boolean; }
+interface SessionRequestPayload {
+  id: number; status: string; created_at: string;
+  session_type: { id: number; slug: string; name: string; duration_minutes: number } | null;
+  preferred_times: string[]; patient_note: string;
+  physician_response_note: string;
+  counter_proposed_time: string | null;
+  confirmed_appointment_id: number | null;
+  confirmed_time: string | null;
+  zoom_join_url: string | null;
+}
+interface PatientSession {
+  id: number; starts_at: string; duration_min: number; appointment_type: string;
+  status: string; zoom_join_url: string | null;
+  canceled_at: string | null; canceled_within_window: boolean;
+  completed_at: string | null; no_showed_at: string | null;
+}
 
 const BookTab: React.FC<{API:string; token:string; patient:PatientPayload|null; onChanged?:()=>void}> = ({ API, token, patient, onChanged }) => {
-  const [service, setService] = useState<Service>('medical_visit');
-  const [weekStart, setWeekStart] = useState(() => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    d.setDate(d.getDate() + diff);
-    d.setHours(0,0,0,0);
-    return d;
-  });
-  const [activeDayIdx, setActiveDayIdx] = useState<number>(() => {
-    const t = new Date(); const wd = t.getDay();
-    // Snap to Mon-Fri only; if weekend, default to Monday.
-    if (wd === 0 || wd === 6) return 0;
-    return wd - 1;
-  });
-  const [pending, setPending] = useState<{day: Date; label: string; hour:number; min:number} | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [confirmed, setConfirmed] = useState<Booking | null>(null);
-  const [error, setError] = useState('');
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [showCancelTarget, setShowCancelTarget] = useState<PatientSession | null>(null);
+  const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
+  const [requests, setRequests] = useState<SessionRequestPayload[]>([]);
+  const [sessions, setSessions] = useState<PatientSession[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const weekDays = useMemo(() =>
-    Array.from({length:5}).map((_, i) => {
-      const d = new Date(weekStart); d.setDate(d.getDate() + i); return d;
-    }), [weekStart]);
-
-  const SLOTS = useMemo(() => {
-    const arr: {label:string; hour:number; min:number}[] = [];
-    for (let h = 8; h < 20; h++) for (const m of [0, 30]) {
-      const hh = h % 12 === 0 ? 12 : h % 12;
-      const ap = h < 12 ? 'AM' : 'PM';
-      arr.push({ label: `${hh}:${m.toString().padStart(2,'0')} ${ap}`, hour: h, min: m });
-    }
-    return arr;
-  }, []);
-
-  const loadBookings = useCallback(() => {
-    fetch(`${API}/concierge/me/bookings`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : { bookings: [] })
-      .then(d => setBookings(d.bookings || []))
-      .catch(() => {});
+  const load = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      fetch(`${API}/concierge/session-types`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { session_types: [] }),
+      fetch(`${API}/concierge/patient/session-requests`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { session_requests: [] }),
+      fetch(`${API}/concierge/patient/sessions`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { sessions: [] }),
+    ]).then(([t, r, s]) => {
+      setSessionTypes(t.session_types || []);
+      setRequests(r.session_requests || []);
+      setSessions(s.sessions || []);
+    }).finally(() => setLoading(false));
   }, [API, token]);
-  useEffect(() => { loadBookings(); }, [loadBookings]);
+  useEffect(() => { load(); }, [load]);
 
-  const svcMeta = SERVICES.find(s => s.id === service)!;
-  const allowanceLine =
-    service === 'guided_meditation' && patient ? `${patient.meditations_used} of ${patient.meditations_allowed} meditations used` :
-    service === 'medical_visit'     && patient ? `${patient.visits_used} of ${patient.visits_allowed} visits used` :
-    'Urgent same-day is à la carte unless you\'re on Ascend.';
+  const now = Date.now();
+  const upcoming = sessions.filter(s => s.status === 'scheduled' && s.starts_at && new Date(s.starts_at).getTime() > now);
+  const past     = sessions.filter(s => s.status !== 'scheduled' || (s.starts_at && new Date(s.starts_at).getTime() <= now));
+  const pendingRequests = requests.filter(r => r.status === 'pending' || r.status === 'counter_proposed');
 
-  const confirm = async () => {
-    if (!pending) return;
-    setError(''); setSaving(true);
+  const submitCancel = async (forfeit: boolean) => {
+    if (!showCancelTarget) return;
     try {
-      const starts = new Date(pending.day);
-      starts.setHours(pending.hour, pending.min, 0, 0);
-      const res = await fetch(`${API}/concierge/me/bookings`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
-        body: JSON.stringify({ service_type: service, starts_at: starts.toISOString(), duration_min: 30 }),
+      await fetch(`${API}/concierge/patient/sessions/${showCancelTarget.id}/cancel`, {
+        method:'POST', headers: { Authorization: `Bearer ${token}` },
       });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.detail || 'Booking failed');
-      setConfirmed(d); setPending(null);
-      loadBookings();
-      onChanged && onChanged();
-    } catch (e: any) { setError(e.message); }
-    finally { setSaving(false); }
+    } catch {}
+    setShowCancelTarget(null);
+    load();
+    onChanged && onChanged();
   };
 
   return (
     <div>
-      <div style={{padding:'18px 4px 8px 4px'}}>
-        <div style={{fontSize:'22px', fontWeight:800, color:DEEPP}}>Book a session</div>
-        <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'4px'}}>Mon–Fri, 8 AM – 8 PM MST. Confirmations arrive by secure message within minutes.</div>
-      </div>
-
-      <div style={{display:'flex', gap:'8px', overflowX:'auto', padding:'2px 0 10px 0', marginBottom:'10px'}}>
-        {SERVICES.map(s => {
-          const active = service === s.id;
-          return (
-            <button key={s.id} onClick={() => setService(s.id)}
-              style={{
-                flexShrink:0, padding:'8px 14px', borderRadius:'999px',
-                border: active ? `1px solid ${s.color}` : '1px solid rgba(107,78,124,0.18)',
-                background: active ? `${s.color}1f` : 'rgba(255,255,255,0.7)',
-                color: active ? s.color : DEEPP, fontSize:'12px', fontWeight: active ? 800 : 600,
-                cursor:'pointer', fontFamily:'inherit',
-              }}>
-              {s.icon} {s.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <Card style={{marginBottom:'12px'}}>
-        <Label>This cycle</Label>
-        <div style={{fontSize:'13px', color:DEEPP, marginTop:'4px'}}>{allowanceLine}</div>
-        <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'4px'}}>{svcMeta.price}</div>
-      </Card>
-
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px'}}>
-        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); }} style={navBtn}>← Prev</button>
-        <div style={{fontSize:'12px', color:DEEPP, fontWeight:700}}>
-          Week of {weekStart.toLocaleDateString(undefined, {month:'short', day:'numeric'})}
+      <div style={{padding:'18px 4px 8px 4px', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'12px'}}>
+        <div>
+          <div style={{fontSize:'22px', fontWeight:800, color:DEEPP}}>Sessions</div>
+          <div style={{fontSize:'12px', color:DEEPP, opacity:0.7, marginTop:'4px'}}>Request a session and Dr. Anderson will personally confirm.</div>
         </div>
-        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); }} style={navBtn}>Next →</button>
+        <button onClick={()=>setShowRequestModal(true)} style={{...solidBtn, padding:'10px 16px', fontSize:'12.5px'}}>+ Request a Session</button>
       </div>
 
-      <div style={{display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'6px', marginBottom:'12px'}}>
-        {weekDays.map((d, i) => {
-          const active = activeDayIdx === i;
-          return (
-            <button key={d.toISOString()} onClick={() => setActiveDayIdx(i)}
-              style={{
-                textAlign:'center', padding:'10px 4px',
-                background: active ? `linear-gradient(135deg, ${TEAL}33, ${PRIMARY})` : 'rgba(255,255,255,0.6)',
-                borderRadius:'12px',
-                border: active ? `1px solid ${TEAL}` : '1px solid rgba(107,78,124,0.12)',
-                cursor:'pointer', fontFamily:'inherit',
-              }}>
-              <div style={{fontSize:'10px', color:DEEPP, opacity:0.65, letterSpacing:'1px', textTransform:'uppercase', fontWeight:700}}>{d.toLocaleDateString(undefined, {weekday:'short'})}</div>
-              <div style={{fontSize:'18px', color:DEEPP, fontWeight:800, marginTop:'2px'}}>{d.getDate()}</div>
-            </button>
-          );
-        })}
-      </div>
+      {loading && <Card style={{padding:'20px', textAlign:'center', color:DEEPP, opacity:0.7}}>Loading…</Card>}
 
-      <Card>
-        <Label>Available slots · {weekDays[activeDayIdx]?.toLocaleDateString(undefined, {weekday:'long', month:'short', day:'numeric'})}</Label>
-        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(86px,1fr))', gap:'6px', marginTop:'10px'}}>
-          {SLOTS.map(s => (
-            <button key={s.label}
-              onClick={() => setPending({ day: weekDays[activeDayIdx], label: s.label, hour: s.hour, min: s.min })}
-              style={{
-                background: PRIMARY, border:`1px solid ${TEAL}55`, color: DEEPP,
-                borderRadius:'10px', padding:'10px 6px', fontSize:'12px', fontWeight:700, cursor:'pointer',
-                fontFamily:'inherit',
-              }}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'12px', lineHeight:1.5, textAlign:'center'}}>
-          Slots reflect the calendar — Dr. Anderson will confirm and send a secure video link before your session.
-        </div>
-      </Card>
-
-      {/* Upcoming bookings */}
-      {bookings.length > 0 && (
-        <Card style={{marginTop:'12px'}}>
-          <Label>Your upcoming sessions</Label>
+      {!loading && pendingRequests.length > 0 && (
+        <Card style={{marginBottom:'12px'}}>
+          <Label>Pending</Label>
           <div style={{display:'flex', flexDirection:'column', gap:'8px', marginTop:'10px'}}>
-            {bookings.slice(0, 6).map(b => {
-              const meta = SERVICES.find(s => s.id === b.service_type);
-              return (
-                <div key={b.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 12px', background:'rgba(255,255,255,0.65)', borderRadius:'12px', border:'1px solid rgba(107,78,124,0.1)'}}>
-                  <div>
-                    <div style={{fontSize:'12px', fontWeight:800, color:DEEPP}}>{meta?.icon} {meta?.label || b.service_type}</div>
-                    <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, marginTop:'2px'}}>{new Date(b.starts_at).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</div>
-                  </div>
-                  <span style={statusPill(b.status)}>{b.status}</span>
+            {pendingRequests.map(r => (
+              <div key={r.id} style={{padding:'10px 12px', background:'rgba(255,250,236,0.85)', borderRadius:'12px', border:'1px solid rgba(201,168,76,0.45)'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px'}}>
+                  <div style={{fontSize:'13px', fontWeight:800, color:DEEPP}}>{r.session_type?.name || '—'}</div>
+                  <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:'rgba(201,168,76,0.18)', color:'#7a5a10', fontWeight:800, letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap'}}>
+                    {r.status === 'counter_proposed' ? 'Counter-proposal' : 'Awaiting confirmation'}
+                  </span>
                 </div>
-              );
-            })}
+                <div style={{fontSize:'11.5px', color:DEEPP, opacity:0.75, marginTop:'4px', lineHeight:1.55}}>
+                  {(r.preferred_times || []).slice(0,3).map((t, i) => (
+                    <div key={i}>· {new Date(t).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</div>
+                  ))}
+                </div>
+                {r.counter_proposed_time && (
+                  <div style={{marginTop:'8px', padding:'8px 10px', background:'rgba(83,74,183,0.08)', borderRadius:'8px', fontSize:'12px', color:DEEPP}}>
+                    Dr. Anderson proposed: <b>{new Date(r.counter_proposed_time).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</b>
+                    {r.physician_response_note && <div style={{fontSize:'11.5px', fontStyle:'italic', marginTop:'4px', opacity:0.85}}>"{r.physician_response_note}"</div>}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </Card>
       )}
 
-      {/* Pending-confirm modal */}
-      {pending && (
-        <SheetModal onClose={() => setPending(null)}>
-          <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, letterSpacing:'2px', textTransform:'uppercase', fontWeight:800}}>Confirm booking</div>
-          <div style={{fontSize:'20px', fontWeight:800, color:DEEPP, marginTop:'4px'}}>{svcMeta.icon} {svcMeta.label}</div>
-          <div style={{fontSize:'13px', color:DEEPP, marginTop:'10px', lineHeight:1.6}}>
-            {pending.day.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'})} · <b>{pending.label}</b> MST · 30 min
+      {!loading && upcoming.length > 0 && (
+        <Card style={{marginBottom:'12px'}}>
+          <Label>Upcoming</Label>
+          <div style={{display:'flex', flexDirection:'column', gap:'8px', marginTop:'10px'}}>
+            {upcoming.map(s => (
+              <div key={s.id} style={{padding:'12px', background:'rgba(255,255,255,0.85)', borderRadius:'12px', border:'1px solid rgba(122,176,240,0.25)'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px'}}>
+                  <div>
+                    <div style={{fontSize:'13px', fontWeight:800, color:DEEPP}}>{titleize(s.appointment_type)}</div>
+                    <div style={{fontSize:'12px', color:DEEPP, opacity:0.85, marginTop:'2px'}}>{new Date(s.starts_at).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})} · {s.duration_min} min</div>
+                  </div>
+                  <span style={statusPill('scheduled')}>Confirmed</span>
+                </div>
+                <div style={{display:'flex', gap:'8px', marginTop:'10px', flexWrap:'wrap'}}>
+                  {s.zoom_join_url && (
+                    <a href={s.zoom_join_url} target="_blank" rel="noopener noreferrer" style={{...solidBtn, textAlign:'center', textDecoration:'none', flex:1, padding:'10px 14px', fontSize:'12.5px'}}>Join Session</a>
+                  )}
+                  <button onClick={()=>setShowCancelTarget(s)} style={{...ghostBtn, padding:'10px 14px', fontSize:'12.5px'}}>Cancel</button>
+                </div>
+              </div>
+            ))}
           </div>
-          <div style={{fontSize:'11px', color:DEEPP, opacity:0.65, marginTop:'10px', lineHeight:1.5}}>{svcMeta.price}. Dr. Anderson will confirm and send a secure video link.</div>
-          <div style={{background:'rgba(232,168,64,0.1)', border:'1px solid rgba(232,168,64,0.35)', borderRadius:'10px', padding:'8px 12px', fontSize:'11px', color:'#8a5a10', marginTop:'12px', lineHeight:1.5}}>
-            ⚠️ Beta: do not share identifying patient information during booking.
-          </div>
-          {error && <div style={{color:'#a02020', fontSize:'12px', marginTop:'10px'}}>{error}</div>}
-          <div style={{display:'flex', gap:'8px', marginTop:'16px'}}>
-            <button onClick={() => setPending(null)} style={{flex:1, ...ghostBtn}}>Cancel</button>
-            <button onClick={confirm} disabled={saving} style={{flex:1, ...solidBtn, opacity: saving ? 0.6 : 1}}>
-              {saving ? 'Booking…' : 'Confirm booking'}
-            </button>
-          </div>
-        </SheetModal>
+        </Card>
       )}
 
-      {/* Success modal */}
-      {confirmed && (
-        <SheetModal onClose={() => setConfirmed(null)}>
-          <div style={{fontSize:'40px', textAlign:'center', marginBottom:'6px'}}>✨</div>
-          <div style={{fontSize:'20px', fontWeight:800, color:DEEPP, textAlign:'center'}}>Session booked</div>
-          <div style={{fontSize:'13px', color:DEEPP, opacity:0.75, textAlign:'center', marginTop:'6px'}}>
-            {new Date(confirmed.starts_at).toLocaleString(undefined, {weekday:'long', month:'long', day:'numeric', hour:'numeric', minute:'2-digit'})}
+      {!loading && past.length > 0 && (
+        <Card>
+          <Label>Past sessions</Label>
+          <div style={{display:'flex', flexDirection:'column', gap:'6px', marginTop:'10px'}}>
+            {past.slice(0, 10).map(s => (
+              <div key={s.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', borderBottom:'1px solid rgba(107,78,124,0.08)', fontSize:'12px', color:DEEPP}}>
+                <span>{titleize(s.appointment_type)} · {new Date(s.starts_at).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'})}</span>
+                <span style={statusPill(s.status)}>{s.status.replace('_',' ')}</span>
+              </div>
+            ))}
           </div>
-          <div style={{fontSize:'12px', color:DEEPP, opacity:0.65, textAlign:'center', marginTop:'10px', lineHeight:1.6}}>
-            A confirmation message from Dr. Anderson is on its way to your inbox.
-          </div>
-          <button onClick={() => setConfirmed(null)} style={{...solidBtn, width:'100%', marginTop:'18px'}}>Done</button>
-        </SheetModal>
+        </Card>
+      )}
+
+      {!loading && pendingRequests.length === 0 && upcoming.length === 0 && past.length === 0 && (
+        <Card style={{padding:'24px', textAlign:'center', color:DEEPP}}>
+          <div style={{fontSize:'32px', marginBottom:'8px', opacity:0.4}}>✨</div>
+          <div style={{fontSize:'13px', opacity:0.85}}>No sessions yet. Request your first one above.</div>
+        </Card>
+      )}
+
+      {showRequestModal && (
+        <RequestSessionModal
+          API={API} token={token}
+          sessionTypes={sessionTypes}
+          patient={patient}
+          onClose={()=>setShowRequestModal(false)}
+          onSubmitted={()=>{ setShowRequestModal(false); load(); onChanged && onChanged(); }}
+        />
+      )}
+
+      {showCancelTarget && (
+        <CancelSessionModal
+          session={showCancelTarget}
+          onClose={()=>setShowCancelTarget(null)}
+          onConfirm={submitCancel}
+        />
       )}
     </div>
+  );
+};
+
+const titleize = (slug: string): string => (slug || '').split('_').map(w => w ? w[0].toUpperCase() + w.slice(1) : '').join(' ');
+
+// ───── Request session modal ────────────────────────────────────────
+const RequestSessionModal: React.FC<{
+  API: string; token: string;
+  sessionTypes: SessionType[];
+  patient: PatientPayload | null;
+  onClose: () => void;
+  onSubmitted: () => void;
+}> = ({ API, token, sessionTypes, patient, onClose, onSubmitted }) => {
+  const eligible = sessionTypes.filter(t => !t.tier_required || (patient && (patient as any).membership_tier === t.tier_required));
+  const [stId, setStId] = useState<number>(eligible[0]?.id || sessionTypes[0]?.id || 0);
+  const blank = { date: '', time: '' };
+  const [t1, setT1] = useState({...blank});
+  const [t2, setT2] = useState({...blank});
+  const [t3, setT3] = useState({...blank});
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState('');
+
+  const toIso = (dt: {date:string; time:string}): string | null => {
+    if (!dt.date || !dt.time) return null;
+    try {
+      const d = new Date(`${dt.date}T${dt.time}:00`);
+      if (Number.isNaN(d.getTime())) return null;
+      return d.toISOString();
+    } catch { return null; }
+  };
+
+  const submit = async () => {
+    setErr('');
+    const st = sessionTypes.find(s => s.id === stId);
+    if (!st) { setErr('Choose a session type.'); return; }
+    const times = [toIso(t1), toIso(t2), toIso(t3)].filter(Boolean) as string[];
+    if (!st.is_async && times.length === 0) { setErr('Please pick at least one preferred time.'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API}/concierge/patient/session-requests`, {
+        method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session_type_id: stId, preferred_times: times, patient_note: note.trim() || undefined }),
+      });
+      const d = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(d.detail || 'Could not submit request.');
+      onSubmitted();
+    } catch (e: any) { setErr(e.message || 'Could not submit request.'); }
+    finally { setSubmitting(false); }
+  };
+
+  return (
+    <SheetModal onClose={onClose}>
+      <div style={{fontSize:'11px', color:DEEPP, opacity:0.7, letterSpacing:'2px', textTransform:'uppercase', fontWeight:800}}>Request a session</div>
+      <div style={{fontSize:'18px', fontWeight:800, color:DEEPP, marginTop:'4px', marginBottom:'14px'}}>Three preferred times</div>
+
+      <div style={{marginBottom:'12px'}}>
+        <div style={{fontSize:'10px', fontWeight:800, color:DEEPP, opacity:0.65, letterSpacing:'1.4px', textTransform:'uppercase', marginBottom:'4px'}}>Session type</div>
+        <select value={stId} onChange={e=>setStId(Number(e.target.value))} style={{...msgInputStyle, appearance:'auto'}}>
+          {sessionTypes.map(t => {
+            const locked = t.tier_required && (!patient || (patient as any).membership_tier !== t.tier_required);
+            return <option key={t.id} value={t.id} disabled={!!locked}>{t.name}{t.duration_minutes ? ` (${t.duration_minutes} min)` : ''}{locked ? ' — Ascend only' : ''}</option>;
+          })}
+        </select>
+      </div>
+
+      {[
+        { label: 'First choice', state: t1, set: setT1 },
+        { label: 'Second choice (optional)', state: t2, set: setT2 },
+        { label: 'Third choice (optional)', state: t3, set: setT3 },
+      ].map((row, i) => (
+        <div key={i} style={{marginBottom:'10px'}}>
+          <div style={{fontSize:'10px', fontWeight:800, color:DEEPP, opacity:0.65, letterSpacing:'1.4px', textTransform:'uppercase', marginBottom:'4px'}}>{row.label}</div>
+          <div style={{display:'flex', gap:'8px'}}>
+            <input type="date" value={row.state.date} onChange={e=>row.set({...row.state, date: e.target.value})} style={{...msgInputStyle, flex:1}}/>
+            <input type="time" value={row.state.time} onChange={e=>row.set({...row.state, time: e.target.value})} style={{...msgInputStyle, flex:1}}/>
+          </div>
+        </div>
+      ))}
+
+      <div style={{marginBottom:'12px'}}>
+        <div style={{fontSize:'10px', fontWeight:800, color:DEEPP, opacity:0.65, letterSpacing:'1.4px', textTransform:'uppercase', marginBottom:'4px'}}>Note to Dr. Anderson (optional)</div>
+        <textarea value={note} onChange={e=>setNote(e.target.value)} rows={3} placeholder="What you'd like to focus on…" style={{...msgInputStyle, resize:'vertical', minHeight:'70px'}}/>
+      </div>
+
+      {err && <div style={{color:'#a02020', fontSize:'12px', marginBottom:'10px'}}>{err}</div>}
+
+      <div style={{display:'flex', gap:'8px'}}>
+        <button onClick={onClose} disabled={submitting} style={{flex:1, ...ghostBtn}}>Cancel</button>
+        <button onClick={submit} disabled={submitting} style={{flex:1, ...solidBtn, opacity: submitting ? 0.6 : 1}}>{submitting ? 'Sending…' : 'Submit Request'}</button>
+      </div>
+    </SheetModal>
+  );
+};
+
+const CancelSessionModal: React.FC<{
+  session: PatientSession;
+  onClose: () => void;
+  onConfirm: (forfeit: boolean) => void;
+}> = ({ session, onClose, onConfirm }) => {
+  const startsAt = session.starts_at ? new Date(session.starts_at) : null;
+  const hoursAway = startsAt ? (startsAt.getTime() - Date.now()) / 3_600_000 : 0;
+  const within48 = hoursAway < 48;
+  return (
+    <SheetModal onClose={onClose}>
+      <div style={{fontSize:'18px', fontWeight:800, color:DEEPP, marginBottom:'10px'}}>{within48 ? '⚠️ Cancel within 48 hours?' : 'Cancel session?'}</div>
+      <div style={{fontSize:'13px', color:DEEPP, lineHeight:1.65, marginBottom:'14px'}}>
+        {within48
+          ? 'Cancelling within 48 hours of your session means this session will be forfeited and no credit will be returned, per our cancellation policy.'
+          : 'Your session credit will be returned to your monthly allocation.'}
+      </div>
+      <div style={{display:'flex', gap:'8px'}}>
+        <button onClick={onClose} style={{flex:1, ...ghostBtn}}>Keep session</button>
+        <button onClick={()=>onConfirm(within48)} style={{flex:1, ...solidBtn, background: within48 ? '#c04040' : undefined}}>
+          {within48 ? 'Cancel anyway' : 'Confirm cancel'}
+        </button>
+      </div>
+    </SheetModal>
   );
 };
 

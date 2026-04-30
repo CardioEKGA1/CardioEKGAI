@@ -115,6 +115,11 @@ const AppointmentsSection: React.FC<Props> = ({ API, token, accent }) => {
 
   return (
     <div>
+      {/* Incoming patient session requests — pending + counter-proposed.
+          Prepended above the historical manual-appointment UI so the
+          owner sees what needs a response first. */}
+      <IncomingRequestsPanel API={API} token={token} accent={accent} onChanged={load}/>
+
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap', marginBottom:'14px'}}>
         <div>
           <div style={{fontSize:'20px', fontWeight:800, color:'#1a2a4a'}}>Appointments</div>
@@ -310,5 +315,284 @@ const CreateAppointmentModal: React.FC<{API:string; token:string; accent:string;
     </div>
   );
 };
+
+// ───── Incoming Requests panel + Confirm/Propose/Draft modals ──────
+
+interface ReqPatient { id: number; name: string; email: string; membership_tier: string | null; }
+interface IncomingRequest {
+  id: number; status: string; created_at: string;
+  preferred_times: string[]; patient_note: string;
+  physician_response_note: string;
+  counter_proposed_time: string | null;
+  confirmed_appointment_id: number | null;
+  zoom_join_url: string | null;
+  session_type: { id: number; slug: string; name: string; duration_minutes: number } | null;
+  patient?: ReqPatient;
+}
+
+const IncomingRequestsPanel: React.FC<{API:string; token:string; accent:string; onChanged:()=>void}> = ({ API, token, accent, onChanged }) => {
+  const [requests, setRequests] = useState<IncomingRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [confirming, setConfirming] = useState<IncomingRequest | null>(null);
+  const [proposing, setProposing] = useState<IncomingRequest | null>(null);
+  const [drafting, setDrafting] = useState<IncomingRequest | null>(null);
+  const [actingId, setActingId] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch(`${API}/concierge/session-requests?status=pending`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { session_requests: [] })
+      .then(d => setRequests(d.session_requests || []))
+      .finally(() => setLoading(false));
+  }, [API, token]);
+  useEffect(() => { load(); }, [load]);
+
+  const decline = async (r: IncomingRequest) => {
+    if (!window.confirm(`Decline ${r.patient?.name || 'this'} request?`)) return;
+    setActingId(r.id);
+    try {
+      await fetch(`${API}/concierge/session-requests/${r.id}/decline`, { method:'POST', headers:{Authorization:`Bearer ${token}`} });
+      load(); onChanged();
+    } finally { setActingId(null); }
+  };
+
+  return (
+    <div style={{marginBottom:'24px'}}>
+      <div style={{display:'flex', alignItems:'baseline', gap:'10px', marginBottom:'10px'}}>
+        <div style={{fontSize:'13px', fontWeight:800, color:'#1a2a4a', letterSpacing:'0.6px', textTransform:'uppercase'}}>Incoming requests</div>
+        <div style={{fontSize:'11.5px', color:'#7090a8'}}>· {requests.length}</div>
+      </div>
+      {loading ? (
+        <div style={{...CARD, padding:'18px', textAlign:'center', fontSize:'12.5px', color:'#7090a8'}}>Loading…</div>
+      ) : requests.length === 0 ? (
+        <div style={{...CARD, padding:'18px', textAlign:'center', fontSize:'12.5px', color:'#7090a8', fontStyle:'italic'}}>
+          No pending session requests right now.
+        </div>
+      ) : (
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:'10px'}}>
+          {requests.map(r => {
+            const tier = (r.patient?.membership_tier || '').toLowerCase();
+            const tierColor = tier === 'ascend' ? '#C9A84C' : tier === 'align' ? '#534AB7' : '#7ab0f0';
+            const busy = actingId === r.id;
+            return (
+              <div key={r.id} style={{...CARD, background:'linear-gradient(180deg, rgba(255,250,236,0.85), rgba(255,255,255,0.85))', borderColor:'rgba(201,168,76,0.45)'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px', marginBottom:'6px', flexWrap:'wrap'}}>
+                  <div>
+                    <div style={{fontSize:'14px', fontWeight:800, color:'#1a2a4a'}}>{r.patient?.name || '—'}</div>
+                    <div style={{fontSize:'11px', color:'#4a5e6a', marginTop:'2px'}}>{r.session_type?.name} · {r.session_type?.duration_minutes} min</div>
+                  </div>
+                  {r.patient?.membership_tier && (
+                    <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:`${tierColor}1a`, color:tierColor, fontWeight:800, letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap'}}>{r.patient.membership_tier}</span>
+                  )}
+                </div>
+                <div style={{fontSize:'11.5px', color:'#1a2a4a', opacity:0.85, marginTop:'8px', lineHeight:1.55}}>
+                  <div style={{fontWeight:700, fontSize:'10.5px', textTransform:'uppercase', letterSpacing:'1px', color:'#4a7ad0', marginBottom:'2px'}}>Preferred times</div>
+                  {(r.preferred_times || []).map((t, i) => (
+                    <div key={i}>· {new Date(t).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</div>
+                  ))}
+                </div>
+                {r.patient_note && (
+                  <div style={{marginTop:'10px', padding:'10px 12px', background:'rgba(83,74,183,0.06)', borderRadius:'10px', fontSize:'12px', fontStyle:'italic', color:'#1a2a4a', lineHeight:1.55}}>
+                    "{r.patient_note}"
+                  </div>
+                )}
+                <div style={{display:'flex', gap:'6px', marginTop:'12px', flexWrap:'wrap'}}>
+                  <button disabled={busy} onClick={()=>setConfirming(r)} style={{background:'#C9A84C', border:'none', color:'white', borderRadius:'10px', padding:'8px 14px', fontSize:'12px', fontWeight:800, cursor: busy ? 'wait' : 'pointer', boxShadow:'0 4px 12px rgba(201,168,76,0.28)'}}>Confirm</button>
+                  <button disabled={busy} onClick={()=>setProposing(r)} style={{background:'transparent', border:'1px solid rgba(83,74,183,0.4)', color:'#534AB7', borderRadius:'10px', padding:'8px 14px', fontSize:'12px', fontWeight:700, cursor: busy ? 'wait' : 'pointer'}}>Propose alt</button>
+                  <button disabled={busy} onClick={()=>setDrafting(r)} style={{background:'transparent', border:'1px solid rgba(122,176,240,0.4)', color:'#4a7ad0', borderRadius:'10px', padding:'8px 14px', fontSize:'12px', fontWeight:700, cursor: busy ? 'wait' : 'pointer'}}>✦ Draft</button>
+                  <button disabled={busy} onClick={()=>decline(r)} style={{background:'transparent', border:'1px solid rgba(192,64,64,0.35)', color:'#c04040', borderRadius:'10px', padding:'8px 12px', fontSize:'12px', fontWeight:700, cursor: busy ? 'wait' : 'pointer'}}>Decline</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {confirming && (
+        <ConfirmRequestModal
+          API={API} token={token}
+          request={confirming}
+          onClose={()=>setConfirming(null)}
+          onDone={()=>{ setConfirming(null); load(); onChanged(); }}
+        />
+      )}
+      {proposing && (
+        <ProposeAltModal
+          API={API} token={token}
+          request={proposing}
+          onClose={()=>setProposing(null)}
+          onDone={()=>{ setProposing(null); load(); }}
+        />
+      )}
+      {drafting && (
+        <AiDraftModal
+          API={API} token={token}
+          request={drafting}
+          onClose={()=>setDrafting(null)}
+        />
+      )}
+    </div>
+  );
+};
+
+const ConfirmRequestModal: React.FC<{
+  API:string; token:string;
+  request: IncomingRequest;
+  onClose:()=>void;
+  onDone:()=>void;
+}> = ({ API, token, request, onClose, onDone }) => {
+  const [chosen, setChosen] = useState<string>(request.preferred_times[0] || '');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState('');
+  const submit = async () => {
+    setErr(''); setSubmitting(true);
+    try {
+      const res = await fetch(`${API}/concierge/session-requests/${request.id}/confirm`, {
+        method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+        body: JSON.stringify({ chosen_time: chosen }),
+      });
+      const d = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(d.detail || 'Confirm failed');
+      onDone();
+    } catch (e: any) { setErr(e.message); }
+    finally { setSubmitting(false); }
+  };
+  return (
+    <ModalShell onClose={onClose} title="Confirm session" subtitle={`${request.patient?.name} · ${request.session_type?.name}`}>
+      <div style={{fontSize:'12px', color:'#4a7ad0', fontWeight:700, marginBottom:'8px', textTransform:'uppercase', letterSpacing:'0.5px'}}>Pick which time works</div>
+      <div style={{display:'flex', flexDirection:'column', gap:'6px', marginBottom:'14px'}}>
+        {request.preferred_times.map((t, i) => (
+          <label key={i} style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px', borderRadius:'10px', background: chosen === t ? 'rgba(201,168,76,0.15)' : 'rgba(255,255,255,0.7)', border: chosen === t ? '1px solid #C9A84C' : '1px solid rgba(122,176,240,0.25)', cursor:'pointer'}}>
+            <input type="radio" checked={chosen === t} onChange={()=>setChosen(t)} style={{accentColor:'#C9A84C'}}/>
+            <span style={{fontSize:'13px', color:'#1a2a4a'}}>{new Date(t).toLocaleString(undefined, {weekday:'long', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</span>
+          </label>
+        ))}
+      </div>
+      <div style={{fontSize:'11.5px', color:'#7090a8', marginBottom:'14px', fontStyle:'italic'}}>
+        On confirm: a Zoom for Healthcare meeting is auto-created and a confirmation email with the join link is sent to {request.patient?.email}.
+      </div>
+      {err && <div style={{color:'#a02020', fontSize:'12px', marginBottom:'10px'}}>{err}</div>}
+      <div style={{display:'flex', gap:'8px', justifyContent:'flex-end'}}>
+        <button onClick={onClose} disabled={submitting} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
+        <button onClick={submit} disabled={submitting || !chosen} style={{background:'#C9A84C', border:'none', borderRadius:'10px', padding:'9px 18px', fontSize:'13px', fontWeight:800, color:'white', cursor: submitting ? 'wait' : 'pointer', opacity: submitting ? 0.7 : 1}}>
+          {submitting ? 'Confirming…' : 'Confirm + Create Zoom'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+};
+
+const ProposeAltModal: React.FC<{
+  API:string; token:string;
+  request: IncomingRequest;
+  onClose:()=>void;
+  onDone:()=>void;
+}> = ({ API, token, request, onClose, onDone }) => {
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState('');
+  const submit = async () => {
+    setErr('');
+    if (!date || !time) { setErr('Pick a date and time.'); return; }
+    let iso;
+    try { iso = new Date(`${date}T${time}:00`).toISOString(); }
+    catch { setErr('Invalid date/time.'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API}/concierge/session-requests/${request.id}/propose`, {
+        method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+        body: JSON.stringify({ proposed_time: iso, note }),
+      });
+      const d = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(d.detail || 'Propose failed');
+      onDone();
+    } catch (e: any) { setErr(e.message); }
+    finally { setSubmitting(false); }
+  };
+  return (
+    <ModalShell onClose={onClose} title="Propose alternative time" subtitle={`${request.patient?.name} · ${request.session_type?.name}`}>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'12px'}}>
+        <div>
+          <div style={FIELD_LABEL}>Date</div>
+          <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={INPUT}/>
+        </div>
+        <div>
+          <div style={FIELD_LABEL}>Time</div>
+          <input type="time" value={time} onChange={e=>setTime(e.target.value)} style={INPUT}/>
+        </div>
+      </div>
+      <div style={{marginBottom:'12px'}}>
+        <div style={FIELD_LABEL}>Note to patient (optional)</div>
+        <textarea value={note} onChange={e=>setNote(e.target.value)} rows={3} style={{...INPUT, resize:'vertical', minHeight:'70px', fontFamily:'inherit'}}/>
+      </div>
+      {err && <div style={{color:'#a02020', fontSize:'12px', marginBottom:'10px'}}>{err}</div>}
+      <div style={{display:'flex', gap:'8px', justifyContent:'flex-end'}}>
+        <button onClick={onClose} disabled={submitting} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Cancel</button>
+        <button onClick={submit} disabled={submitting} style={{background:'#534AB7', border:'none', borderRadius:'10px', padding:'9px 18px', fontSize:'13px', fontWeight:800, color:'white', cursor: submitting ? 'wait' : 'pointer', opacity: submitting ? 0.7 : 1}}>
+          {submitting ? 'Sending…' : 'Send counter-proposal'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+};
+
+const AiDraftModal: React.FC<{
+  API:string; token:string;
+  request: IncomingRequest;
+  onClose:()=>void;
+}> = ({ API, token, request, onClose }) => {
+  const [draft, setDraft] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    fetch(`${API}/concierge/session-requests/${request.id}/draft-response`, {
+      method:'POST', headers:{ Authorization:`Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(r))
+      .then(d => setDraft(d.draft || ''))
+      .catch(async r => { try { const d = await (r as any).json(); setErr(d.detail || 'Draft failed'); } catch { setErr('Draft failed'); } })
+      .finally(() => setLoading(false));
+  }, [API, token, request.id]);
+  const copy = () => {
+    try { navigator.clipboard.writeText(draft); alert('Copied to clipboard'); } catch {}
+  };
+  return (
+    <ModalShell onClose={onClose} title="✦ AI Draft Response" subtitle={`${request.patient?.name} · ${request.session_type?.name}`}>
+      {loading ? (
+        <div style={{padding:'24px', textAlign:'center', color:'#4a7ad0', fontSize:'13px'}}>Drafting in Dr. Anderson's voice…</div>
+      ) : err ? (
+        <div style={{color:'#a02020', fontSize:'13px'}}>{err}</div>
+      ) : (
+        <>
+          <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={10} style={{...INPUT, resize:'vertical', minHeight:'200px', fontFamily:'Georgia, serif', lineHeight:1.6, fontSize:'13.5px'}}/>
+          <div style={{fontSize:'11px', color:'#7090a8', marginTop:'6px', fontStyle:'italic'}}>
+            Edit as needed, then copy & send via your preferred channel. (No automatic send — you stay in the loop.)
+          </div>
+        </>
+      )}
+      <div style={{display:'flex', gap:'8px', justifyContent:'flex-end', marginTop:'14px'}}>
+        <button onClick={onClose} style={{background:'rgba(255,255,255,0.85)', border:'1px solid rgba(122,176,240,0.3)', borderRadius:'10px', padding:'9px 16px', fontSize:'13px', fontWeight:600, color:'#4a7ad0', cursor:'pointer'}}>Close</button>
+        {!loading && !err && <button onClick={copy} style={{background:'#534AB7', border:'none', borderRadius:'10px', padding:'9px 18px', fontSize:'13px', fontWeight:800, color:'white', cursor:'pointer'}}>Copy draft</button>}
+      </div>
+    </ModalShell>
+  );
+};
+
+const ModalShell: React.FC<{title:string; subtitle?:string; onClose:()=>void; children:React.ReactNode}> = ({ title, subtitle, onClose, children }) => (
+  <div style={{position:'fixed', inset:0, background:'rgba(26,42,74,0.45)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', zIndex:1500}}>
+    <div style={{background:'white', borderRadius:'18px', padding:'24px', maxWidth:'520px', width:'100%', boxShadow:'0 16px 50px rgba(26,42,74,0.3)', maxHeight:'92vh', overflowY:'auto'}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'14px', gap:'10px'}}>
+        <div>
+          <div style={{fontSize:'16px', fontWeight:800, color:'#1a2a4a'}}>{title}</div>
+          {subtitle && <div style={{fontSize:'12px', color:'#4a7ad0', marginTop:'2px'}}>{subtitle}</div>}
+        </div>
+        <button onClick={onClose} style={{background:'transparent', border:'none', fontSize:'20px', color:'#4a7ad0', cursor:'pointer', padding:0, lineHeight:1}}>×</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
 
 export default AppointmentsSection;

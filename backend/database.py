@@ -144,6 +144,11 @@ class ConciergePatient(Base):
     # and triggers the welcome magic-link email.
     is_approved = Column(Boolean, default=False, index=True)
     approved_at = Column(DateTime, nullable=True)
+    # 6-step onboarding gate (consents + intake form). Stamped when the
+    # patient completes the final welcome step. PatientApp shows the
+    # onboarding overlay until this is set; afterwards the regular tabs
+    # become reachable.
+    onboarding_completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -173,7 +178,108 @@ class ConciergeAppointment(Base):
     appointment_type = Column(String)  # medical_visit | life_coaching | guided_meditation | telehealth | follow_up
     status = Column(String, default="scheduled")  # scheduled | completed | canceled | no_show
     notes = Column(String, default="")
+    # Zoom for Healthcare integration (populated when a session_request is
+    # confirmed). join_url is patient-facing; start_url is physician-only.
+    zoom_meeting_id = Column(String, nullable=True, index=True)
+    zoom_join_url   = Column(String, nullable=True)
+    zoom_start_url  = Column(String, nullable=True)
+    # Back-link to the originating session request (when this appointment
+    # was provisioned via the patient request flow).
+    session_request_id = Column(Integer, nullable=True, index=True)
+    # Cancellation accounting — the 48h policy is enforced at request time
+    # but persisted here so the physician dashboard can audit.
+    canceled_at = Column(DateTime, nullable=True)
+    canceled_within_window = Column(Boolean, default=False)  # < 48h cancellation forfeits credit
+    completed_at = Column(DateTime, nullable=True)
+    no_showed_at = Column(DateTime, nullable=True)
+    physician_session_notes = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+# Patient consent records — one row per (patient × document_type × version).
+# Re-signing a new version creates a new row so the historical signature is
+# never overwritten. document_type slugs match the 4 onboarding consent
+# steps: telehealth_consent, good_faith_estimate, communication_policy,
+# cancellation_policy.
+class ConciergePatientConsent(Base):
+    __tablename__ = "concierge_patient_consents"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True, nullable=False)
+    document_type = Column(String, index=True, nullable=False)
+    document_version = Column(String, default="1.0")
+    signed_name = Column(String, nullable=False)
+    signed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+
+
+# Structured intake form (separate from the legacy intake_data JSON on
+# ConciergePatient). Latest row per patient_id wins; older submissions are
+# kept for audit. The "personal" fields are duplicated from ConciergePatient
+# so the form is self-contained for the physician's review.
+class ConciergePatientIntake(Base):
+    __tablename__ = "concierge_patient_intake"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True, nullable=False)
+    # Personal
+    full_name = Column(String, nullable=True)
+    dob = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    address = Column(String, nullable=True)
+    emergency_contact = Column(String, nullable=True)
+    # Medical
+    medical_conditions = Column(JSON, default=list)  # checklist (list of strings)
+    surgeries = Column(String, default="")
+    medications = Column(String, default="")
+    allergies = Column(String, default="")
+    family_history = Column(String, default="")
+    # Lifestyle
+    exercise = Column(String, default="")
+    diet = Column(String, default="")
+    sleep = Column(String, default="")
+    stress = Column(String, default="")
+    substance_use = Column(String, default="")
+    # Spiritual / integrative
+    spiritual_practice = Column(String, default="")
+    healing_goals = Column(String, default="")
+    # Audit
+    submitted_at = Column(DateTime, default=datetime.utcnow, index=True)
+    ip_address = Column(String, nullable=True)
+
+
+# Catalog of bookable session types. Seeded at boot if empty. tier_required
+# is the minimum membership tier that can request the session ('ascend' for
+# urgent same-day; null for everyone). is_async marks lab review where
+# scheduling doesn't apply.
+class ConciergeSessionType(Base):
+    __tablename__ = "concierge_session_types"
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String, unique=True, nullable=False)
+    name = Column(String, nullable=False)
+    duration_minutes = Column(Integer, default=30)
+    tier_required = Column(String, nullable=True)  # null | 'ascend'
+    is_async = Column(Boolean, default=False)
+    sort_order = Column(Integer, default=100)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# Patient-initiated session request. Physician sees this as a card with the
+# patient's three preferred times + note. On confirm, a ConciergeAppointment
+# row is provisioned (with Zoom URLs) and `confirmed_appointment_id` is set.
+class ConciergeSessionRequest(Base):
+    __tablename__ = "concierge_session_requests"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, index=True, nullable=False)
+    session_type_id = Column(Integer, index=True, nullable=False)
+    preferred_times = Column(JSON, default=list)  # list of up to 3 ISO datetime strings
+    patient_note = Column(String, default="")
+    # pending → confirmed | counter_proposed | declined | cancelled
+    status = Column(String, default="pending", index=True)
+    physician_response_note = Column(String, default="")
+    counter_proposed_time = Column(DateTime, nullable=True)
+    confirmed_appointment_id = Column(Integer, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
 
 class ConciergeMembership(Base):
     __tablename__ = "concierge_memberships"
@@ -520,6 +626,20 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_is_approved ON concierge_patients(is_approved)"))
+        # 6-step onboarding completion + appointment Zoom + cancellation
+        # accounting columns. Safe ADD COLUMN IF NOT EXISTS — Postgres-only.
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS zoom_meeting_id VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS zoom_join_url VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS zoom_start_url VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS session_request_id INTEGER"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS canceled_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS canceled_within_window BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS no_showed_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS physician_session_notes VARCHAR DEFAULT ''"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_zoom_meeting_id ON concierge_appointments(zoom_meeting_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_session_request_id ON concierge_appointments(session_request_id)"))
         # Pre-approve the test patient so dev sign-in continues to work
         # uninterrupted. Idempotent — only stamps approved_at if NULL.
         conn.execute(text(
@@ -558,6 +678,32 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS insurance_acknowledged BOOLEAN DEFAULT FALSE"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
+
+# Seed the bookable session-type catalog if empty. Idempotent: each row is
+# upserted by slug. Source of truth for the patient Book tab dropdown and
+# physician Appointments confirmation modal.
+try:
+    from sqlalchemy.orm import Session as _Sess
+    _seed_db = _Sess(bind=engine)
+    if _seed_db.query(ConciergeSessionType).count() == 0:
+        seeds = [
+            ("energy_healing",   "Energy Healing / Life Coaching", 30, None,     False, 10),
+            ("medical_consult",  "Medical Consultation",            30, None,     False, 20),
+            ("extended_visit",   "Extended Visit",                  60, None,     False, 30),
+            ("guided_meditation","Guided Meditation",               30, None,     False, 40),
+            ("urgent_same_day",  "Urgent Same-Day Consult",         30, "ascend", False, 50),
+            ("lab_review",       "Lab Result Review (async)",       0,  None,     True,  60),
+        ]
+        for slug, name, dur, tier, is_async, sort in seeds:
+            _seed_db.add(ConciergeSessionType(
+                slug=slug, name=name, duration_minutes=dur,
+                tier_required=tier, is_async=is_async, sort_order=sort,
+            ))
+        _seed_db.commit()
+        print(f"Seeded {len(seeds)} concierge session types.")
+    _seed_db.close()
+except Exception as e:
+    print(f"Session type seed skipped: {e}")
 
 try:
     with engine.begin() as conn:

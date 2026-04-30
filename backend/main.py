@@ -22,6 +22,8 @@ from database import (
     PageVisit,
     MeditateOracleMessage, MeditateOraclePull, MeditateDiaryEntry,
     MeditateAccessRequest, ConciergeInquiry, HipaaAuditLog,
+    ConciergePatientConsent, ConciergePatientIntake,
+    ConciergeSessionType, ConciergeSessionRequest,
     MeditateIntention, MeditateOracleFavorite, MeditateMedFavorite,
     MeditatePlayHistory, MeditateAiInsight,
     ToolTrialUse,
@@ -3430,6 +3432,790 @@ def concierge_inquiry_delete(
     db.delete(inquiry)
     db.commit()
     return {"ok": True, "deleted_inquiry_id": inquiry_id}
+
+
+# ───── Zoom for Healthcare integration ────────────────────────────────
+# Server-to-Server OAuth (no per-user redirect dance). Token TTL is 1 hour
+# from Zoom; we cache one access_token per process and refresh proactively
+# 60 seconds before expiry.
+
+ZOOM_ACCOUNT_ID = (os.getenv("ZOOM_ACCOUNT_ID") or "").strip()
+ZOOM_CLIENT_ID = (os.getenv("ZOOM_CLIENT_ID") or "").strip()
+ZOOM_CLIENT_SECRET = (os.getenv("ZOOM_CLIENT_SECRET") or "").strip()
+
+_zoom_token: dict = {"access_token": None, "expires_at": None}
+
+def _zoom_configured() -> bool:
+    return bool(ZOOM_ACCOUNT_ID and ZOOM_CLIENT_ID and ZOOM_CLIENT_SECRET)
+
+def _zoom_get_access_token() -> str | None:
+    """Returns a cached server-to-server OAuth access token, refreshing if
+    near expiry. None if Zoom credentials aren't configured (caller falls
+    back to a placeholder URL so booking still works in non-prod)."""
+    if not _zoom_configured():
+        return None
+    now = datetime.utcnow()
+    cached = _zoom_token.get("access_token")
+    expires_at = _zoom_token.get("expires_at")
+    if cached and expires_at and expires_at > now + timedelta(seconds=60):
+        return cached
+    try:
+        import urllib.request, urllib.parse, base64
+        creds = base64.b64encode(f"{ZOOM_CLIENT_ID}:{ZOOM_CLIENT_SECRET}".encode()).decode()
+        url = f"https://zoom.us/oauth/token?grant_type=account_credentials&account_id={urllib.parse.quote(ZOOM_ACCOUNT_ID)}"
+        req = urllib.request.Request(url, method="POST", headers={
+            "Authorization": f"Basic {creds}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }, data=b"")
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode())
+        token = payload.get("access_token")
+        ttl = int(payload.get("expires_in") or 3600)
+        if token:
+            _zoom_token["access_token"] = token
+            _zoom_token["expires_at"] = now + timedelta(seconds=ttl)
+            return token
+    except Exception as e:
+        print(f"Zoom OAuth failed: {type(e).__name__}: {e}")
+    return None
+
+def _zoom_create_meeting(topic: str, start_time_iso: str, duration_min: int) -> dict | None:
+    """POST /v2/users/me/meetings. Returns dict with id, join_url, start_url
+    on success; None on failure (caller surfaces a friendly error)."""
+    token = _zoom_get_access_token()
+    if not token:
+        return None
+    try:
+        import urllib.request
+        body = json.dumps({
+            "topic": topic,
+            "type": 2,                     # scheduled meeting
+            "start_time": start_time_iso,  # Zoom accepts ISO 8601 with Z or offset
+            "duration": max(15, int(duration_min or 30)),
+            "timezone": "America/Denver",  # SoulMD practice TZ; UI displays in MT
+            "settings": {
+                "waiting_room": True,
+                "join_before_host": False,
+                "mute_upon_entry": True,
+                "auto_recording": "none",
+                "encryption_type": "enhanced_encryption",
+                "host_video": True,
+                "participant_video": False,
+                "approval_type": 0,        # automatic
+            },
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.zoom.us/v2/users/me/meetings",
+            method="POST", data=body,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        return {
+            "id": str(data.get("id") or ""),
+            "join_url": data.get("join_url"),
+            "start_url": data.get("start_url"),
+        }
+    except Exception as e:
+        print(f"Zoom create meeting failed: {type(e).__name__}: {e}")
+        return None
+
+
+# ───── Concierge scheduling — patient onboarding consents + intake ────
+
+CONSENT_DOCUMENT_TYPES = {
+    "telehealth_consent",
+    "good_faith_estimate",
+    "communication_policy",
+    "cancellation_policy",
+}
+
+class _PatientConsentSubmit(BaseModel):
+    document_type: str
+    signed_name: str
+    document_version: str | None = "1.0"
+
+@app.post("/concierge/patient/consents")
+def concierge_patient_record_consent(
+    data: _PatientConsentSubmit,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    doc = (data.document_type or "").strip().lower()
+    if doc not in CONSENT_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"document_type must be one of {sorted(CONSENT_DOCUMENT_TYPES)}")
+    name = (data.signed_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Typed signature required.")
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent") or None
+    db.add(ConciergePatientConsent(
+        patient_id=p.id, document_type=doc,
+        document_version=(data.document_version or "1.0"),
+        signed_name=name, ip_address=ip, user_agent=ua,
+    ))
+    db.commit()
+    return {"ok": True, "document_type": doc, "signed_at": datetime.utcnow().isoformat()}
+
+
+class _PatientIntakeFullSubmit(BaseModel):
+    full_name: str | None = None
+    dob: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    emergency_contact: str | None = None
+    medical_conditions: list[str] | None = None
+    surgeries: str | None = None
+    medications: str | None = None
+    allergies: str | None = None
+    family_history: str | None = None
+    exercise: str | None = None
+    diet: str | None = None
+    sleep: str | None = None
+    stress: str | None = None
+    substance_use: str | None = None
+    spiritual_practice: str | None = None
+    healing_goals: str | None = None
+
+@app.post("/concierge/patient/intake-full")
+def concierge_patient_intake_full(
+    data: _PatientIntakeFullSubmit,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Structured intake form (replaces the legacy 1-page intake). Inserts
+    a new row each submission so the audit trail survives revisions."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    ip = request.client.host if request.client else None
+    intake = ConciergePatientIntake(
+        patient_id=p.id,
+        full_name=(data.full_name or "").strip() or p.name,
+        dob=(data.dob or "").strip() or None,
+        phone=(data.phone or "").strip() or None,
+        address=(data.address or "").strip() or None,
+        emergency_contact=(data.emergency_contact or "").strip() or None,
+        medical_conditions=list(data.medical_conditions or []),
+        surgeries=(data.surgeries or "").strip(),
+        medications=(data.medications or "").strip(),
+        allergies=(data.allergies or "").strip(),
+        family_history=(data.family_history or "").strip(),
+        exercise=(data.exercise or "").strip(),
+        diet=(data.diet or "").strip(),
+        sleep=(data.sleep or "").strip(),
+        stress=(data.stress or "").strip(),
+        substance_use=(data.substance_use or "").strip(),
+        spiritual_practice=(data.spiritual_practice or "").strip(),
+        healing_goals=(data.healing_goals or "").strip(),
+        ip_address=ip,
+    )
+    db.add(intake)
+    # Mirror the canonical name/dob/phone onto ConciergePatient for
+    # backward-compat with older queries that read from there.
+    if intake.full_name and intake.full_name != p.name: p.name = intake.full_name
+    if intake.dob: p.dob = intake.dob
+    if intake.phone: p.phone = intake.phone
+    p.intake_completed_at = datetime.utcnow()
+    if not p.terms_accepted_at:
+        p.terms_accepted_at = datetime.utcnow()
+    p.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(intake)
+    return {"ok": True, "intake_id": intake.id, "submitted_at": intake.submitted_at.isoformat()}
+
+
+@app.post("/concierge/patient/onboarding-complete")
+def concierge_patient_onboarding_complete(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stamp the final 'onboarding done' flag on the patient row. Called
+    by the 6-step gate's last screen. Sends a one-shot notification to
+    Dr. Anderson confirming the new patient is fully onboarded."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    already = p.onboarding_completed_at is not None
+    if not already:
+        p.onboarding_completed_at = datetime.utcnow()
+        p.updated_at = datetime.utcnow()
+        db.commit()
+        try:
+            _send_anderson_notification(
+                subject=f"{p.name or p.email} completed onboarding ✓",
+                body_html=(
+                    f'<div style="font-family:-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:20px;color:#1a2a4a;line-height:1.7">'
+                    f'  <h2 style="margin:0 0 12px;font-size:17px">Patient onboarding complete</h2>'
+                    f'  <p style="margin:6px 0;font-size:13px"><b>Patient:</b> {_esc(p.name)} &lt;{_esc(p.email)}&gt;</p>'
+                    f'  <p style="margin:6px 0;font-size:13px"><b>Tier:</b> {_esc(p.membership_tier or "—")}</p>'
+                    f'  <p style="margin:14px 0 4px;font-size:13px">All four consent documents signed and full intake form submitted.</p>'
+                    f'  <p style="margin:14px 0 0;font-size:11px;color:#8aa0c0">Completed {_now_stamp()}</p>'
+                    f'</div>'
+                ),
+            )
+        except Exception as e:
+            print(f"onboarding-complete notification failed: {e}")
+    return {"ok": True, "onboarding_completed_at": p.onboarding_completed_at.isoformat()}
+
+
+# Extend the existing onboarding-status endpoint with consent + intake flags.
+@app.get("/concierge/patient/onboarding-full-status")
+def concierge_patient_onboarding_full_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    is_super = _is_concierge_owner(current_user)
+    p = _lookup_concierge_patient_for_user(current_user, db)
+    if not p and is_super:
+        p = _get_or_create_patient_row(current_user, db)
+    if not p:
+        return {"enrolled": False, "is_superuser": is_super}
+    consents = db.query(ConciergePatientConsent).filter(ConciergePatientConsent.patient_id == p.id).all()
+    signed = {c.document_type for c in consents}
+    intake = db.query(ConciergePatientIntake).filter(ConciergePatientIntake.patient_id == p.id).order_by(ConciergePatientIntake.submitted_at.desc()).first()
+    return {
+        "enrolled": True,
+        "is_superuser": is_super,
+        "is_approved": bool(getattr(p, "is_approved", False)) or is_super,
+        "onboarding_completed": p.onboarding_completed_at is not None,
+        "consents_signed": sorted(list(signed)),
+        "intake_submitted": intake is not None,
+        "patient_name": p.name,
+        "membership_tier": p.membership_tier,
+    }
+
+
+# ───── Concierge scheduling — session types catalog ───────────────────
+
+@app.get("/concierge/session-types")
+def concierge_list_session_types(
+    current_user: User | None = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Public to any authed user — patient Book tab + physician confirm
+    modal both consume this. Tier gating is enforced at request time, not
+    here, so the patient still sees the urgent option (with a lock badge)."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    rows = db.query(ConciergeSessionType).order_by(ConciergeSessionType.sort_order.asc(), ConciergeSessionType.id.asc()).all()
+    return {
+        "session_types": [
+            {
+                "id": r.id, "slug": r.slug, "name": r.name,
+                "duration_minutes": r.duration_minutes,
+                "tier_required": r.tier_required,
+                "is_async": bool(r.is_async),
+            } for r in rows
+        ],
+    }
+
+
+# ───── Concierge scheduling — session requests (patient + physician) ──
+
+class _SessionRequestSubmit(BaseModel):
+    session_type_id: int
+    preferred_times: list[str]  # up to 3 ISO datetime strings
+    patient_note: str | None = None
+
+def _session_request_dict(r: ConciergeSessionRequest, db: Session, *, include_patient: bool = False) -> dict:
+    st = db.query(ConciergeSessionType).filter(ConciergeSessionType.id == r.session_type_id).first()
+    appt = None
+    if r.confirmed_appointment_id:
+        appt = db.query(ConciergeAppointment).filter(ConciergeAppointment.id == r.confirmed_appointment_id).first()
+    out = {
+        "id": r.id,
+        "patient_id": r.patient_id,
+        "session_type": {"id": st.id, "slug": st.slug, "name": st.name, "duration_minutes": st.duration_minutes} if st else None,
+        "preferred_times": r.preferred_times or [],
+        "patient_note": r.patient_note or "",
+        "status": r.status,
+        "physician_response_note": r.physician_response_note or "",
+        "counter_proposed_time": r.counter_proposed_time.isoformat() if r.counter_proposed_time else None,
+        "confirmed_appointment_id": r.confirmed_appointment_id,
+        "confirmed_time": appt.starts_at.isoformat() if appt and appt.starts_at else None,
+        "zoom_join_url": appt.zoom_join_url if appt else None,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+    if include_patient:
+        p = db.query(ConciergePatient).filter(ConciergePatient.id == r.patient_id).first()
+        if p:
+            out["patient"] = {"id": p.id, "name": p.name, "email": p.email, "membership_tier": p.membership_tier}
+    return out
+
+
+@app.post("/concierge/patient/session-requests")
+def concierge_patient_create_session_request(
+    data: _SessionRequestSubmit,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    if not bool(getattr(p, "is_approved", False)) and not _is_concierge_owner(current_user):
+        raise HTTPException(status_code=403, detail="Account not yet approved")
+    st = db.query(ConciergeSessionType).filter(ConciergeSessionType.id == data.session_type_id).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="Unknown session type")
+    if st.tier_required == "ascend" and (p.membership_tier or "").lower() != "ascend":
+        raise HTTPException(status_code=403, detail="This session type is reserved for Ascend members.")
+    times = [t for t in (data.preferred_times or []) if t and t.strip()][:3]
+    if not st.is_async and not times:
+        raise HTTPException(status_code=400, detail="Please choose at least one preferred time.")
+    # Validate ISO format
+    for t in times:
+        try:
+            datetime.fromisoformat(t.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid datetime: {t}")
+    req = ConciergeSessionRequest(
+        patient_id=p.id, session_type_id=st.id,
+        preferred_times=times, patient_note=(data.patient_note or "").strip(),
+        status="pending",
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    # Notify Dr. Anderson out-of-band so she can respond promptly even
+    # without the dashboard open.
+    try:
+        first_time = times[0] if times else "Async"
+        _send_anderson_notification(
+            subject=f"New session request — {p.name} ({st.name})",
+            body_html=(
+                f'<div style="font-family:-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:20px;color:#1a2a4a;line-height:1.7">'
+                f'  <h2 style="margin:0 0 10px;font-size:17px">{_esc(p.name)} requested a session</h2>'
+                f'  <p style="margin:4px 0;font-size:13px"><b>Type:</b> {_esc(st.name)} ({st.duration_minutes} min)</p>'
+                f'  <p style="margin:4px 0;font-size:13px"><b>Tier:</b> {_esc(p.membership_tier or "—")}</p>'
+                f'  <p style="margin:4px 0;font-size:13px"><b>First preferred time:</b> {_esc(first_time)}</p>'
+                f'  <p style="margin:14px 0 0;font-size:13px">Open the Appointments tab to confirm or counter-propose:</p>'
+                f'  <p style="margin:6px 0 0;font-size:13px"><a href="https://soulmd.us/concierge" style="color:#534AB7;font-weight:700">soulmd.us/concierge → Appointments</a></p>'
+                f'</div>'
+            ),
+        )
+    except Exception as e:
+        print(f"session request notification failed: {e}")
+    return _session_request_dict(req, db)
+
+
+@app.get("/concierge/patient/session-requests")
+def concierge_patient_list_session_requests(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    rows = db.query(ConciergeSessionRequest).filter(ConciergeSessionRequest.patient_id == p.id).order_by(ConciergeSessionRequest.created_at.desc()).all()
+    return {"session_requests": [_session_request_dict(r, db) for r in rows]}
+
+
+@app.get("/concierge/patient/sessions")
+def concierge_patient_list_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Patient-facing list of confirmed appointments — upcoming + past +
+    canceled / no-shows, all sorted by scheduled time."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    rows = db.query(ConciergeAppointment).filter(ConciergeAppointment.patient_id == p.id).order_by(ConciergeAppointment.starts_at.desc()).all()
+    return {"sessions": [
+        {
+            "id": a.id, "starts_at": a.starts_at.isoformat() if a.starts_at else None,
+            "duration_min": a.duration_min, "appointment_type": a.appointment_type,
+            "status": a.status, "zoom_join_url": a.zoom_join_url,
+            "session_request_id": a.session_request_id,
+            "canceled_at": a.canceled_at.isoformat() if a.canceled_at else None,
+            "canceled_within_window": bool(a.canceled_within_window),
+            "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+            "no_showed_at": a.no_showed_at.isoformat() if a.no_showed_at else None,
+        } for a in rows
+    ]}
+
+
+@app.post("/concierge/patient/sessions/{appointment_id}/cancel")
+def concierge_patient_cancel_session(
+    appointment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Patient self-cancellation. The 48-hour rule:
+       - >= 48 hours before starts_at → clean cancel, credit returned.
+       - <  48 hours → forfeits credit (canceled_within_window=True).
+       Frontend shows a warning modal before posting."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    p = _get_or_create_patient_row(current_user, db)
+    a = db.query(ConciergeAppointment).filter(ConciergeAppointment.id == appointment_id).first()
+    if not a or a.patient_id != p.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if a.status in ("canceled", "no_show", "completed"):
+        raise HTTPException(status_code=400, detail=f"Session is already {a.status}.")
+    now = datetime.utcnow()
+    breaches_window = False
+    if a.starts_at:
+        starts = a.starts_at if a.starts_at.tzinfo is None else a.starts_at.replace(tzinfo=None)
+        breaches_window = (starts - now) < timedelta(hours=48)
+    a.status = "canceled"
+    a.canceled_at = now
+    a.canceled_within_window = breaches_window
+    # Don't auto-refund the visit credit on a within-window cancel.
+    if not breaches_window and (p.visits_used or 0) > 0:
+        # Best-effort credit return — keeps the per-month counter accurate.
+        p.visits_used = max(0, (p.visits_used or 0) - 1)
+    p.updated_at = now
+    db.commit()
+    return {
+        "ok": True, "appointment_id": a.id,
+        "canceled_within_window": breaches_window,
+        "credit_returned": not breaches_window,
+    }
+
+
+# ───── Physician scheduling endpoints ─────────────────────────────────
+
+@app.get("/concierge/session-requests")
+def concierge_list_session_requests(
+    status: str = "pending",
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Physician inbox. Default filter is pending; pass status='all' to
+    see counter_proposed / confirmed / declined / cancelled too."""
+    q = db.query(ConciergeSessionRequest)
+    s = (status or "pending").lower()
+    if s != "all":
+        q = q.filter(ConciergeSessionRequest.status == s)
+    rows = q.order_by(ConciergeSessionRequest.created_at.desc()).limit(500).all()
+    return {"session_requests": [_session_request_dict(r, db, include_patient=True) for r in rows]}
+
+
+class _ConfirmSessionRequest(BaseModel):
+    chosen_time: str  # ISO datetime — must be one of preferred_times (not strictly enforced; UI picks)
+
+@app.post("/concierge/session-requests/{request_id}/confirm")
+def concierge_confirm_session_request(
+    request_id: int,
+    data: _ConfirmSessionRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    req = db.query(ConciergeSessionRequest).filter(ConciergeSessionRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status not in ("pending", "counter_proposed"):
+        raise HTTPException(status_code=400, detail=f"Request is {req.status}.")
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == req.patient_id).first()
+    st = db.query(ConciergeSessionType).filter(ConciergeSessionType.id == req.session_type_id).first()
+    if not p or not st:
+        raise HTTPException(status_code=400, detail="Patient or session type missing.")
+    try:
+        starts = datetime.fromisoformat(data.chosen_time.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid chosen_time — use ISO 8601.")
+
+    appt = ConciergeAppointment(
+        patient_id=p.id,
+        starts_at=starts,
+        duration_min=st.duration_minutes or 30,
+        appointment_type=st.slug,
+        status="scheduled",
+        notes=req.patient_note or "",
+        session_request_id=req.id,
+    )
+    db.add(appt)
+    db.flush()  # need appt.id for back-link
+
+    # Provision the Zoom meeting. If Zoom isn't configured we still flip
+    # the request to confirmed and email the patient — the practice owner
+    # can paste a join URL into the appointment manually later.
+    zoom_topic = f"{st.name} — SoulMD Concierge"
+    iso_for_zoom = (starts.replace(microsecond=0).isoformat() + ("Z" if starts.tzinfo is None else ""))
+    zoom_meeting = _zoom_create_meeting(zoom_topic, iso_for_zoom, st.duration_minutes or 30)
+    if zoom_meeting:
+        appt.zoom_meeting_id = zoom_meeting.get("id")
+        appt.zoom_join_url   = zoom_meeting.get("join_url")
+        appt.zoom_start_url  = zoom_meeting.get("start_url")
+
+    req.status = "confirmed"
+    req.confirmed_appointment_id = appt.id
+    req.updated_at = datetime.utcnow()
+    p.last_contact_at = datetime.utcnow()
+    db.commit()
+    db.refresh(appt)
+
+    _send_session_confirmation_email(p, st, appt)
+    return _session_request_dict(req, db, include_patient=True)
+
+
+class _CounterProposeRequest(BaseModel):
+    proposed_time: str  # ISO datetime
+    note: str | None = None
+
+@app.post("/concierge/session-requests/{request_id}/propose")
+def concierge_counter_propose_session(
+    request_id: int,
+    data: _CounterProposeRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    req = db.query(ConciergeSessionRequest).filter(ConciergeSessionRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Cannot counter-propose a {req.status} request.")
+    try:
+        when = datetime.fromisoformat(data.proposed_time.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid proposed_time — use ISO 8601.")
+    req.status = "counter_proposed"
+    req.counter_proposed_time = when
+    req.physician_response_note = (data.note or "").strip()
+    req.updated_at = datetime.utcnow()
+    db.commit()
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == req.patient_id).first()
+    if p:
+        try:
+            _send_counter_proposal_email(p, req, when)
+        except Exception as e:
+            print(f"counter-proposal email failed: {e}")
+    return _session_request_dict(req, db, include_patient=True)
+
+
+@app.post("/concierge/session-requests/{request_id}/decline")
+def concierge_decline_session_request(
+    request_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    req = db.query(ConciergeSessionRequest).filter(ConciergeSessionRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    req.status = "declined"
+    req.updated_at = datetime.utcnow()
+    db.commit()
+    return _session_request_dict(req, db, include_patient=True)
+
+
+@app.post("/concierge/appointments/{appointment_id}/complete")
+def concierge_appointment_complete(
+    appointment_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    a = db.query(ConciergeAppointment).filter(ConciergeAppointment.id == appointment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    a.status = "completed"
+    a.completed_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "appointment_id": a.id}
+
+
+@app.post("/concierge/appointments/{appointment_id}/no-show")
+def concierge_appointment_no_show(
+    appointment_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    a = db.query(ConciergeAppointment).filter(ConciergeAppointment.id == appointment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    a.status = "no_show"
+    a.no_showed_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "appointment_id": a.id}
+
+
+class _SessionNotesUpdate(BaseModel):
+    notes: str
+
+@app.patch("/concierge/appointments/{appointment_id}/notes")
+def concierge_appointment_notes(
+    appointment_id: int,
+    data: _SessionNotesUpdate,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    a = db.query(ConciergeAppointment).filter(ConciergeAppointment.id == appointment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    a.physician_session_notes = (data.notes or "").strip()
+    db.commit()
+    return {"ok": True}
+
+
+# ───── AI draft assistant for session requests ────────────────────────
+
+@app.post("/concierge/session-requests/{request_id}/draft-response")
+def concierge_session_request_draft_response(
+    request_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    """Asks Claude to draft a warm, personalized response in Dr. Anderson's
+    voice. Used by the Appointments tab "Draft Response" button. Returns
+    {draft: str} — the physician reviews/edits before sending."""
+    req = db.query(ConciergeSessionRequest).filter(ConciergeSessionRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == req.patient_id).first()
+    st = db.query(ConciergeSessionType).filter(ConciergeSessionType.id == req.session_type_id).first()
+    if not p or not st:
+        raise HTTPException(status_code=400, detail="Missing patient or session type")
+    if not client:
+        raise HTTPException(status_code=503, detail="AI not configured")
+    # Allowance lookup so the draft can reference remaining sessions.
+    allow = {"awaken":2, "align":3, "ascend":5}.get((p.membership_tier or "").lower(), 2)
+    used = p.visits_used or 0
+    remaining = max(0, allow - used)
+    times_str = "\n".join(f"  - {t}" for t in (req.preferred_times or [])) or "  (async — no time provided)"
+    prompt = (
+        f"You are Dr. Neysi Anderson — board-certified Internal Medicine physician at SoulMD Concierge. "
+        f"Tone: warm, unhurried, deeply personal, no medical jargon, no exclamation points. "
+        f"Draft a response (3–5 sentences) confirming or gently counter-proposing a session.\n\n"
+        f"Patient: {p.name}\n"
+        f"Tier: {p.membership_tier} ({remaining} of {allow} visits remaining this period)\n"
+        f"Session type: {st.name} ({st.duration_minutes} min)\n"
+        f"Preferred times:\n{times_str}\n"
+        f"Patient note: {req.patient_note or '(none)'}\n\n"
+        f"If their first preferred time is reasonable, confirm it. Otherwise, gently propose an alternative "
+        f"(invent a plausible weekday morning time). Sign off as 'With care, Dr. Anderson'."
+    )
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text if resp.content else ""
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Claude draft failed: {type(e).__name__}: {str(e)[:200]}")
+    return {"draft": text.strip()}
+
+
+# ───── Session SendGrid emails ────────────────────────────────────────
+
+def _send_session_confirmation_email(patient: ConciergePatient, st: ConciergeSessionType, appt: ConciergeAppointment) -> None:
+    """Fired on physician confirm. Includes Zoom join URL, the 48h
+    cancellation policy reminder, and an add-to-calendar Google link."""
+    if not SENDGRID_API_KEY:
+        return
+    try:
+        # Local time in MT for the body text. Zoom and the patient PWA
+        # show the same scheduled instant; the email matches that.
+        local = appt.starts_at  # stored as naive UTC; Zoom interprets as MT per timezone setting in _zoom_create_meeting
+        when = local.strftime("%A, %B %-d at %-I:%M %p MT") if local else "—"
+        join_url = appt.zoom_join_url or "(your physician will share the join link directly)"
+        # Google Calendar link builder (UTC ISO compact format).
+        try:
+            gcal_start = local.strftime("%Y%m%dT%H%M%SZ") if local else ""
+            gcal_end = (local + timedelta(minutes=st.duration_minutes or 30)).strftime("%Y%m%dT%H%M%SZ") if local else ""
+            from urllib.parse import quote as _quote
+            gcal_url = (
+                "https://calendar.google.com/calendar/render?action=TEMPLATE"
+                f"&text={_quote(st.name + ' — SoulMD Concierge')}"
+                f"&dates={gcal_start}/{gcal_end}"
+                f"&details={_quote('Join: ' + (appt.zoom_join_url or ''))}"
+            )
+        except Exception:
+            gcal_url = "https://calendar.google.com/calendar/r"
+        html = (
+            f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
+            f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
+            f'  <h1 style="font-size:22px;font-weight:400;letter-spacing:0.02em;color:#1a2a4a;margin:0 0 22px">Your session is confirmed.</h1>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dear {_esc((patient.name or "").split()[0] if patient.name else "friend")},</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dr. Anderson has confirmed your <b>{_esc(st.name)}</b> session for:</p>'
+            f'  <p style="font-size:18px;color:#1a2a4a;margin:0 0 22px;font-weight:600">{_esc(when)}</p>'
+            f'  <p style="margin:0 0 22px"><a href="{_esc(join_url)}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Join Session</a></p>'
+            f'  <p style="font-size:13px;margin:0 0 18px"><a href="{_esc(gcal_url)}" style="color:#534AB7;font-weight:600;text-decoration:none">+ Add to Google Calendar</a></p>'
+            f'  <p style="font-size:13px;color:#6B7280;margin:0 0 14px;line-height:1.7"><b>Cancellation policy:</b> Sessions may be cancelled cleanly up to 48 hours before the scheduled time. Cancellations within 48 hours forfeit the session credit.</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 4px">With care,</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 2px;font-style:italic">Dr. Neysi Anderson</p>'
+            f'  <p style="font-size:12px;color:#6B7280;margin:0">SoulMD Concierge Medicine</p>'
+            f'</div>'
+        )
+        msg = Mail(from_email=FROM_EMAIL, to_emails=patient.email,
+                   subject=f"Confirmed: {st.name} on {when}", html_content=html)
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY).send(msg)
+    except Exception as e:
+        print(f"session confirmation email failed for {patient.email}: {e}")
+
+
+def _send_counter_proposal_email(patient: ConciergePatient, req: ConciergeSessionRequest, proposed: datetime) -> None:
+    if not SENDGRID_API_KEY:
+        return
+    try:
+        when = proposed.strftime("%A, %B %-d at %-I:%M %p MT")
+        note = req.physician_response_note or ""
+        html = (
+            f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
+            f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
+            f'  <h1 style="font-size:22px;font-weight:400;letter-spacing:0.02em;color:#1a2a4a;margin:0 0 22px">An alternative time</h1>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dear {_esc((patient.name or "").split()[0] if patient.name else "friend")},</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dr. Anderson would like to propose this time instead:</p>'
+            f'  <p style="font-size:18px;color:#1a2a4a;margin:0 0 22px;font-weight:600">{_esc(when)}</p>'
+            + (f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 22px;font-style:italic">"{_esc(note)}"</p>' if note else "")
+            + f'  <p style="margin:0 0 22px"><a href="https://soulmd.us/patient" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Open Your Portal</a></p>'
+            f'  <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Open the Book tab to accept this time or submit new preferred times.</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 4px">With care,</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 2px;font-style:italic">Dr. Neysi Anderson</p>'
+            f'</div>'
+        )
+        msg = Mail(from_email=FROM_EMAIL, to_emails=patient.email,
+                   subject=f"Alternative time proposed — SoulMD Concierge", html_content=html)
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY).send(msg)
+    except Exception as e:
+        print(f"counter-proposal email failed for {patient.email}: {e}")
+
+
+# ───── Physician dashboard support: per-patient onboarding snapshot ──
+
+@app.get("/concierge/patients/{patient_id}/onboarding")
+def concierge_patient_onboarding_snapshot(
+    patient_id: int,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    p = db.query(ConciergePatient).filter(ConciergePatient.id == patient_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    consents = db.query(ConciergePatientConsent).filter(ConciergePatientConsent.patient_id == p.id).order_by(ConciergePatientConsent.signed_at.desc()).all()
+    intake = db.query(ConciergePatientIntake).filter(ConciergePatientIntake.patient_id == p.id).order_by(ConciergePatientIntake.submitted_at.desc()).first()
+    return {
+        "patient_id": p.id,
+        "onboarding_completed_at": p.onboarding_completed_at.isoformat() if p.onboarding_completed_at else None,
+        "consents": [
+            {"document_type": c.document_type, "version": c.document_version,
+             "signed_name": c.signed_name, "signed_at": c.signed_at.isoformat() if c.signed_at else None,
+             "ip_address": c.ip_address}
+            for c in consents
+        ],
+        "intake": ({
+            "id": intake.id,
+            "submitted_at": intake.submitted_at.isoformat() if intake.submitted_at else None,
+            "full_name": intake.full_name, "dob": intake.dob, "phone": intake.phone,
+            "address": intake.address, "emergency_contact": intake.emergency_contact,
+            "medical_conditions": intake.medical_conditions or [],
+            "surgeries": intake.surgeries, "medications": intake.medications,
+            "allergies": intake.allergies, "family_history": intake.family_history,
+            "exercise": intake.exercise, "diet": intake.diet, "sleep": intake.sleep,
+            "stress": intake.stress, "substance_use": intake.substance_use,
+            "spiritual_practice": intake.spiritual_practice, "healing_goals": intake.healing_goals,
+        }) if intake else None,
+    }
 
 
 @app.delete("/concierge/patients/{patient_id}")
