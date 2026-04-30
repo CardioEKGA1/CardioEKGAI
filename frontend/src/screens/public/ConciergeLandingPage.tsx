@@ -386,8 +386,10 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
               src="/images/dr-anderson.jpeg"
               alt="N. Anderson, MD"
               style={{
-                width:'220px',
-                height:'220px',
+                width:'300px',
+                height:'300px',
+                minWidth:'300px',
+                minHeight:'300px',
                 objectFit:'cover',
                 objectPosition:'center top',
                 borderRadius:'50%',
