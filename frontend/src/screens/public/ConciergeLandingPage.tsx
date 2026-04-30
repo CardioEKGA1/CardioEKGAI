@@ -48,7 +48,7 @@ interface Tier {
 // Footnote markers on Ascend benefits. Spec: gold #C9A84C, Georgia serif,
 // small superscript. Inherits nothing — fully self-contained so it
 // renders the same anywhere the marker appears.
-const Footnote: React.FC<{n: 1 | 2}> = ({ n }) => (
+const Footnote: React.FC<{n: 1 | 2 | 3}> = ({ n }) => (
   <sup style={{
     fontFamily: SERIF,
     fontSize: '0.72em',
@@ -58,7 +58,7 @@ const Footnote: React.FC<{n: 1 | 2}> = ({ n }) => (
     marginLeft: '1px',
     verticalAlign: 'super',
     lineHeight: 0,
-  }}>{n === 1 ? '¹' : '²'}</sup>
+  }}>{n === 1 ? '¹' : n === 2 ? '²' : '³'}</sup>
 );
 
 const TIERS: Tier[] = [
@@ -1038,10 +1038,22 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
               </div>
             </div>
             <div style={{
-              fontFamily: SANS, fontSize:'13px', color: GOLD,
-              opacity: 0.9, marginBottom:'24px', letterSpacing:'0.02em',
+              fontFamily: SANS, fontSize:'11px', color: MUTED,
+              letterSpacing:'0.04em', marginBottom:'4px', textTransform:'uppercase',
             }}>
-              {tier.annual}
+              First 3 months only<Footnote n={3}/>
+            </div>
+            <div style={{
+              fontFamily: SANS, fontSize:'13px', color: GOLD,
+              opacity: 0.9, marginBottom:'4px', letterSpacing:'0.02em',
+            }}>
+              {tier.annual} after balance payment
+            </div>
+            <div style={{
+              fontFamily: SANS, fontSize:'11px', color: MUTED,
+              opacity: 0.8, marginBottom:'24px', fontStyle:'italic',
+            }}>
+              Monthly payments apply toward annual membership.
             </div>
 
             <div style={{height:'1px', background: HAIRLINE, margin:'0 0 24px'}}/>
@@ -1318,6 +1330,9 @@ const BottomDisclaimers: React.FC = () => {
       </p>
       <p style={{...para, marginTop: '16px'}}>
         ² Mystical Features include access to psychic and mediumship experiences and other consciousness-expanding offerings curated by Dr. Anderson. Features are introduced over time and are exclusive to active Ascend members. Specific offerings may vary and are subject to availability.
+      </p>
+      <p style={{...para, marginTop: '16px'}}>
+        ³ Monthly membership is available during your first year only, for a maximum of three (3) consecutive months. After your third monthly payment, you will receive an invoice for the remaining annual balance (annual price minus monthly payments made). You will have fourteen (14) days to complete this payment. If payment is not received, your membership will transition to à la carte access — your portal remains open and sessions may be booked individually at published rates. Upon annual membership completion, subsequent renewals require full annual payment. Pricing and policies are subject to change with thirty (30) days written notice to your email on file.
       </p>
     </div>
   );

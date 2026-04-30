@@ -18,7 +18,25 @@ function useIsMobile(): boolean {
   return m;
 }
 
-interface Props { API: string; token: string; accent: string; }
+// Sidebar sections the home cards link to. Subset of the parent
+// dashboard's full Section union — only the routes we actually expose
+// on the home screen are listed here so a typo can't smuggle in a
+// non-existent destination.
+export type HomeNavTarget =
+  | 'home' | 'members' | 'inquiries' | 'conversations' | 'appointments'
+  | 'insights' | 'protocols' | 'coaching' | 'resources' | 'billing';
+
+interface Props {
+  API: string;
+  token: string;
+  accent: string;
+  // Optional — when present, the home-screen quick-action buttons
+  // (View all →, View calendar →, View today's focus, etc.) route the
+  // parent dashboard's section state instead of doing nothing. Undefined
+  // means the parent didn't wire it up — buttons stay rendered but
+  // become no-ops, exactly as before this fix.
+  onNavigate?: (target: HomeNavTarget) => void;
+}
 
 interface TodaySession {
   id: number;
@@ -103,7 +121,10 @@ const Avatar: React.FC<{name: string; size?: number}> = ({ name, size = 36 }) =>
   </div>
 );
 
-const PhysicianHome: React.FC<Props> = ({ API, token }) => {
+const PhysicianHome: React.FC<Props> = ({ API, token, onNavigate }) => {
+  // Tiny helper so each button is a one-liner. No-op if the parent
+  // didn't wire onNavigate.
+  const go = (target: HomeNavTarget) => () => { if (onNavigate) onNavigate(target); };
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,7 +193,7 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
             You have <b>{focusMembers.length}</b> member{focusMembers.length === 1 ? '' : 's'} who may benefit from attention today.
           </div>
         </div>
-        <button style={{
+        <button onClick={go('members')} style={{
           background:'rgba(30,20,60,0.55)', border:'0.5px solid rgba(255,255,255,0.3)',
           color:'white', borderRadius:'999px',
           padding: isMobile ? '11px 18px' : '10px 18px',
@@ -191,21 +212,25 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
         <div style={CARD}>
           <div style={CARD_HEADER}>
             <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Today's Focus</div>
-            <button style={CARD_LINK}>View all →</button>
+            <button onClick={go('members')} style={CARD_LINK}>View all →</button>
           </div>
           {focusMembers.length === 0 ? (
             <div style={{fontSize:'12.5px', color: INK_SOFT, lineHeight:1.55}}>No members need attention today — the quiet days count too.</div>
           ) : (
             <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
               {focusMembers.map(m => (
-                <div key={m.id} style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                <button
+                  key={m.id}
+                  onClick={go('members')}
+                  style={{display:'flex', alignItems:'center', gap:'12px', background:'transparent', border:'none', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', textAlign:'left', width:'100%'}}
+                >
                   <Avatar name={m.name}/>
                   <div style={{flex:1, minWidth:0}}>
                     <div style={{fontSize:'13.5px', fontWeight:700, color: INK, marginBottom:'2px'}}>{m.name}</div>
                     <div style={{fontSize:'11.5px', color: INK_SOFT}}>{m.reason}</div>
                   </div>
                   <span style={{fontSize:'10px', fontWeight:700, padding:'4px 10px', borderRadius:'999px', background:'rgba(224,106,106,0.12)', color:'#C34545', whiteSpace:'nowrap'}}>Needs outreach</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -222,14 +247,14 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
           <div style={{fontSize:'13px', color: INK, lineHeight:1.6, flex:1}}>
             {insight}
           </div>
-          <button style={{...CARD_LINK, alignSelf:'flex-start'}}>View insight details →</button>
+          <button onClick={go('insights')} style={{...CARD_LINK, alignSelf:'flex-start'}}>View insight details →</button>
         </div>
 
         {/* Upcoming Appointments */}
         <div style={CARD}>
           <div style={CARD_HEADER}>
             <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Upcoming Appointments</div>
-            <button style={CARD_LINK}>View calendar →</button>
+            <button onClick={go('appointments')} style={CARD_LINK}>View calendar →</button>
           </div>
           {upcoming.length === 0 ? (
             <div style={{fontSize:'12.5px', color: INK_SOFT, lineHeight:1.55}}>No appointments scheduled today.</div>
@@ -238,7 +263,11 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
               {upcoming.map(s => {
                 const when = new Date(s.starts_at);
                 return (
-                  <div key={s.id} style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                  <button
+                    key={s.id}
+                    onClick={go('appointments')}
+                    style={{display:'flex', alignItems:'center', gap:'12px', background:'transparent', border:'none', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', textAlign:'left', width:'100%'}}
+                  >
                     <Avatar name={s.patient_name}/>
                     <div style={{flex:1, minWidth:0}}>
                       <div style={{fontSize:'13.5px', fontWeight:700, color: INK, marginBottom:'2px'}}>{s.patient_name}</div>
@@ -246,7 +275,7 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
                         {when.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' })} · {humanize(s.service_type)}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -268,8 +297,8 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
         </div>
         <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
           <button onClick={() => setShowOracleSender(true)} style={actionBtnStyle('solid')}>Send insight</button>
-          <button style={actionBtnStyle('ghost')}>Check-in</button>
-          <button style={actionBtnStyle('ghost')}>Share reflection</button>
+          <button onClick={go('conversations')} style={actionBtnStyle('ghost')}>Check-in</button>
+          <button onClick={go('coaching')} style={actionBtnStyle('ghost')}>Share reflection</button>
         </div>
       </div>
 
@@ -280,21 +309,25 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
         <div style={CARD}>
           <div style={CARD_HEADER}>
             <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Recent Conversations</div>
-            <button style={CARD_LINK}>View all →</button>
+            <button onClick={go('conversations')} style={CARD_LINK}>View all →</button>
           </div>
           {messages.length === 0 ? (
             <div style={{fontSize:'12.5px', color: INK_SOFT, lineHeight:1.55}}>No conversations yet. Start one from the Conversations tab.</div>
           ) : (
             <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
               {messages.slice(0, 3).map(m => (
-                <div key={m.id} style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                <button
+                  key={m.id}
+                  onClick={go('conversations')}
+                  style={{display:'flex', alignItems:'center', gap:'12px', background:'transparent', border:'none', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', textAlign:'left', width:'100%'}}
+                >
                   <Avatar name={m.patient_name}/>
                   <div style={{flex:1, minWidth:0}}>
                     <div style={{fontSize:'13.5px', fontWeight:700, color: INK, marginBottom:'2px'}}>{m.patient_name}</div>
                     <div style={{fontSize:'11.5px', color: INK_SOFT, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{m.body}</div>
                   </div>
                   {!m.read_at && <span style={{width:'8px', height:'8px', borderRadius:'50%', background: PURPLE, flexShrink:0}}/>}
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -304,7 +337,7 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
         <div style={CARD}>
           <div style={CARD_HEADER}>
             <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Lab Reviews</div>
-            <button style={CARD_LINK}>View all labs →</button>
+            <button onClick={go('protocols')} style={CARD_LINK}>View all labs →</button>
           </div>
           <div style={{display:'flex', flexDirection:'column', gap:'10px', flex:1}}>
             <LabRow label="High priority" count={labs.high} color="#E06A6A"/>
@@ -317,7 +350,7 @@ const PhysicianHome: React.FC<Props> = ({ API, token }) => {
         <div style={CARD}>
           <div style={CARD_HEADER}>
             <div style={CARD_TITLE}><span style={{color: PURPLE}}>✦</span> Practice Snapshot</div>
-            <button style={CARD_LINK}>View full report →</button>
+            <button onClick={go('insights')} style={CARD_LINK}>View full report →</button>
           </div>
           <div style={{display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? '14px' : '10px', flex:1}}>
             <Snapshot label="Active Members" value={data.total_active_members} trend="↗"/>

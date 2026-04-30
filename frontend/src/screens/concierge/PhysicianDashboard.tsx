@@ -199,7 +199,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
         </div>
 
         <main style={{flex:1, padding:`clamp(14px,3vw,28px) clamp(14px,3vw,28px) ${isMobile ? '92px' : 'clamp(14px,3vw,28px)'}`, maxWidth:'1280px', width:'100%', margin:'0 auto', boxSizing:'border-box'}}>
-          {section === 'home'          && <PhysicianHome API={API} token={token} accent={PURPLE}/>}
+          {section === 'home'          && <PhysicianHome API={API} token={token} accent={PURPLE} onNavigate={go}/>}
           {section === 'members'       && <PatientsSection API={API} token={token} accent={PURPLE}/>}
           {section === 'inquiries'     && <InquiriesSection API={API} token={token} accent={PURPLE}/>}
           {section === 'conversations' && <MessagesSection API={API} token={token} accent={PURPLE}/>}
