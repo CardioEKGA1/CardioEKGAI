@@ -476,9 +476,11 @@ const GFE_BODY = (
       <li>Urgent same-day consult: $444</li>
       <li>Lab result review + async message: $75</li>
     </ul>
-    <p>This estimate covers the recurring membership fee and per-service rates for 12 months. Actual charges may vary if you upgrade or downgrade your membership tier.</p>
+    <p>This estimate covers the recurring membership fee and per-service rates for 12 months.</p>
+    <p><b>Payments are final and non-refundable.</b> All payments are final and non-refundable. Monthly payments made during the 3-month trial period are applied toward the remaining annual balance — this is a payment-completion structure, not a refund or discount. No credits, refunds, or prorated adjustments are issued under any circumstances.</p>
+    <p><b>Tier changes.</b> Tier changes are only permitted at annual renewal. Members may switch to any tier at renewal by paying the full annual price of the new tier. Mid-year tier changes are not permitted. Members wishing to access additional services mid-year may use à la carte options or contact <a href="mailto:support@soulmd.us" style={{color:'#534AB7'}}>support@soulmd.us</a>.</p>
     <p><b>Right to dispute:</b> if you receive a bill that is at least $400 more than this estimate, you may dispute the bill through the federal patient-provider dispute resolution process. Visit <a href="https://www.cms.gov/nosurprises" target="_blank" rel="noopener noreferrer" style={{color:'#534AB7'}}>cms.gov/nosurprises</a> for details.</p>
-    <p>By signing below, you acknowledge receipt of this Good Faith Estimate.</p>
+    <p>By signing below, you acknowledge receipt of this Good Faith Estimate and the payment + tier-change policies above.</p>
   </>
 );
 

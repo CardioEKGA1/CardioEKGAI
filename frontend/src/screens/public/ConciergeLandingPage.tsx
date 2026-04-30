@@ -1683,6 +1683,12 @@ const BottomDisclaimers: React.FC = () => {
       <p style={{...para, marginTop: '16px'}}>
         ³ Monthly membership is available during your first year only, for a maximum of three (3) consecutive months. After your third monthly payment, you will receive an invoice for the remaining annual balance (annual price minus monthly payments made). You will have fourteen (14) days to complete this payment. If payment is not received, your membership will transition to à la carte access — your portal remains open and sessions may be booked individually at published rates. Upon annual membership completion, subsequent renewals require full annual payment. Pricing and policies are subject to change with thirty (30) days written notice to your email on file.
       </p>
+      <p style={{...para, marginTop: '16px'}}>
+        All payments are final and non-refundable. Monthly payments made during the 3-month trial period are applied toward the remaining annual balance — this is a payment-completion structure, not a refund or discount. No credits, refunds, or prorated adjustments are issued under any circumstances.
+      </p>
+      <p style={{...para, marginTop: '16px'}}>
+        Tier changes are only permitted at annual renewal. Members may switch to any tier at renewal by paying the full annual price of the new tier. Mid-year tier changes are not permitted. Members wishing to access additional services mid-year may use à la carte options or contact <a href="mailto:support@soulmd.us" style={{color: 'inherit', textDecoration: 'underline'}}>support@soulmd.us</a>.
+      </p>
     </div>
   );
 };
