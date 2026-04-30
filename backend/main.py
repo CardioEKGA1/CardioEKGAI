@@ -7677,6 +7677,17 @@ _build = os.path.join(os.path.dirname(__file__), "build")
 if os.path.exists(_build):
     app.mount("/static", StaticFiles(directory=os.path.join(_build, "static")), name="static")
 
+    # Public assets that live under /images/ (physician portrait, etc.).
+    # Without this mount, the SPA catch-all at the bottom of this file
+    # would intercept /images/*.jpeg requests and serve index.html in
+    # place of the file — the browser then tries to decode HTML as an
+    # image and renders a broken-image icon. Only mounted when the
+    # directory actually exists so deploys without a public/images/
+    # don't crash on startup.
+    _images_dir = os.path.join(_build, "images")
+    if os.path.isdir(_images_dir):
+        app.mount("/images", StaticFiles(directory=_images_dir), name="images")
+
     # Files that must be served AS-IS from build root (not as the SPA shell),
     # otherwise browsers get index.html HTML in place of the actual file and
     # silently break (service worker fails to install, manifest fails to
