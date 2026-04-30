@@ -28,6 +28,7 @@ from database import (
     MeditatePlayHistory, MeditateAiInsight,
     ToolTrialUse,
     MembershipStatus,
+    ConciergeInquiryLog, MagicLinkConsumed,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
@@ -9687,6 +9688,15 @@ class _ConciergeInquiryRequest(BaseModel):
     # submitted. The frontend gates the submit button on this checkbox;
     # the backend re-checks here so a hand-crafted POST can't bypass.
     age_18_or_older: bool | None = None
+    # Honeypot. Real browsers never see this field (it's hidden via
+    # CSS); bots blindly fill every input on the form. Any non-empty
+    # value here triggers a silent reject — we return a fake 200 so
+    # the bot can't tell its submission failed.
+    website: str | None = None
+    # Anti-replay timing. Frontend records the millisecond timestamp
+    # when the form first paints; we reject submissions that came in
+    # less than 3 seconds later as bot-flag.
+    form_loaded_at_ms: int | None = None
 
 
 def _send_anderson_notification(subject: str, body_html: str) -> bool:
@@ -10065,32 +10075,212 @@ def public_meditations_request(
     return {"ok": True, "id": row.id}
 
 
+# ───── Public-form abuse protection helpers ───────────────────────────
+# The /concierge-medicine/inquire endpoint is the only fully-public POST
+# we expose; bot traffic + age fraud is the realistic threat model. This
+# block is the gauntlet a submission must clear before anything is
+# written to concierge_inquiries.
+
+# Curated list of disposable/throwaway email domains. Not exhaustive —
+# bot operators rotate domains constantly — but covers the long tail of
+# scripted abuse without hitting a paid email-validation service.
+_DISPOSABLE_EMAIL_DOMAINS: set[str] = {
+    "mailinator.com", "tempmail.com", "tempmail.org", "10minutemail.com",
+    "guerrillamail.com", "guerrillamail.net", "guerrillamail.org",
+    "guerrillamail.biz", "sharklasers.com", "yopmail.com", "throwawaymail.com",
+    "trashmail.com", "trashmail.net", "fakeinbox.com", "getairmail.com",
+    "maildrop.cc", "mintemail.com", "spambox.us", "33mail.com",
+    "dispostable.com", "tempr.email", "mvrht.net", "emailondeck.com",
+    "spamgourmet.com", "mailnesia.com", "harakirimail.com",
+}
+
+# Phone number sanity. Allow anything from "555 5555" up to international
+# "+44 (0) 7700 900123" — strip non-digits and require 10–15 digits.
+_PHONE_DIGIT_RE = re.compile(r"\D+")
+_EMAIL_BASIC_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_NAME_WORDS_RE  = re.compile(r"\S+")
+
+
+def _normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def _email_hash(email: str) -> str:
+    if not email:
+        return ""
+    return hashlib.sha256(_normalize_email(email).encode("utf-8")).hexdigest()
+
+
+def _validate_phone(phone: str) -> bool:
+    digits = _PHONE_DIGIT_RE.sub("", phone or "")
+    return 10 <= len(digits) <= 15
+
+
+def _validate_email_strict(email: str) -> tuple[bool, str]:
+    """Returns (ok, reason). Lightweight checks only — no DNS lookup so
+    we don't add latency on the public form. The disposable-domain list
+    catches the realistic bot traffic; MX-record verification is left
+    out deliberately because it's slow and unreliable from inside the
+    Railway egress network."""
+    e = _normalize_email(email)
+    if not e or not _EMAIL_BASIC_RE.match(e):
+        return False, "syntax"
+    local, _, domain = e.partition("@")
+    if len(local) < 2:
+        return False, "single_char_local"
+    if domain in _DISPOSABLE_EMAIL_DOMAINS:
+        return False, "disposable"
+    return True, ""
+
+
+def _validate_name(name: str) -> tuple[bool, str]:
+    n = (name or "").strip()
+    if len(n) < 5:
+        return False, "too_short"
+    words = _NAME_WORDS_RE.findall(n)
+    if len(words) < 2:
+        return False, "single_word"
+    return True, ""
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP. Trusts the leftmost X-Forwarded-For hop
+    when present (Railway's edge sets it); otherwise falls back to the
+    direct connection. Used for rate limiting + abuse logging only,
+    never for auth, so spoofing is not a security issue."""
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if xff:
+        return xff
+    return (request.client.host if request.client else "") or ""
+
+
+def _log_inquiry_attempt(db: Session, request: Request, email: str, outcome: str, detail: str = "") -> None:
+    """Append-only audit log for /concierge-medicine/inquire. Failures
+    swallowed — abuse logging must not block the user-facing response."""
+    try:
+        db.add(ConciergeInquiryLog(
+            email_hash=_email_hash(email) or None,
+            ip_address=_client_ip(request) or None,
+            user_agent=(request.headers.get("user-agent") or "")[:500] or None,
+            outcome=outcome,
+            detail=(detail or "")[:200],
+        ))
+        db.commit()
+    except Exception as e:
+        print(f"inquiry log write failed: {e}")
+
+
+_INQUIRY_RATE_PER_HOUR = 3
+def _ip_rate_limited(db: Session, ip: str) -> bool:
+    """True iff this IP has logged >= _INQUIRY_RATE_PER_HOUR submissions
+    in the past hour. Counts ALL outcomes — accepted, rejected,
+    honeypot — so a single source can't drain the rate budget by
+    spamming validation failures."""
+    if not ip:
+        return False
+    cutoff = datetime.utcnow() - timedelta(hours=1)
+    count = db.query(ConciergeInquiryLog).filter(
+        ConciergeInquiryLog.ip_address == ip,
+        ConciergeInquiryLog.created_at >= cutoff,
+    ).count()
+    return count >= _INQUIRY_RATE_PER_HOUR
+
+
+def _strip_html(s: str | None, max_len: int = 4000) -> str:
+    """Light input sanitizer for free-text fields written to the DB.
+    Strips HTML tags + control chars + caps length. NOT a security
+    boundary — Stripe/SendGrid/admin reads always re-escape via _esc()
+    — but it keeps the DB clean and prevents obviously hostile content
+    (script tags, etc.) from being persisted verbatim. Whitespace
+    inside the value is preserved so multi-line health histories
+    survive."""
+    if not s:
+        return ""
+    out = re.sub(r"<[^>]*>", "", s)            # strip tags
+    out = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", out)  # control chars (keep \t \n \r)
+    return out.strip()[:max_len]
+
+
 @app.post("/concierge-medicine/inquire")
 def public_concierge_inquiry(
     data: _ConciergeInquiryRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    name  = (data.name or "").strip()
-    email = (data.email or "").strip()
-    phone = (data.phone or "").strip()
+    name  = _strip_html((data.name or "").strip(), 200)
+    email_raw = (data.email or "").strip()
+    email = _normalize_email(email_raw)
+    phone = _strip_html((data.phone or "").strip(), 60)
     tier  = (data.tier_interest or "").strip().lower() or None
     # health_history is the new primary narrative field (per-tier card
     # form). Legacy `message` is still accepted from the bottom-of-page
     # fallback form. We persist whichever the caller provided into both
     # so admin queries don't have to coalesce.
-    health_history = (data.health_history or "").strip()
-    legacy_msg     = (data.message or "").strip()
+    health_history = _strip_html(data.health_history or "", 4000)
+    legacy_msg     = _strip_html(data.message or "", 4000)
     primary_text   = health_history or legacy_msg
-    dob = (data.dob or "").strip() or None
+    dob = _strip_html((data.dob or "").strip(), 32) or None
     insurance_acked = bool(data.insurance_acknowledged)
 
-    if not name or "@" not in email:
-        raise HTTPException(status_code=400, detail="Name and a valid email are required.")
+    # Honeypot — silent reject. Always returns 200 so the bot can't
+    # tell its submission failed; DB write skipped entirely.
+    if (data.website or "").strip():
+        _log_inquiry_attempt(db, request, email, "honeypot", "website field populated")
+        return {"ok": True, "id": 0}
+
+    # Time-on-form check — silent reject if posted under 3 seconds.
+    if data.form_loaded_at_ms is not None:
+        try:
+            now_ms = int(datetime.utcnow().timestamp() * 1000)
+            if now_ms - int(data.form_loaded_at_ms) < 3000:
+                _log_inquiry_attempt(db, request, email, "honeypot", "submitted_too_fast")
+                return {"ok": True, "id": 0}
+        except (TypeError, ValueError):
+            pass
+
+    # IP rate limit — visible reject so legit users get a clear signal
+    # if they're behind a shared NAT and one neighbor was abusive. The
+    # counter resets every hour.
+    ip = _client_ip(request)
+    if _ip_rate_limited(db, ip):
+        _log_inquiry_attempt(db, request, email, "rate_limited", ip)
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+
+    name_ok, name_reason = _validate_name(name)
+    if not name_ok:
+        _log_inquiry_attempt(db, request, email, "invalid_field", f"name:{name_reason}")
+        raise HTTPException(status_code=400, detail="Please enter your full name (first and last).")
+
+    email_ok, email_reason = _validate_email_strict(email)
+    if not email_ok:
+        _log_inquiry_attempt(db, request, email, "invalid_email", email_reason)
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+
+    if not _validate_phone(phone):
+        _log_inquiry_attempt(db, request, email, "invalid_field", "phone")
+        raise HTTPException(status_code=400, detail="Please enter a valid phone number.")
+
     if not bool(data.age_18_or_older):
+        _log_inquiry_attempt(db, request, email, "invalid_field", "age_checkbox_unchecked")
         raise HTTPException(
             status_code=400,
             detail="Please confirm you are 18 years of age or older to submit this request.",
         )
+
+    age = _age_from_iso_dob(dob)
+    if age is None:
+        _log_inquiry_attempt(db, request, email, "invalid_field", "dob_unparseable")
+        raise HTTPException(status_code=400, detail="Please enter a valid date of birth.")
+    if age < 18:
+        _log_inquiry_attempt(db, request, email, "age_rejected", f"age={age}")
+        # The literal phrase here matches the frontend block-screen copy
+        # so PatientIntake.tsx + ConciergeLandingPage.tsx render the
+        # same message verbatim.
+        raise HTTPException(
+            status_code=400,
+            detail="SoulMD Concierge is available to patients 18 years of age and older.",
+        )
+
     if tier and tier not in {"awaken", "align", "ascend", "unsure"}:
         tier = "unsure"
 
@@ -10103,6 +10293,7 @@ def public_concierge_inquiry(
         insurance_acknowledged=insurance_acked,
     )
     db.add(row); db.commit(); db.refresh(row)
+    _log_inquiry_attempt(db, request, email, "accepted", f"id={row.id}")
 
     tier_label = {"awaken":"Awaken","align":"Align","ascend":"Ascend","unsure":"Not sure yet"}.get(tier or "", "—")
     subject = (

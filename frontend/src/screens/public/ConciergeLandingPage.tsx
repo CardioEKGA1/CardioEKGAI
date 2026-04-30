@@ -910,25 +910,71 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
   const showBack = lockedBack || (hoverCapable && hovering);
 
   const [form, setForm] = useState({
-    name: '', email: '', phone: '', why: '',
+    name: '', email: '', phone: '', dob: '', why: '',
+    // Honeypot — real users never see this field. Bots will fill it
+    // because they enumerate every input on the form. Any non-empty
+    // value triggers a silent backend reject.
+    website: '',
   });
   const [age18, setAge18] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [err, setErr] = useState('');
+  // Per-field validation errors so each input can render its own red
+  // border + inline message. Cleared on successful submit attempt.
+  const [fieldErr, setFieldErr] = useState<{[k: string]: string}>({});
+  // Capture the moment the form first renders so the backend can
+  // reject sub-3-second submissions as bot-flag.
+  const [loadedAt] = useState<number>(() => Date.now());
+
+  // Years between iso (YYYY-MM-DD) and today; null if unparseable.
+  // Mirrors backend _age_from_iso_dob so client + server agree.
+  const computedAge = (iso: string): number | null => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
+    return age;
+  };
+  // Phone regex matches the backend's "10–15 digits after stripping
+  // non-digits" rule. Done here too so the user sees the error
+  // before the round-trip.
+  const phoneOk = (p: string) => p.replace(/\D+/g, '').length >= 10 && p.replace(/\D+/g, '').length <= 15;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
     setErr('');
-    if (!form.name.trim() || !form.email.trim() || !form.email.includes('@')) {
-      setErr('Please enter your name and a valid email.');
-      return;
+    const errs: {[k: string]: string} = {};
+    if (!form.name.trim() || form.name.trim().split(/\s+/).length < 2 || form.name.trim().length < 5) {
+      errs.name = 'Please enter your full name.';
+    }
+    if (!form.email.trim() || !form.email.includes('@') || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) {
+      errs.email = 'Please enter a valid email address.';
+    }
+    if (!form.phone.trim() || !phoneOk(form.phone)) {
+      errs.phone = 'Please enter a valid phone number.';
+    }
+    const age = computedAge(form.dob);
+    if (!form.dob.trim()) {
+      errs.dob = 'Date of birth is required.';
+    } else if (age === null) {
+      errs.dob = 'Please enter a valid date of birth.';
+    } else if (age < 18) {
+      errs.dob = 'SoulMD Concierge is available to patients 18 years of age and older.';
     }
     if (!age18) {
-      setErr('Please confirm you are 18 years of age or older.');
+      errs.age18 = 'Please confirm you are 18 years of age or older.';
+    }
+    if (Object.keys(errs).length) {
+      setFieldErr(errs);
+      setErr('Please complete the required fields.');
       return;
     }
+    setFieldErr({});
     setSubmitting(true);
     try {
       const res = await fetch(`${API}/concierge-medicine/inquire`, {
@@ -937,11 +983,17 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim(),
-          phone: form.phone.trim() || undefined,
+          phone: form.phone.trim(),
+          dob: form.dob.trim(),
           tier_interest: tier.id,
           // Backend persists the narrative into health_history.
           health_history: form.why.trim() || undefined,
           age_18_or_older: true,
+          // Honeypot + timing — backend silently rejects when website
+          // is non-empty or when this submission lands < 3 s after
+          // mount, returning fake 200 either way.
+          website: form.website,
+          form_loaded_at_ms: loadedAt,
         }),
       });
       if (!res.ok) {
@@ -1165,19 +1217,45 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
                   value={form.name}
                   onChange={v => setForm(f => ({...f, name: v}))}
                   type="text" autoComplete="name" required
+                  errorText={fieldErr.name}
                 />
                 <FlipInput
                   label="Email"
                   value={form.email}
                   onChange={v => setForm(f => ({...f, email: v}))}
                   type="email" autoComplete="email" required
+                  errorText={fieldErr.email}
                 />
                 <FlipInput
                   label="Phone"
                   value={form.phone}
                   onChange={v => setForm(f => ({...f, phone: v}))}
-                  type="tel" autoComplete="tel"
+                  type="tel" autoComplete="tel" required
+                  errorText={fieldErr.phone}
                 />
+                <FlipInput
+                  label="Date of birth"
+                  value={form.dob}
+                  onChange={v => setForm(f => ({...f, dob: v}))}
+                  type="date" autoComplete="bday" required
+                  errorText={fieldErr.dob}
+                />
+
+                {/* Honeypot — hidden from real users via inline CSS.
+                    Bots blindly fill any input named "website"; backend
+                    silently rejects on any non-empty value. */}
+                <div aria-hidden style={{position:'absolute', left:'-9999px', top:'auto', width:'1px', height:'1px', overflow:'hidden'}}>
+                  <label>
+                    Website
+                    <input
+                      type="text"
+                      tabIndex={-1}
+                      autoComplete="off"
+                      value={form.website}
+                      onChange={e => setForm(f => ({...f, website: e.target.value}))}
+                    />
+                  </label>
+                </div>
 
                 <label style={flipLabelStyle}>
                   Why this tier resonates with you
@@ -1192,19 +1270,21 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
 
                 <label style={{
                   display:'flex', alignItems:'flex-start', gap:'8px',
-                  fontFamily: SANS, fontSize:'11.5px', color: NAVY,
+                  fontFamily: SANS, fontSize:'11.5px',
+                  color: fieldErr.age18 ? '#a02020' : NAVY,
                   letterSpacing: 0, textTransform:'none', fontWeight: 400,
                   cursor:'pointer', marginTop:'4px',
                 }}>
                   <input
                     type="checkbox"
                     checked={age18}
-                    onChange={e => setAge18(e.target.checked)}
+                    onChange={e => { setAge18(e.target.checked); if (e.target.checked) setFieldErr(fe => { const n = {...fe}; delete n.age18; return n; }); }}
                     onClick={e => e.stopPropagation()}
-                    style={{marginTop:'2px', accentColor: NAVY, flexShrink:0}}
+                    style={{marginTop:'2px', accentColor: fieldErr.age18 ? '#a02020' : NAVY, flexShrink:0}}
                   />
                   <span>I confirm I am 18 years of age or older.</span>
                 </label>
+                {fieldErr.age18 && <div style={{fontSize:'11px', color:'#a02020', marginTop:'-4px'}}>{fieldErr.age18}</div>}
 
                 {err && (
                   <div style={{
@@ -1288,8 +1368,9 @@ const FlipInput: React.FC<{
   type?: string;
   autoComplete?: string;
   required?: boolean;
-}> = ({ label, value, onChange, type='text', autoComplete, required }) => (
-  <label style={flipLabelStyle}>
+  errorText?: string;
+}> = ({ label, value, onChange, type='text', autoComplete, required, errorText }) => (
+  <label style={{...flipLabelStyle, color: errorText ? '#a02020' : flipLabelStyle.color}}>
     {label}{required ? ' *' : ''}
     <input
       type={type}
@@ -1297,8 +1378,9 @@ const FlipInput: React.FC<{
       required={required}
       value={value}
       onChange={e => onChange(e.target.value)}
-      style={flipInputStyle}
+      style={{...flipInputStyle, border: errorText ? '1px solid #d04040' : flipInputStyle.border}}
     />
+    {errorText && <span style={{fontSize:'10.5px', color:'#a02020', marginTop:'2px', textTransform:'none', letterSpacing:0, fontWeight:400}}>{errorText}</span>}
   </label>
 );
 

@@ -650,6 +650,36 @@ class ConciergeInquiry(Base):
     status = Column(String, default="pending", index=True)  # pending | responded | enrolled | declined
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+
+# Public-form abuse log. Every POST to /concierge-medicine/inquire is
+# logged here regardless of outcome — accepted, age-rejected, rate-
+# limited, honeypot-tripped — so we have a single audit trail for
+# Dr. Anderson and so the rate limiter has a clean source of truth.
+class ConciergeInquiryLog(Base):
+    __tablename__ = "concierge_inquiry_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    email_hash = Column(String, index=True, nullable=True)   # sha256 of normalized email; nullable in case parsing fails
+    ip_address = Column(String, index=True, nullable=True)
+    user_agent = Column(String, nullable=True)
+    outcome = Column(String, index=True, nullable=False)     # accepted | age_rejected | honeypot | rate_limited | invalid_email | invalid_field
+    detail = Column(String, default="")                       # short reason or field name; never raw user input
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+# One-time-use guard for magic-link tokens. JWTs are stateless; this
+# table records the token's signature when it's first consumed so
+# subsequent /auth/verify-token calls with the same token return 401.
+# The body is the JWT's signature segment (last "." chunk) to keep the
+# index small — collision-resistant under HS256.
+class MagicLinkConsumed(Base):
+    __tablename__ = "magic_link_consumed"
+    id = Column(Integer, primary_key=True, index=True)
+    token_sig = Column(String, index=True, unique=True, nullable=False)
+    email = Column(String, index=True, nullable=True)
+    consumed_ip = Column(String, nullable=True)
+    consumed_ua = Column(String, nullable=True)
+    consumed_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 # HIPAA-style audit trail. Records every action a physician (or admin)
 # takes against a patient record so we can demonstrate access provenance
 # during compliance review. Append-only; never updated. The detail JSON
