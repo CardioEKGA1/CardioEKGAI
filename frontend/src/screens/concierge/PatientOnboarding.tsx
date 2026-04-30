@@ -244,6 +244,20 @@ const CONDITIONS = [
   'Migraines', 'Pregnancy or postpartum',
 ];
 
+// Years between an ISO date (YYYY-MM-DD) and today. Mirrors the
+// backend's _age_from_iso_dob so the over/under-18 verdict is the
+// same on both sides; keeps under-18 patients from ever submitting.
+const ageFromIsoDob = (iso: string): number | null => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - d.getFullYear();
+  const m = today.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
+  return age;
+};
+
 const IntakeStep: React.FC<{
   patientName: string;
   submitting: boolean;
@@ -257,10 +271,33 @@ const IntakeStep: React.FC<{
     exercise: '', diet: '', sleep: '', stress: '', substance_use: '',
     spiritual_practice: '', healing_goals: '',
   });
+  const [age18, setAge18] = useState(false);
   const set = (k: keyof typeof form, v: any) => setForm(f => ({...f, [k]: v}));
   const toggleCondition = (c: string) => setForm(f => ({...f, medical_conditions: f.medical_conditions.includes(c) ? f.medical_conditions.filter(x => x !== c) : [...f.medical_conditions, c]}));
 
-  const required = form.full_name.trim() && form.dob.trim();
+  const computedAge = form.dob ? ageFromIsoDob(form.dob) : null;
+  const isUnder18 = computedAge !== null && computedAge < 18;
+
+  // Submit gate: name + DOB filled, the explicit checkbox is checked,
+  // AND the DOB-derived age is at least 18. Server re-validates all
+  // three before stamping age_verified — this is just for UX.
+  const required = !!form.full_name.trim() && !!form.dob.trim() && age18 && !isUnder18;
+
+  if (isUnder18) {
+    return (
+      <div style={{...cardStyle, textAlign:'center', padding:'40px 24px'}}>
+        <div style={{fontFamily: SERIF, fontSize:'20px', color: NAVY, fontWeight:600, marginBottom:'14px'}}>
+          We're sorry.
+        </div>
+        <p style={{fontSize:'14px', color: NAVY, lineHeight:1.7, marginBottom:'20px'}}>
+          SoulMD Concierge is available to patients <b>18 years of age and older</b>. Please contact{' '}
+          <a href="mailto:support@soulmd.us" style={{color: DEEPP, fontWeight:700}}>support@soulmd.us</a>{' '}
+          if you have questions.
+        </p>
+        <button onClick={() => set('dob', '')} style={{...ghostBtnStyle, padding:'10px 18px'}}>← Edit date of birth</button>
+      </div>
+    );
+  }
 
   return (
     <div style={cardStyle}>
@@ -302,11 +339,29 @@ const IntakeStep: React.FC<{
           <Field label="Current practice (meditation, prayer, energy work, etc.)"><textarea value={form.spiritual_practice} onChange={e=>set('spiritual_practice', e.target.value)} rows={2} style={textareaStyle}/></Field>
           <Field label="What you're hoping to heal or transform"><textarea value={form.healing_goals} onChange={e=>set('healing_goals', e.target.value)} rows={3} style={textareaStyle}/></Field>
         </Section>
+
+        <Section title="Age verification">
+          <label style={{display:'flex', alignItems:'flex-start', gap:'10px', cursor:'pointer', padding:'4px 0'}}>
+            <input
+              type="checkbox"
+              checked={age18}
+              onChange={e=>setAge18(e.target.checked)}
+              style={{marginTop:'4px', accentColor: GOLD, width:'18px', height:'18px', flexShrink:0}}
+            />
+            <span style={{fontSize:'13px', color: NAVY, lineHeight:1.6}}>
+              I confirm I am 18 years of age or older.
+            </span>
+          </label>
+        </Section>
       </div>
 
       <div style={{display:'flex', gap:'8px', marginTop:'16px'}}>
         <button onClick={onBack} disabled={submitting} style={ghostBtnStyle}>← Back</button>
-        <button onClick={()=>onSubmit(form)} disabled={submitting || !required} style={{...primaryBtnStyle, flex:1, opacity:(submitting||!required)?0.55:1}}>
+        <button
+          onClick={()=>onSubmit({ ...form, age_18_or_older: true })}
+          disabled={submitting || !required}
+          style={{...primaryBtnStyle, flex:1, opacity:(submitting||!required)?0.55:1}}
+        >
           {submitting ? 'Saving…' : 'Submit Intake'}
         </button>
       </div>

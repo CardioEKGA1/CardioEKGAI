@@ -651,9 +651,20 @@ def gate_tool_with_trial(user, tool_slug: str, request: Request, db: Session) ->
       subscription-required check).
     - authenticated non-subscriber or unauthenticated → allow exactly
       one use per (client fingerprint, tool), record it, then block.
+
+    Concierge patients (non-superuser users with a ConciergePatient
+    row) are hard-403'd here regardless of trial state — the clinical
+    suite is a separate product that they were never invited to. The
+    frontend redirects them away on every screen change; this gate is
+    the API-side enforcement.
     """
     if user and user.is_superuser:
         return "superuser"
+    if user and _is_concierge_patient(user, db):
+        raise HTTPException(
+            status_code=403,
+            detail="Concierge patients cannot access the clinical suite. Returning to /patient.",
+        )
     if user and has_tool_access(user, tool_slug, db):
         # Subscribed users never hit the trial rail; normal gate_tool logs
         # usage + spend through the existing path.
@@ -827,6 +838,58 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
     if not payload:
         return None
     return db.query(User).filter(User.email == payload.get("sub")).first()
+
+
+def _is_concierge_patient(user: "User | None", db: Session) -> bool:
+    """True iff this user has a ConciergePatient row — i.e. the JWT
+    belongs to someone enrolled in the concierge product, not a
+    clinical-suite SaaS user. Superusers are explicitly NOT counted as
+    concierge patients here so the practice owner can still navigate
+    the clinical suite for testing/admin work. Used by the route guards
+    below and surfaced on /auth/me so the frontend can lock these users
+    out of clinical-suite pages immediately on every render.
+
+    Match precedence mirrors _lookup_concierge_patient_for_user: explicit
+    user_id link first, then case-insensitive email fallback for
+    pre-link patients. Idempotent / read-only / no DB writes."""
+    if not user:
+        return False
+    if bool(getattr(user, "is_superuser", False)):
+        return False
+    q = db.query(ConciergePatient.id).filter(ConciergePatient.user_id == user.id)
+    if q.first() is not None:
+        return True
+    email = (user.email or "").strip().lower()
+    if not email:
+        return False
+    return db.query(ConciergePatient.id).filter(
+        func.lower(ConciergePatient.email) == email
+    ).first() is not None
+
+
+def verify_not_concierge_patient(
+    current_user: "User | None" = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Defense-in-depth gate for clinical-suite endpoints. Concierge
+    patients (non-superuser users with a ConciergePatient row) get a
+    hard 403 here, even if their JWT is otherwise valid. Pairs with
+    the frontend redirect at App.tsx — frontend keeps them out of the
+    URL bar; this keeps them out of the API even if they hand-craft a
+    request. Anonymous (no token) callers fall through unchanged so
+    public endpoints aren't accidentally locked down.
+
+    Returns the user (or None) so endpoints can chain it instead of
+    declaring two dependencies."""
+    if current_user and _is_concierge_patient(current_user, db):
+        # 403 not 404: the URL exists for clinical-suite users; this
+        # patient just isn't authorized for it. Frontend can render a
+        # friendly "redirecting to /patient" splash on this status.
+        raise HTTPException(
+            status_code=403,
+            detail="Concierge patients cannot access the clinical suite. Returning to /patient.",
+        )
+    return current_user
 
 
 # Trial status — lives here because it depends on get_current_user and
@@ -1297,7 +1360,7 @@ def delete_account(request: Request, data: AccountDeletion, current_user: User =
     return {"ok": True, "subscriptions_canceled": len(canceled_subs)}
 
 @app.get("/auth/me")
-def me(current_user: User = Depends(get_current_user)):
+def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return {
@@ -1305,6 +1368,11 @@ def me(current_user: User = Depends(get_current_user)):
         "scan_count": current_user.scan_count,
         "is_subscribed": current_user.is_subscribed,
         "is_superuser": bool(getattr(current_user, "is_superuser", False)),
+        # Frontend reads this on every screen change and hard-redirects
+        # to /patient if true. Source of truth: presence of a
+        # ConciergePatient row, ignored for superusers (so the practice
+        # owner can navigate the clinical suite for testing).
+        "is_concierge_patient": _is_concierge_patient(current_user, db),
     }
 
 @app.post("/analyze")
@@ -1348,9 +1416,11 @@ async def analyze_ekg(request: Request, file: UploadFile = File(...), current_us
 
 @app.post("/chat")
 @limiter.limit("20/minute")
-async def chat(request: Request, data: dict, current_user: User = Depends(get_current_user)):
+async def chat(request: Request, data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Please sign in")
+    if _is_concierge_patient(current_user, db):
+        raise HTTPException(status_code=403, detail="Concierge patients cannot access the clinical suite. Returning to /patient.")
     messages = data.get("messages", [])
     response = client.messages.create(
         model="claude-opus-4-6",
@@ -3127,6 +3197,7 @@ def _patient_dict(p: ConciergePatient) -> dict:
         "approved_at": p.approved_at.isoformat() if getattr(p, "approved_at", None) else None,
         "payment_method": getattr(p, "payment_method", "stripe") or "stripe",
         "onboarding_completed_at": p.onboarding_completed_at.isoformat() if getattr(p, "onboarding_completed_at", None) else None,
+        "age_verified": bool(getattr(p, "age_verified", False)),
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -3813,6 +3884,27 @@ class _PatientIntakeFullSubmit(BaseModel):
     substance_use: str | None = None
     spiritual_practice: str | None = None
     healing_goals: str | None = None
+    # 18+ verification — required for the SoulMD Concierge ToS. Client
+    # must send both the explicit checkbox state and a parseable DOB;
+    # the backend re-derives age and rejects under-18 submissions.
+    age_18_or_older: bool | None = None
+
+
+def _age_from_iso_dob(dob_iso: str | None) -> int | None:
+    """Returns full years between dob_iso (YYYY-MM-DD) and today, or None
+    if the string can't be parsed. We don't trust client-side age math —
+    a malicious client could submit age_18_or_older=True with a 2015 DOB
+    and bypass the gate entirely."""
+    if not dob_iso:
+        return None
+    try:
+        d = datetime.fromisoformat(dob_iso.strip()[:10])
+    except (ValueError, TypeError):
+        return None
+    today = datetime.utcnow().date()
+    age = today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+    return age
+
 
 @app.post("/concierge/patient/intake-full")
 def concierge_patient_intake_full(
@@ -3822,15 +3914,45 @@ def concierge_patient_intake_full(
     db: Session = Depends(get_db),
 ):
     """Structured intake form (replaces the legacy 1-page intake). Inserts
-    a new row each submission so the audit trail survives revisions."""
+    a new row each submission so the audit trail survives revisions.
+
+    Age gate: a server-derived age >= 18 AND the explicit checkbox are
+    both required before the row is written and before the canonical
+    onboarding flag is moved forward. Either missing → 400, with the
+    detail string shaped so the frontend can render the over/under-18
+    block screen verbatim."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
+    dob_iso = (data.dob or "").strip() or None
+    age = _age_from_iso_dob(dob_iso)
+    if not bool(data.age_18_or_older):
+        raise HTTPException(
+            status_code=400,
+            detail="Please confirm you are 18 years of age or older to proceed.",
+        )
+    if age is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter a valid date of birth (YYYY-MM-DD).",
+        )
+    if age < 18:
+        # Block screen on the frontend keys off the literal phrase here;
+        # don't change the wording without updating PatientIntake.tsx.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "We're sorry — SoulMD Concierge is available to patients 18 years of age and older. "
+                "Please contact support@soulmd.us if you have questions."
+            ),
+        )
     p = _get_or_create_patient_row(current_user, db)
     ip = request.client.host if request.client else None
+    now = datetime.utcnow()
     intake = ConciergePatientIntake(
         patient_id=p.id,
         full_name=(data.full_name or "").strip() or p.name,
-        dob=(data.dob or "").strip() or None,
+        dob=dob_iso,
+        date_of_birth=dob_iso,
         phone=(data.phone or "").strip() or None,
         address=(data.address or "").strip() or None,
         emergency_contact=(data.emergency_contact or "").strip() or None,
@@ -3846,6 +3968,8 @@ def concierge_patient_intake_full(
         substance_use=(data.substance_use or "").strip(),
         spiritual_practice=(data.spiritual_practice or "").strip(),
         healing_goals=(data.healing_goals or "").strip(),
+        age_verified=True,
+        age_verified_at=now,
         ip_address=ip,
     )
     db.add(intake)
@@ -3854,10 +3978,11 @@ def concierge_patient_intake_full(
     if intake.full_name and intake.full_name != p.name: p.name = intake.full_name
     if intake.dob: p.dob = intake.dob
     if intake.phone: p.phone = intake.phone
-    p.intake_completed_at = datetime.utcnow()
+    p.age_verified = True
+    p.intake_completed_at = now
     if not p.terms_accepted_at:
-        p.terms_accepted_at = datetime.utcnow()
-    p.updated_at = datetime.utcnow()
+        p.terms_accepted_at = now
+    p.updated_at = now
     db.commit()
     db.refresh(intake)
     return {"ok": True, "intake_id": intake.id, "submitted_at": intake.submitted_at.isoformat()}
@@ -8885,6 +9010,10 @@ class _ConciergeInquiryRequest(BaseModel):
     dob: str | None = None
     health_history: str | None = None
     insurance_acknowledged: bool | None = None
+    # 18+ verification — required before the public inquiry form can be
+    # submitted. The frontend gates the submit button on this checkbox;
+    # the backend re-checks here so a hand-crafted POST can't bypass.
+    age_18_or_older: bool | None = None
 
 
 def _send_anderson_notification(subject: str, body_html: str) -> bool:
@@ -9096,6 +9225,11 @@ def public_concierge_inquiry(
 
     if not name or "@" not in email:
         raise HTTPException(status_code=400, detail="Name and a valid email are required.")
+    if not bool(data.age_18_or_older):
+        raise HTTPException(
+            status_code=400,
+            detail="Please confirm you are 18 years of age or older to submit this request.",
+        )
     if tier and tier not in {"awaken", "align", "ascend", "unsure"}:
         tier = "unsure"
 

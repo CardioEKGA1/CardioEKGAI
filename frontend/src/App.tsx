@@ -51,7 +51,27 @@ export interface User {
   scan_count: number;
   is_subscribed: boolean;
   is_superuser?: boolean;
+  // Backend-derived. True iff a ConciergePatient row is linked to
+  // this user AND they are NOT a superuser. Drives the hard route
+  // lock to /patient — these users can never see the clinical suite.
+  is_concierge_patient?: boolean;
 }
+
+// Screens the patient PWA may legally render. Anything outside this
+// set, when the signed-in user has is_concierge_patient=true, triggers
+// a hard window.location.replace('/patient') in the global route guard.
+// Listed by name (not derived from a regex) so adding a new clinical-
+// suite screen never silently slips into the patient-allowed surface.
+const PATIENT_ALLOWED_SCREENS: Screen[] = [
+  'patient_login', 'patient_pwa', 'patient_terms', 'patient_intake',
+  // Privacy / Terms are static legal pages reachable from the patient
+  // PWA footer; allowed so links from emails / consent screens don't
+  // bounce. They render the same content regardless of signed-in user.
+  'privacy', 'terms',
+  // 404 is intentionally allowed so a typo'd URL just shows the not-found
+  // shell instead of looping the redirect.
+  'not_found',
+];
 
 type Screen =
   | 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall'
@@ -229,6 +249,21 @@ const App: React.FC = () => {
     if (isAdminRoute) return;
     const handlePop = () => {
       const fromUrl = pathToScreen(window.location.pathname);
+      // Concierge-patient back-button fence. If the URL the browser
+      // just navigated to is outside the patient-allowed surface,
+      // synchronously rewrite both the URL and the React screen back
+      // to /patient. Done BEFORE setScreen so the clinical-suite shell
+      // never gets a chance to mount, and BEFORE the global guard
+      // useEffect runs (which would redirect a tick later — too late
+      // to prevent the flash).
+      if (user && user.is_concierge_patient && !user.is_superuser) {
+        const target = fromUrl || 'not_found';
+        if (!PATIENT_ALLOWED_SCREENS.includes(target)) {
+          try { window.history.replaceState({}, '', '/patient'); } catch {}
+          setScreen('patient_pwa');
+          return;
+        }
+      }
       if (fromUrl) {
         setScreen(fromUrl);
         return;
@@ -254,7 +289,22 @@ const App: React.FC = () => {
       scan_count: data.scan_count,
       is_subscribed: data.is_subscribed,
       is_superuser: !!data.is_superuser,
+      is_concierge_patient: !!data.is_concierge_patient,
     });
+
+    // Concierge patients ALWAYS land on /patient and nowhere else.
+    // Wins over every other redirect mechanism so a hand-crafted ?rt=
+    // or stored sessionStorage intent can't divert them onto a clinical
+    // suite URL. window.history.replaceState scrubs the magic-link query
+    // string from the address bar AND prevents the back button from
+    // returning to the URL that contained the token. window.location
+    // .replace then drops the `landing` history entry from this very
+    // load so the back button can't reach it either.
+    if (data && data.is_concierge_patient && !data.is_superuser) {
+      try { window.history.replaceState({}, '', '/patient'); } catch {}
+      window.location.replace('/patient');
+      return;
+    }
 
     // Post-auth redirect precedence:
     //   1. sessionStorage['soulmd_post_auth_redirect'] — explicit intent set
@@ -501,6 +551,27 @@ const App: React.FC = () => {
     return () => { cancelled = true; };
   }, [screen, user, token, navigate]);
 
+  // ─── Concierge patient → clinical-suite hard lock ─────────────────
+  // If the signed-in user has is_concierge_patient=true (and isn't a
+  // superuser), they may ONLY visit the screens listed in
+  // PATIENT_ALLOWED_SCREENS. Any other screen — landing, dashboard,
+  // /scan, any /tool/*, /chat, /concierge admin, /meditate, etc. — gets
+  // a synchronous redirect to /patient via window.location.replace so:
+  //   • the offending URL never enters their browser history (replace
+  //     overwrites the current entry instead of pushing a new one)
+  //   • the back button can't take them back to it
+  //   • clicking a stale link to /dashboard from anywhere just bounces
+  // window.history.replaceState on the same tick scrubs the URL bar
+  // even before React's state machine runs.
+  // Defense-in-depth: the backend gate_tool_with_trial / chat / etc.
+  // also 403 these users, so even a hand-crafted fetch doesn't leak.
+  useEffect(() => {
+    if (!user || !user.is_concierge_patient || user.is_superuser) return;
+    if (PATIENT_ALLOWED_SCREENS.includes(screen)) return;
+    try { window.history.replaceState({}, '', '/patient'); } catch {}
+    window.location.replace('/patient');
+  }, [screen, user]);
+
   // /patient/terms and /patient/intake both require an authed session. If
   // someone lands on them without a token, kick back to the sign-in page.
   useEffect(() => {
@@ -619,7 +690,23 @@ const App: React.FC = () => {
           also exercise the PWA from /patient (no more ?view=patient
           query string). */}
       {screen==='patient_pwa' && user && token && (
-        <Concierge API={API} token={token} onBack={()=>navigate('dashboard')} patientOnly/>
+        <Concierge
+          API={API}
+          token={token}
+          patientOnly
+          onBack={() => {
+            // Concierge patients can never reach /dashboard — the only
+            // valid "back" from the patient PWA is to end the session
+            // and return to the public sign-in screen. Superusers (the
+            // practice owner testing as a patient) keep the legacy
+            // shortcut to the clinical dashboard.
+            if (user.is_concierge_patient && !user.is_superuser) {
+              handleLogout();
+            } else {
+              navigate('dashboard');
+            }
+          }}
+        />
       )}
       {screen==='patient_pwa' && !token && <PatientLogin API={API} onRequestMembership={() => navigate('landing')}/>}
       {screen==='patient_terms' && token && (

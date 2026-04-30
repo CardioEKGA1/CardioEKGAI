@@ -173,6 +173,13 @@ class ConciergePatient(Base):
     # onboarding overlay until this is set; afterwards the regular tabs
     # become reachable.
     onboarding_completed_at = Column(DateTime, nullable=True)
+    # 18+ verification — required by the SoulMD Concierge ToS. Patient
+    # checks the box during onboarding (and on the public tier-card
+    # form before submitting). Until this flips True the backend
+    # refuses to mark intake_completed_at, so the onboarding gate
+    # cannot be cleared. Mirrored as the canonical patient-level flag
+    # alongside the per-intake-row flag on ConciergePatientIntake.
+    age_verified = Column(Boolean, default=False, index=True)
     # ─── 3-month trial → annual commitment policy ────────────────────
     # Year-1 membership runs as 3 monthly invoices, then a one-time
     # remaining-balance invoice (annual − 3×monthly) with a 14-day
@@ -291,6 +298,13 @@ class ConciergePatientIntake(Base):
     # Spiritual / integrative
     spiritual_practice = Column(String, default="")
     healing_goals = Column(String, default="")
+    # Age verification — patient must be 18+ to enroll. The intake
+    # form requires the checkbox AND a DOB; the backend re-validates
+    # both before stamping age_verified_at and propagating
+    # ConciergePatient.age_verified.
+    date_of_birth = Column(String, nullable=True)              # ISO date string, mirrors `dob` for explicitness
+    age_verified = Column(Boolean, default=False)
+    age_verified_at = Column(DateTime, nullable=True)
     # Audit
     submitted_at = Column(DateTime, default=datetime.utcnow, index=True)
     ip_address = Column(String, nullable=True)
@@ -784,6 +798,13 @@ with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_membership_status ON concierge_patients(membership_status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_remaining_balance_due_at ON concierge_patients(remaining_balance_due_at)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_annual_renewal_due_at ON concierge_patients(annual_renewal_due_at)"))
+
+        # ─── Age verification (18+ gate) ────────────────────────────
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS age_verified BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_age_verified ON concierge_patients(age_verified)"))
+        conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR"))
+        conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS age_verified BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS age_verified_at TIMESTAMP"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 

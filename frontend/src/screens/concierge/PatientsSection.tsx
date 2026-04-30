@@ -17,6 +17,7 @@ interface Patient {
   last_contact_at: string | null;
   is_approved: boolean;
   approved_at: string | null;
+  age_verified?: boolean;       // 18+ self-attestation captured during onboarding intake
   created_at: string;
   updated_at: string;
 }
@@ -265,6 +266,21 @@ const PatientsSection: React.FC<Props> = ({ API, token, accent }) => {
                         <span style={{fontSize:'10px', padding:'3px 8px', borderRadius:'999px', background:`${tier.color}1a`, color:tier.color, fontWeight:700, letterSpacing:'0.5px', textTransform:'uppercase', whiteSpace:'nowrap'}}>{tier.label}</span>
                       </div>
                       <div style={{fontSize:'12px', color:'#4a5e6a', marginBottom:'8px', wordBreak:'break-all'}}>{p.email}</div>
+                      <div style={{display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center', marginBottom:'4px'}}>
+                        {p.age_verified ? (
+                          <span title="Patient confirmed 18+ during onboarding intake" style={{
+                            fontSize:'10px', padding:'2px 8px', borderRadius:'999px',
+                            background:'rgba(46,140,90,0.10)', color:'#2e8c5a',
+                            fontWeight:700, letterSpacing:'0.4px', textTransform:'uppercase',
+                          }}>18+ ✓</span>
+                        ) : (
+                          <span title="Age verification pending — fires on first intake submission" style={{
+                            fontSize:'10px', padding:'2px 8px', borderRadius:'999px',
+                            background:'rgba(160,128,40,0.12)', color:'#7a5e10',
+                            fontWeight:700, letterSpacing:'0.4px', textTransform:'uppercase',
+                          }}>Age unverified</span>
+                        )}
+                      </div>
                       <div style={{display:'flex', gap:'10px', flexWrap:'wrap', fontSize:'11px', color:'#4a7ad0'}}>
                         {approved && <span>Approved {approved.toLocaleDateString()}</span>}
                         {last && <span>· Last contact {last.toLocaleDateString()}</span>}

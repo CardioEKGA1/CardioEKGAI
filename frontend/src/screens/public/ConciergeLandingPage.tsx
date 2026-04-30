@@ -229,6 +229,7 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
   const [form, setForm] = useState({
     name: '', email: '', phone: '', tier: 'unsure', message: '',
   });
+  const [bottomAge18, setBottomAge18] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [err, setErr] = useState('');
@@ -239,6 +240,10 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
     setErr('');
     if (!form.name.trim() || !form.email.trim() || !form.email.includes('@')) {
       setErr('Please enter your name and a valid email.');
+      return;
+    }
+    if (!bottomAge18) {
+      setErr('Please confirm you are 18 years of age or older.');
       return;
     }
     setSubmitting(true);
@@ -254,6 +259,7 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
           // Backend persists this into health_history (its primary
           // narrative column); legacy `message` is also kept.
           health_history: form.message.trim() || undefined,
+          age_18_or_older: true,
         }),
       });
       if (!res.ok) {
@@ -753,6 +759,20 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
                 />
               </FormField>
 
+              <label style={{
+                display:'flex', alignItems:'flex-start', gap:'10px',
+                fontFamily: SANS, fontSize:'13px', color: NAVY,
+                cursor:'pointer', marginBottom:'18px',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={bottomAge18}
+                  onChange={e => setBottomAge18(e.target.checked)}
+                  style={{marginTop:'3px', accentColor: NAVY, flexShrink:0}}
+                />
+                <span>I confirm I am 18 years of age or older.</span>
+              </label>
+
               {err && (
                 <div style={{
                   background:'rgba(224,80,80,0.08)',
@@ -763,14 +783,14 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
                 }}>{err}</div>
               )}
 
-              <button type="submit" disabled={submitting} style={{
+              <button type="submit" disabled={submitting || !bottomAge18} style={{
                 width:'100%', padding:'16px 40px',
                 background: NAVY, color:'#FFFFFF',
                 fontFamily: SERIF, fontSize:'14px',
                 letterSpacing:'0.08em', textTransform:'uppercase',
                 border:'none', borderRadius:'2px',
-                cursor: submitting ? 'wait' : 'pointer',
-                opacity: submitting ? 0.7 : 1,
+                cursor: (submitting || !bottomAge18) ? 'not-allowed' : 'pointer',
+                opacity: (submitting || !bottomAge18) ? 0.55 : 1,
               }}>
                 {submitting ? 'Sending…' : 'Submit Inquiry'}
               </button>
@@ -892,6 +912,7 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
   const [form, setForm] = useState({
     name: '', email: '', phone: '', why: '',
   });
+  const [age18, setAge18] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [err, setErr] = useState('');
@@ -902,6 +923,10 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
     setErr('');
     if (!form.name.trim() || !form.email.trim() || !form.email.includes('@')) {
       setErr('Please enter your name and a valid email.');
+      return;
+    }
+    if (!age18) {
+      setErr('Please confirm you are 18 years of age or older.');
       return;
     }
     setSubmitting(true);
@@ -916,6 +941,7 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
           tier_interest: tier.id,
           // Backend persists the narrative into health_history.
           health_history: form.why.trim() || undefined,
+          age_18_or_older: true,
         }),
       });
       if (!res.ok) {
@@ -1152,6 +1178,22 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
                   />
                 </label>
 
+                <label style={{
+                  display:'flex', alignItems:'flex-start', gap:'8px',
+                  fontFamily: SANS, fontSize:'11.5px', color: NAVY,
+                  letterSpacing: 0, textTransform:'none', fontWeight: 400,
+                  cursor:'pointer', marginTop:'4px',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={age18}
+                    onChange={e => setAge18(e.target.checked)}
+                    onClick={e => e.stopPropagation()}
+                    style={{marginTop:'2px', accentColor: NAVY, flexShrink:0}}
+                  />
+                  <span>I confirm I am 18 years of age or older.</span>
+                </label>
+
                 {err && (
                   <div style={{
                     background:'rgba(224,80,80,0.08)',
@@ -1164,7 +1206,7 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
 
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !age18}
                   style={{
                     marginTop:'8px',
                     width:'100%', padding:'13px 18px',
@@ -1172,8 +1214,8 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
                     fontFamily: SERIF, fontSize:'12px',
                     letterSpacing:'0.1em', textTransform:'uppercase',
                     border:'none', borderRadius:'2px',
-                    cursor: submitting ? 'wait' : 'pointer',
-                    opacity: submitting ? 0.7 : 1,
+                    cursor: (submitting || !age18) ? 'not-allowed' : 'pointer',
+                    opacity: (submitting || !age18) ? 0.55 : 1,
                   }}
                 >
                   {submitting ? 'Sending…' : 'Request Invitation'}
