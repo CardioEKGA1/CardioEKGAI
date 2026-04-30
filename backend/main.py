@@ -4181,6 +4181,134 @@ def _send_counter_proposal_email(patient: ConciergePatient, req: ConciergeSessio
         print(f"counter-proposal email failed for {patient.email}: {e}")
 
 
+# Mountain Time formatter — practice TZ for all patient-facing copy.
+# DST-aware via zoneinfo (Python 3.9+, runtime is 3.11). Stored timestamps
+# are naive UTC; we attach UTC then convert to America/Denver.
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    _TZ_MT = _ZoneInfo("America/Denver")
+    _TZ_UTC = _ZoneInfo("UTC")
+except Exception:
+    _TZ_MT = None
+    _TZ_UTC = None
+
+def _format_mt(dt: datetime, fmt: str = "%A, %B %-d at %-I:%M %p MT") -> str:
+    if not dt:
+        return ""
+    if _TZ_MT and _TZ_UTC:
+        local = (dt.replace(tzinfo=_TZ_UTC) if dt.tzinfo is None else dt).astimezone(_TZ_MT)
+    else:
+        local = dt
+    try:
+        return local.strftime(fmt)
+    except ValueError:
+        # Windows-only fallback (shouldn't fire on Linux Railway).
+        return local.strftime(fmt.replace("%-d", "%d").replace("%-I", "%I").lstrip("0"))
+
+
+def _send_session_reminder_24h(patient: ConciergePatient, st: ConciergeSessionType | None, appt: ConciergeAppointment) -> bool:
+    """T-24h reminder. Includes Zoom link + 'prepare a quiet, private space'.
+    Returns True iff the SendGrid call was attempted (so the cron stamps
+    the column to prevent re-send)."""
+    if not SENDGRID_API_KEY:
+        return False
+    try:
+        when = _format_mt(appt.starts_at)
+        join = appt.zoom_join_url or ""
+        first = (patient.name or "").strip().split()[0] if patient.name else "friend"
+        type_label = (st.name if st else (appt.appointment_type or "Session")).replace("_", " ")
+        join_btn = (
+            f'<p style="margin:0 0 22px"><a href="{_esc(join)}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Join Session</a></p>'
+            if join else
+            '<p style="font-size:13px;color:#6B7280;margin:0 0 22px;font-style:italic">Your physician will share the join link directly before the session.</p>'
+        )
+        html = (
+            f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
+            f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
+            f'  <h1 style="font-size:22px;font-weight:400;letter-spacing:0.02em;color:#1a2a4a;margin:0 0 22px">Tomorrow with Dr. Anderson</h1>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 14px">Dear {_esc(first)},</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 14px">Your <b>{_esc(type_label)}</b> session is tomorrow:</p>'
+            f'  <p style="font-size:18px;color:#1a2a4a;margin:0 0 22px;font-weight:600">{_esc(when)}</p>'
+            f'  {join_btn}'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 18px;line-height:1.7">A gentle suggestion — prepare a quiet, private space for our time together. Soft light, water within reach, your phone on silent. Healing happens more easily when the body feels safe.</p>'
+            f'  <p style="font-size:13px;color:#6B7280;margin:0 0 14px;line-height:1.7"><b>Cancellation policy:</b> sessions may be cancelled cleanly up to 48 hours before the scheduled time. Cancellations within 48 hours forfeit the session credit.</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 4px">With care,</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 2px;font-style:italic">Dr. Neysi Anderson</p>'
+            f'  <p style="font-size:12px;color:#6B7280;margin:0">SoulMD Concierge Medicine</p>'
+            f'</div>'
+        )
+        msg = Mail(from_email=FROM_EMAIL, to_emails=patient.email,
+                   subject=f"Reminder: {type_label} tomorrow — {when}", html_content=html)
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY).send(msg)
+        return True
+    except Exception as e:
+        print(f"24h reminder email failed for {patient.email}: {e}")
+        return False
+
+
+def _send_session_reminder_1h(patient: ConciergePatient, st: ConciergeSessionType | None, appt: ConciergeAppointment) -> bool:
+    if not SENDGRID_API_KEY:
+        return False
+    try:
+        when = _format_mt(appt.starts_at, "%-I:%M %p MT")
+        join = appt.zoom_join_url or ""
+        first = (patient.name or "").strip().split()[0] if patient.name else "friend"
+        type_label = (st.name if st else (appt.appointment_type or "Session")).replace("_", " ")
+        join_btn = (
+            f'<p style="margin:0 0 18px"><a href="{_esc(join)}" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Join Session</a></p>'
+            if join else
+            '<p style="font-size:13px;color:#6B7280;margin:0 0 18px;font-style:italic">Your physician will share the join link directly.</p>'
+        )
+        html = (
+            f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:32px 26px;color:#1a2a4a;line-height:1.85">'
+            f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:14px">SoulMD Concierge</div>'
+            f'  <h1 style="font-size:20px;font-weight:400;letter-spacing:0.02em;color:#1a2a4a;margin:0 0 18px">In about an hour</h1>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 12px">Dear {_esc(first)}, your {_esc(type_label)} session is at <b>{_esc(when)}</b>.</p>'
+            f'  {join_btn}'
+            f'  <p style="font-size:13px;color:#6B7280;margin:0;font-style:italic">Take a breath. We\'ll see you soon.</p>'
+            f'</div>'
+        )
+        msg = Mail(from_email=FROM_EMAIL, to_emails=patient.email,
+                   subject=f"In about an hour: your {type_label} session", html_content=html)
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY).send(msg)
+        return True
+    except Exception as e:
+        print(f"1h reminder email failed for {patient.email}: {e}")
+        return False
+
+
+def _send_session_followup_2h(patient: ConciergePatient, st: ConciergeSessionType | None, appt: ConciergeAppointment) -> bool:
+    if not SENDGRID_API_KEY:
+        return False
+    try:
+        first = (patient.name or "").strip().split()[0] if patient.name else "friend"
+        type_label = (st.name if st else (appt.appointment_type or "Session")).replace("_", " ")
+        html = (
+            f'<div style="font-family:Georgia,serif;max-width:540px;margin:0 auto;padding:36px 28px;color:#1a2a4a;line-height:1.85">'
+            f'  <div style="font-size:11px;letter-spacing:0.25em;text-transform:uppercase;color:#C9A84C;font-weight:700;margin-bottom:18px">SoulMD Concierge</div>'
+            f'  <h1 style="font-size:22px;font-weight:400;letter-spacing:0.02em;color:#1a2a4a;margin:0 0 22px">How was your session?</h1>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Dear {_esc(first)},</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 16px">Thank you for spending time with Dr. Anderson today. Whatever came up — clarity, calm, questions, or something deeper — give yourself a moment to sit with it.</p>'
+            f'  <p style="font-size:15px;color:#1a2a4a;margin:0 0 22px">When you\'re ready to schedule your next {_esc(type_label).lower()}, the patient portal is here:</p>'
+            f'  <p style="margin:0 0 22px"><a href="https://soulmd.us/patient" style="display:inline-block;background:#1a2a4a;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-family:Georgia,serif;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border-radius:2px">Request Next Session</a></p>'
+            f'  <p style="font-size:13px;color:#6B7280;margin:0 0 18px;font-style:italic">A reflection prompt: what one thing from today\'s session do you want to carry forward?</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 4px">With care,</p>'
+            f'  <p style="font-size:14px;color:#1a2a4a;margin:0 0 2px;font-style:italic">Dr. Neysi Anderson</p>'
+            f'  <p style="font-size:12px;color:#6B7280;margin:0">SoulMD Concierge Medicine</p>'
+            f'</div>'
+        )
+        msg = Mail(from_email=FROM_EMAIL, to_emails=patient.email,
+                   subject="How was your session?", html_content=html)
+        msg.reply_to = CONCIERGE_OWNER_EMAIL
+        sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY).send(msg)
+        return True
+    except Exception as e:
+        print(f"2h follow-up email failed for {patient.email}: {e}")
+        return False
+
+
 # ───── Physician dashboard support: per-patient onboarding snapshot ──
 
 @app.get("/concierge/patients/{patient_id}/onboarding")
@@ -7462,9 +7590,20 @@ def concierge_lab_review(
 # endpoints' existence isn't advertised.
 
 def _require_job_secret(x_job_secret: str | None):
-    expected = _clean_env(os.getenv("JOB_SECRET", ""))
-    if not expected or x_job_secret != expected:
+    """Accepts either CRON_SECRET (canonical, used by cron-job.org and the
+    new appointment-reminders job) or JOB_SECRET (legacy, used by the
+    oracle/visit-counter jobs already deployed). Either may be sent in
+    the X-Job-Secret header. Unknown / missing → 404 so the endpoints'
+    existence isn't advertised."""
+    cron_secret = _clean_env(os.getenv("CRON_SECRET", ""))
+    job_secret  = _clean_env(os.getenv("JOB_SECRET", ""))
+    if not x_job_secret:
         raise HTTPException(status_code=404, detail="Not found")
+    if cron_secret and hmac.compare_digest(x_job_secret, cron_secret):
+        return
+    if job_secret and hmac.compare_digest(x_job_secret, job_secret):
+        return
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 @app.post("/internal/jobs/oracle-morning")
@@ -7526,41 +7665,115 @@ def job_appointment_reminders(
     x_job_secret: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    """Session reminder ping — fires ~60 min before a scheduled appointment.
-    Suggested Railway Cron: every 15 minutes (*/15 * * * *). Looks 45-75 min
-    ahead to catch the 60-min mark regardless of cron cadence. Tracks sent
-    reminders via a notes-field marker so duplicates don't go out if the
-    cron runs twice in the window."""
+    """Three-window session reminder cron. Designed to be hit every 15 min
+    (cron-job.org → POST https://soulmd.us/internal/jobs/appointment-reminders
+    with header X-Job-Secret: $CRON_SECRET).
+
+    Windows + behavior (each idempotent via dedicated timestamp columns):
+      • T-24h ± 15min  → "Tomorrow" email with Zoom link + private-space prompt
+      • T-1h  ± 15min  → "In about an hour" reminder with Zoom link
+                         + push notification fallback for installed PWAs
+      • T+2h  ± 15min  → "How was your session?" email + Book CTA
+
+    Each appointment row has reminder_24h_sent_at / reminder_1h_sent_at /
+    reminder_followup_sent_at. Once stamped, that window won't re-fire even
+    if the cron pings twice within the 30-min span. Cancellations and
+    no-shows are skipped (status filter)."""
     _require_job_secret(x_job_secret)
     now = datetime.utcnow()
-    window_start = now + timedelta(minutes=45)
-    window_end   = now + timedelta(minutes=75)
-    appts = db.query(ConciergeAppointment).filter(
+
+    # Helper: load the session_type_id once per appointment so the body
+    # can name the session ("Medical Consultation") instead of the slug.
+    def _st_for(a: ConciergeAppointment) -> ConciergeSessionType | None:
+        # appointment_type stores the session-type slug (set when the
+        # request was confirmed). Look up the catalog row.
+        if not a.appointment_type:
+            return None
+        return db.query(ConciergeSessionType).filter(ConciergeSessionType.slug == a.appointment_type).first()
+
+    counts = {"t_minus_24h": 0, "t_minus_1h": 0, "t_plus_2h": 0, "skipped": 0}
+
+    # ── T-24h: starts_at ∈ [now+23:45, now+24:15] ─────────────────────
+    win_start = now + timedelta(hours=23, minutes=45)
+    win_end   = now + timedelta(hours=24, minutes=15)
+    appts_24h = db.query(ConciergeAppointment).filter(
         ConciergeAppointment.status == "scheduled",
-        ConciergeAppointment.starts_at >= window_start,
-        ConciergeAppointment.starts_at <= window_end,
+        ConciergeAppointment.starts_at >= win_start,
+        ConciergeAppointment.starts_at <= win_end,
+        ConciergeAppointment.reminder_24h_sent_at.is_(None),
     ).all()
-    pinged = 0
-    for a in appts:
-        if "[reminded]" in (a.notes or ""):
-            continue
+    for a in appts_24h:
         p = db.query(ConciergePatient).filter(ConciergePatient.id == a.patient_id).first()
-        if not (p and p.user_id):
-            continue
-        svc_label = {"medical_visit":"Medical visit", "guided_meditation":"Guided meditation", "urgent_same_day":"Urgent consult"}.get(a.appointment_type, a.appointment_type)
-        when = a.starts_at.strftime("%I:%M %p")
-        n = send_push_to_user(
-            p.user_id,
-            f"See you at {when}",
-            f"{svc_label} with Dr. Anderson in about an hour.",
-            url="/concierge",
-            db=db,
-        )
-        if n > 0:
-            a.notes = (a.notes or "") + " [reminded]"
-            pinged += 1
+        if not p or not p.email:
+            counts["skipped"] += 1; continue
+        if _send_session_reminder_24h(p, _st_for(a), a):
+            a.reminder_24h_sent_at = now
+            counts["t_minus_24h"] += 1
+        else:
+            counts["skipped"] += 1
+
+    # ── T-1h: starts_at ∈ [now+0:45, now+1:15] ────────────────────────
+    win_start = now + timedelta(minutes=45)
+    win_end   = now + timedelta(hours=1, minutes=15)
+    appts_1h = db.query(ConciergeAppointment).filter(
+        ConciergeAppointment.status == "scheduled",
+        ConciergeAppointment.starts_at >= win_start,
+        ConciergeAppointment.starts_at <= win_end,
+        ConciergeAppointment.reminder_1h_sent_at.is_(None),
+    ).all()
+    for a in appts_1h:
+        p = db.query(ConciergePatient).filter(ConciergePatient.id == a.patient_id).first()
+        if not p or not p.email:
+            counts["skipped"] += 1; continue
+        sent_email = _send_session_reminder_1h(p, _st_for(a), a)
+        # Best-effort push notification too — landing them on /patient
+        # opens the PWA directly to the Book tab if installed.
+        if p.user_id:
+            try:
+                when = _format_mt(a.starts_at, "%-I:%M %p MT")
+                send_push_to_user(p.user_id, f"Session at {when}",
+                                  "Tap to join your SoulMD Concierge session.",
+                                  url="/patient", db=db)
+            except Exception as e:
+                print(f"1h push failed for user {p.user_id}: {e}")
+        if sent_email:
+            a.reminder_1h_sent_at = now
+            counts["t_minus_1h"] += 1
+        else:
+            counts["skipped"] += 1
+
+    # ── T+2h: starts_at ∈ [now-2:15, now-1:45] ────────────────────────
+    # Only fire for sessions that actually happened (status='scheduled' or
+    # 'completed' — not canceled / no_show) so we don't follow up on a
+    # canceled session.
+    win_start = now - timedelta(hours=2, minutes=15)
+    win_end   = now - timedelta(hours=1, minutes=45)
+    appts_followup = db.query(ConciergeAppointment).filter(
+        ConciergeAppointment.status.in_(["scheduled", "completed"]),
+        ConciergeAppointment.starts_at >= win_start,
+        ConciergeAppointment.starts_at <= win_end,
+        ConciergeAppointment.reminder_followup_sent_at.is_(None),
+    ).all()
+    for a in appts_followup:
+        p = db.query(ConciergePatient).filter(ConciergePatient.id == a.patient_id).first()
+        if not p or not p.email:
+            counts["skipped"] += 1; continue
+        if _send_session_followup_2h(p, _st_for(a), a):
+            a.reminder_followup_sent_at = now
+            counts["t_plus_2h"] += 1
+        else:
+            counts["skipped"] += 1
+
     db.commit()
-    return {"ok": True, "candidates": len(appts), "delivered_to": pinged}
+    return {
+        "ok": True, "ran_at": now.isoformat() + "Z",
+        "sent": counts,
+        "candidates": {
+            "t_minus_24h": len(appts_24h),
+            "t_minus_1h":  len(appts_1h),
+            "t_plus_2h":   len(appts_followup),
+        },
+    }
 
 
 @app.post("/internal/jobs/reset-visit-counters")

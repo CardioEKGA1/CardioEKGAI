@@ -193,6 +193,10 @@ class ConciergeAppointment(Base):
     completed_at = Column(DateTime, nullable=True)
     no_showed_at = Column(DateTime, nullable=True)
     physician_session_notes = Column(String, default="")
+    # Reminder cron idempotency stamps. NULL = not yet sent for that window.
+    reminder_24h_sent_at = Column(DateTime, nullable=True)
+    reminder_1h_sent_at = Column(DateTime, nullable=True)
+    reminder_followup_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 # Patient consent records — one row per (patient × document_type × version).
@@ -638,6 +642,14 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"))
         conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS no_showed_at TIMESTAMP"))
         conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS physician_session_notes VARCHAR DEFAULT ''"))
+        # Per-window idempotency stamps for the appointment-reminders cron.
+        # The /internal/jobs/appointment-reminders endpoint walks scheduled
+        # appointments at 15-min cadence and sets the matching column when
+        # it sends each reminder; subsequent runs in the same window
+        # short-circuit on the non-NULL column.
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_24h_sent_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_1h_sent_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_followup_sent_at TIMESTAMP"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_zoom_meeting_id ON concierge_appointments(zoom_meeting_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_session_request_id ON concierge_appointments(session_request_id)"))
         # Pre-approve the test patient so dev sign-in continues to work
