@@ -9,6 +9,7 @@
 import React, { useEffect, useState } from 'react';
 import SoulMDLogo from '../../SoulMDLogo';
 import ChoKuRei from '../concierge/ChoKuRei';
+import { executeRecaptcha } from '../../recaptcha';
 
 interface Props { API: string; onHome: () => void; }
 
@@ -247,6 +248,7 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
       return;
     }
     setSubmitting(true);
+    const recaptchaToken = await executeRecaptcha(API, 'inquire');
     try {
       const res = await fetch(`${API}/concierge-medicine/inquire`, {
         method: 'POST',
@@ -260,6 +262,7 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
           // narrative column); legacy `message` is also kept.
           health_history: form.message.trim() || undefined,
           age_18_or_older: true,
+          recaptcha_token: recaptchaToken,
         }),
       });
       if (!res.ok) {
@@ -1006,6 +1009,11 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
     }
     setFieldErr({});
     setSubmitting(true);
+    // grecaptcha.execute is async — kick it off before the fetch so
+    // the round-trip overlaps the (typically slow-cold) Google call.
+    // executeRecaptcha returns null when reCAPTCHA isn't configured;
+    // backend is fail-open in that case so the form still works.
+    const recaptchaToken = await executeRecaptcha(API, 'inquire');
     try {
       const res = await fetch(`${API}/concierge-medicine/inquire`, {
         method: 'POST',
@@ -1024,6 +1032,7 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
           // mount, returning fake 200 either way.
           website: form.website,
           form_loaded_at_ms: loadedAt,
+          recaptcha_token: recaptchaToken,
         }),
       });
       if (!res.ok) {
@@ -1442,6 +1451,7 @@ const PatientSigninModal: React.FC<{
       return;
     }
     setSubmitting(true);
+    const recaptchaToken = await executeRecaptcha(API, 'signin');
     try {
       const res = await fetch(`${API}/concierge-medicine/signin`, {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -1449,6 +1459,7 @@ const PatientSigninModal: React.FC<{
           email: email.trim(),
           website,
           form_loaded_at_ms: loadedAt,
+          recaptcha_token: recaptchaToken,
         }),
       });
       const d = await res.json().catch(() => ({} as any));

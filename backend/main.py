@@ -9724,6 +9724,10 @@ class _ConciergeInquiryRequest(BaseModel):
     # when the form first paints; we reject submissions that came in
     # less than 3 seconds later as bot-flag.
     form_loaded_at_ms: int | None = None
+    # reCAPTCHA v3 token. grecaptcha.execute() generated on submit by
+    # the frontend. Backend verifies against Google siteverify; score
+    # < 0.5 → silent fake-success.
+    recaptcha_token: str | None = None
 
 
 def _send_anderson_notification(subject: str, body_html: str) -> bool:
@@ -10237,6 +10241,62 @@ def _ip_rate_limited(db: Session, ip: str) -> bool:
     return count >= _INQUIRY_RATE_PER_HOUR
 
 
+_RECAPTCHA_MIN_SCORE = 0.5
+_RECAPTCHA_VERIFY_URL = "https://www.google.com/recaptcha/api/siteverify"
+
+
+def _verify_recaptcha(token: str | None, expected_action: str, remote_ip: str = "") -> tuple[bool, float, str]:
+    """Server-side reCAPTCHA v3 verification. Returns (passed, score,
+    detail_for_log). Verdicts:
+      • Token missing → (False, 0.0, "missing_token")
+      • Secret unset (env not yet wired) → (True, 1.0, "disabled")  ←
+        graceful no-op so the form still works during the rollout
+        window; the public /config endpoint will also report
+        recaptcha.enabled=false in this state.
+      • Google API call failed (network / 5xx) → (True, 1.0,
+        "google_api_unreachable")  ← fail-open by design; we never
+        want a Google outage to take down patient sign-up.
+      • Score < _RECAPTCHA_MIN_SCORE → (False, score, "low_score")
+      • Action mismatch → (False, score, "action_mismatch")
+      • All checks pass → (True, score, "ok")
+
+    The caller logs the score + detail to ConciergeInquiryLog and
+    silently fake-success on a False return so a bot can't probe what
+    its score was."""
+    secret = _clean_env(os.getenv("RECAPTCHA_SECRET_KEY", ""))
+    if not secret:
+        return True, 1.0, "disabled"
+    if not token:
+        return False, 0.0, "missing_token"
+
+    try:
+        import urllib.request as _ur
+        import urllib.parse as _up
+        body = _up.urlencode({
+            "secret": secret,
+            "response": token,
+            "remoteip": remote_ip or "",
+        }).encode("utf-8")
+        req = _ur.Request(_RECAPTCHA_VERIFY_URL, data=body, method="POST")
+        with _ur.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception as e:
+        print(f"[recaptcha] siteverify call failed: {e}")
+        return True, 1.0, "google_api_unreachable"
+
+    if not data.get("success"):
+        codes = ",".join(data.get("error-codes") or []) or "unknown"
+        return False, 0.0, f"google_failure:{codes}"
+
+    score = float(data.get("score") or 0.0)
+    action = (data.get("action") or "").strip()
+    if expected_action and action and action != expected_action:
+        return False, score, f"action_mismatch:{action}"
+    if score < _RECAPTCHA_MIN_SCORE:
+        return False, score, "low_score"
+    return True, score, "ok"
+
+
 def _strip_html(s: str | None, max_len: int = 4000) -> str:
     """Light input sanitizer for free-text fields written to the DB.
     Strips HTML tags + control chars + caps length. NOT a security
@@ -10266,6 +10326,7 @@ class _ConciergeSigninRequest(BaseModel):
     # protections apply uniformly to every public POST.
     website: str | None = None
     form_loaded_at_ms: int | None = None
+    recaptcha_token: str | None = None
 
 
 _SIGNIN_RATE_PER_HOUR = 3
@@ -10320,6 +10381,13 @@ def public_concierge_signin(
                 return {"ok": True, "code": "link_sent"}
         except (TypeError, ValueError):
             pass
+
+    rc_ok, rc_score, rc_detail = _verify_recaptcha(
+        data.recaptcha_token, expected_action="signin", remote_ip=_client_ip(request),
+    )
+    if not rc_ok:
+        _log_inquiry_attempt(db, request, email, "honeypot", f"recaptcha_signin:{rc_detail}:score={rc_score:.2f}")
+        return {"ok": True, "code": "link_sent"}
 
     ok, _ = _validate_email_strict(email)
     if not ok:
@@ -10436,6 +10504,16 @@ def public_concierge_inquiry(
         except (TypeError, ValueError):
             pass
 
+    # reCAPTCHA v3 — silent reject on score < 0.5 so bots can't tune
+    # against the threshold. Score logged regardless of outcome so
+    # Dr. Anderson can see the abuse signal in concierge_inquiry_logs.
+    rc_ok, rc_score, rc_detail = _verify_recaptcha(
+        data.recaptcha_token, expected_action="inquire", remote_ip=_client_ip(request),
+    )
+    if not rc_ok:
+        _log_inquiry_attempt(db, request, email, "honeypot", f"recaptcha:{rc_detail}:score={rc_score:.2f}")
+        return {"ok": True, "id": 0}
+
     # IP rate limit — visible reject so legit users get a clear signal
     # if they're behind a shared NAT and one neighbor was abusive. The
     # counter resets every hour.
@@ -10540,6 +10618,17 @@ def public_config():
             # Pair with VAPID_PRIVATE_KEY (backend-only) for signed delivery.
             "vapid_public_key": _clean_env(os.getenv("VAPID_PUBLIC_KEY", "")),
             "enabled": bool(_clean_env(os.getenv("VAPID_PUBLIC_KEY", ""))),
+        },
+        "recaptcha": {
+            # Site key is safe to expose — Google's reCAPTCHA design
+            # explicitly intends it to be embedded in the page. The
+            # SECRET_KEY stays server-side and is only used by
+            # _verify_recaptcha against siteverify. enabled=false when
+            # the env var is missing so the frontend can skip the
+            # script tag and the backend can skip verification (degrades
+            # gracefully — better than blocking every form submit).
+            "site_key": _clean_env(os.getenv("RECAPTCHA_SITE_KEY", "")),
+            "enabled": bool(_clean_env(os.getenv("RECAPTCHA_SITE_KEY", ""))),
         },
     }
 
