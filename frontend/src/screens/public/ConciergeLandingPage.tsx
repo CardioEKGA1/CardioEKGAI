@@ -24,8 +24,7 @@ const BG_BASE   = '#FDFBF8';
 const BG_BLUSH  = '#FDF7FA';
 const BLUSH     = '#F6BFD3';
 const OPAL      = '#C5E8F4';
-const LAVENDER  = '#F5F1FF';            // tier-card back background + disclaimer footer
-const DISCLAIM_INK = '#7a6a9a';         // disclaimer body color
+const LAVENDER  = '#F5F1FF';            // tier-card back background
 const GOLD      = '#C9A84C';
 const NAVY      = '#1a2a4a';
 const MUTED     = '#6B7280';
@@ -453,10 +452,6 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
             À la carte consultations available from $888. No long-term commitment required.
           </div>
 
-          {/* Disclaimers — footnote bodies for the ¹ ² markers on the
-              Ascend tier card. Lavender wash + opal hairline above per
-              spec; serif italic in #7a6a9a for the legal voice. */}
-          <AscendDisclaimers/>
         </div>
       </section>
 
@@ -1253,50 +1248,10 @@ const FlipInput: React.FC<{
   </label>
 );
 
-// ───── Disclaimer footer (Ascend ¹ ²) ─────────────────────────────────
-// Placed below the membership tier grid. Lavender wash + opal hairline
-// above per spec. Body copy is long-form legal text, locked verbatim.
-const AscendDisclaimers: React.FC = () => (
-  <div style={{
-    marginTop:'56px',
-    background: LAVENDER,
-    borderTop:`1px solid ${OPAL}`,
-    padding:'28px clamp(20px, 4vw, 36px)',
-    borderRadius:'2px',
-  }}>
-    <p style={disclaimerParaStyle}>
-      <sup style={disclaimerSupStyle}>¹</sup> The Annual SoulMD Retreat is an exclusive, invitation-only experience held once per year at a curated destination worldwide — locations rotate annually and may include places such as Japan, Costa Rica, and Patagonia. Each retreat is thoughtfully designed to immerse members in healing, consciousness, and transformation within some of the world's most extraordinary natural and cultural landscapes. Retreat attendance fees including travel, accommodations, and event programming are separate from and not included in membership pricing, and are the sole responsibility of the member. Retreat access is exclusive to Ascend members in active good standing at the time of the event.
-    </p>
-    <p style={{...disclaimerParaStyle, marginTop:'16px', marginBottom: 0}}>
-      <sup style={disclaimerSupStyle}>²</sup> Mystical Features include access to psychic and mediumship experiences and other consciousness-expanding offerings curated by Dr. Anderson. Features are introduced over time and are exclusive to active Ascend members. Specific offerings may vary and are subject to availability.
-    </p>
-  </div>
-);
-
-const disclaimerParaStyle: React.CSSProperties = {
-  fontFamily: SERIF,
-  fontStyle:'italic',
-  fontSize:'12.5px',
-  color: DISCLAIM_INK,
-  lineHeight: 1.75,
-  margin: 0,
-  letterSpacing:'0.01em',
-};
-
-const disclaimerSupStyle: React.CSSProperties = {
-  fontFamily: SERIF,
-  color: GOLD,
-  fontStyle:'normal',
-  fontWeight: 600,
-  fontSize:'0.9em',
-  marginRight:'4px',
-};
-
 // ───── Bottom-of-page disclaimers ─────────────────────────────────────
 // Last block on the page, below the legal footer. Quiet legal/footnote
-// rail at 11px Georgia italic in muted lavender (#a89fc0) — distinct
-// from the inline AscendDisclaimers that lives directly under the tier
-// grid. Spec is locked verbatim by the practice owner.
+// rail at 11px Georgia italic in muted lavender (#a89fc0). Spec is
+// locked verbatim by the practice owner.
 const BottomDisclaimers: React.FC = () => {
   const para: React.CSSProperties = {
     fontFamily: 'Georgia, serif',
