@@ -224,47 +224,6 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
     // screens (which may not opt-in) keep their default behavior.
     const prev = document.documentElement.style.scrollBehavior;
     document.documentElement.style.scrollBehavior = 'smooth';
-
-    // Inject the per-page CSS once (3D flip + media-query gated hover).
-    // Inline styles can't express :hover or @media, so we use a tiny
-    // <style> tag scoped via the .tier-flip-* class names.
-    const STYLE_ID = 'soulmd-tier-flip-styles';
-    if (!document.getElementById(STYLE_ID)) {
-      const s = document.createElement('style');
-      s.id = STYLE_ID;
-      // Two flip triggers, designed to coexist without fighting:
-      //  • CSS hover (desktop pointer-fine only) gives a peek-on-hover
-      //    that snaps back when the cursor leaves.
-      //  • JS toggles .is-locked-back when the user clicks "Learn More"
-      //    or focuses a form field on the back. Locked-back ALWAYS wins
-      //    so a user filling out the form doesn't lose their input the
-      //    moment their mouse drifts off the card.
-      s.textContent = `
-        .tier-flip-shell { perspective: 1400px; }
-        .tier-flip-inner {
-          position: relative;
-          transform-style: preserve-3d;
-          transition: transform 0.6s ease;
-          will-change: transform;
-        }
-        .tier-flip-inner.is-locked-back { transform: rotateY(180deg); }
-        .tier-flip-face {
-          position: absolute;
-          inset: 0;
-          backface-visibility: hidden;
-          -webkit-backface-visibility: hidden;
-          display: flex;
-          flex-direction: column;
-        }
-        .tier-flip-face.is-back { transform: rotateY(180deg); }
-        @media (hover: hover) and (pointer: fine) {
-          .tier-flip-shell:hover .tier-flip-inner:not(.is-locked-back) {
-            transform: rotateY(180deg);
-          }
-        }
-      `;
-      document.head.appendChild(s);
-    }
     return () => { document.documentElement.style.scrollBehavior = prev; };
   }, []);
 
@@ -919,16 +878,30 @@ const FormField: React.FC<{label: string; children: React.ReactNode}> = ({ label
 
 // ───── Tier card (Section 4) ──────────────────────────────────────────
 // Flippable: front shows tier copy + price + benefits, back shows a mini
-// inquiry form. Hover (desktop, pointer-fine only) peeks the back; on
-// click ("Learn More →") or focusing any back-side input the card locks
-// to the back so the user doesn't lose their typing if the cursor drifts.
-// "← Back" un-locks. Mobile (no hover) only reveals the back via tap.
+// inquiry form. Desktop hovers peek the back; clicking the front (or the
+// "Learn More →" button, or focusing any form field) locks the card to
+// the back face so the user doesn't lose their typing. Mobile (no hover)
+// reveals the back via tap. "← Back" un-locks.
 const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
   const featured = !!tier.featured;
 
-  // CSS hover handles the peek; .is-locked-back JS class handles the
-  // engaged state (clicked Learn More or interacting with a form field).
+  // lockedBack = explicit click/tap or focus-in-form intent.
+  // hovering   = desktop-only mouse hover peek.
+  // Either drives the rotation; lockedBack wins so a hover-leave doesn't
+  // snap a mid-form user back to the front and erase context.
   const [lockedBack, setLockedBack] = useState(false);
+  const [hovering, setHovering] = useState(false);
+
+  // matchMedia is only meaningful in the browser. We snapshot once on
+  // mount so the value is stable across renders. Touch devices report
+  // (hover: none) so this returns false on iOS/Android — preventing the
+  // CSS-style "tap-then-stuck-hover" bug entirely.
+  const [hoverCapable] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  });
+
+  const showBack = lockedBack || (hoverCapable && hovering);
 
   const [form, setForm] = useState({
     name: '', email: '', phone: '', why: '', heard_from: HEARD_FROM_OPTIONS[0],
@@ -989,10 +962,16 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
   };
 
   return (
-    <div className="tier-flip-shell" style={{
-      position:'relative', display:'flex', flexDirection:'column',
-      minHeight: tier.id === 'ascend' ? '600px' : '560px',
-    }}>
+    <div
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      style={{
+        position:'relative', display:'flex', flexDirection:'column',
+        minHeight: tier.id === 'ascend' ? '600px' : '560px',
+        perspective: '1400px',
+        WebkitPerspective: '1400px',
+      }}
+    >
       {featured && (
         <div style={{
           position:'absolute', top:'-26px', left:'50%',
@@ -1006,11 +985,26 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
         </div>
       )}
 
-      <div className={`tier-flip-inner${lockedBack ? ' is-locked-back' : ''}`} style={{
-        flex:1, position:'relative',
+      <div style={{
+        flex: 1, position: 'relative',
+        transformStyle: 'preserve-3d',
+        WebkitTransformStyle: 'preserve-3d' as any,
+        transition: 'transform 0.6s ease',
+        transform: showBack ? 'rotateY(180deg)' : 'rotateY(0deg)',
+        WebkitTransform: showBack ? 'rotateY(180deg)' : 'rotateY(0deg)' as any,
+        willChange: 'transform',
       }}>
         {/* ─── Front face ─── */}
-        <div className="tier-flip-face">
+        <div
+          onClick={() => setLockedBack(true)}
+          style={{
+            position:'absolute', inset:0,
+            backfaceVisibility:'hidden',
+            WebkitBackfaceVisibility:'hidden',
+            display:'flex', flexDirection:'column',
+            cursor:'pointer',
+          }}
+        >
           <div style={cardShellStyle}>
             <h3 style={{
               fontFamily: SERIF, fontSize:'24px', fontWeight: 400,
@@ -1080,7 +1074,14 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
         </div>
 
         {/* ─── Back face ─── */}
-        <div className="tier-flip-face is-back">
+        <div style={{
+          position:'absolute', inset:0,
+          backfaceVisibility:'hidden',
+          WebkitBackfaceVisibility:'hidden',
+          transform:'rotateY(180deg)',
+          WebkitTransform:'rotateY(180deg)' as any,
+          display:'flex', flexDirection:'column',
+        }}>
           <div style={{
             ...cardShellStyle,
             background: LAVENDER,
@@ -1100,7 +1101,11 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => { setLockedBack(false); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLockedBack(false);
+                    setHovering(false);
+                  }}
                   style={{
                     marginTop:'24px',
                     background:'transparent', border:'none',
@@ -1202,7 +1207,11 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
 
                 <button
                   type="button"
-                  onClick={() => setLockedBack(false)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLockedBack(false);
+                    setHovering(false);
+                  }}
                   style={{
                     marginTop:'4px',
                     background:'transparent', border:'none',

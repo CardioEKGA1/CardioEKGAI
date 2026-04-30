@@ -124,6 +124,10 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "support@soulmd.us")
+# Public, patient-facing support inbox. Referenced from every customer
+# email footer, error message, and contact link — never the practice
+# owner's private address. Override per environment via Railway env.
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@soulmd.us").strip() or "support@soulmd.us"
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 SUPERUSER_EMAIL = os.getenv("SUPERUSER_EMAIL", "").strip().lower()
 # Multi-email superuser list. Any of these emails is treated as
@@ -1115,24 +1119,24 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
         try:
             if is_soulmd:
                 send_email(user.email, "Welcome to SoulMD — here is your free EKGScan",
-                    """<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:40px">
+                    f"""<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:40px">
                     <h1 style="color:#1a2a4a;margin-bottom:16px">SoulMD</h1>
                     <h2 style="color:#1a2a4a">Welcome aboard</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your SoulMD account is live. As a thank-you for joining, your first EKGScan analysis is on us — just open the dashboard and upload any 12-lead tracing.</p>
                     <p style="color:#4a5e6a;line-height:1.7">From there you can unlock standard tools (EKGScan, RxCheck, AntibioticAI, NephroAI) at $9.99/mo or $89.99/yr, premium tools (ClinicalNote AI, CerebralAI, XrayRead, PalliativeMD) at $24.99/mo or $179.99/yr, or go all-in with the SoulMD Suite ($111.11/mo or $999.99/yr — all 10 tools plus unlimited LabRead &amp; CliniScore).</p>
                     <a href="https://soulmd.us/" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Open SoulMD Dashboard</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI output must be independently reviewed by a licensed clinician. In emergencies, call 911.</p>
-                    <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
+                    <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:{SUPPORT_EMAIL}" style="color:#4a7ad0;text-decoration:none">{SUPPORT_EMAIL}</a></p>
                     </div>""")
             else:
                 send_email(user.email, "Welcome to EKGScan — your free scan is ready",
-                    """<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:40px">
+                    f"""<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:40px">
                     <h1 style="color:#1a2a4a;margin-bottom:24px">EKGScan</h1>
                     <h2 style="color:#1a2a4a">Welcome</h2>
                     <p style="color:#4a5e6a;line-height:1.7">Your account is ready. Your first 12-lead EKG interpretation is free — upload any image and get a structured report in seconds.</p>
                     <a href="https://soulmd.us/scan" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px;text-align:center;font-weight:700;margin:24px 0">Analyze an EKG</a>
                     <p style="font-size:12px;color:#a0b0c8;line-height:1.6">For clinical decision support only. All AI interpretation must be reviewed by a qualified clinician. In emergencies, call 911.</p>
-                    <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:support@soulmd.us" style="color:#4a7ad0;text-decoration:none">support@soulmd.us</a></p>
+                    <p style="font-size:11px;color:#a0b0c8;margin-top:16px;border-top:1px solid #e0e6f0;padding-top:12px">© 2026 SoulMD, LLC. All rights reserved. · <a href="mailto:{SUPPORT_EMAIL}" style="color:#4a7ad0;text-decoration:none">{SUPPORT_EMAIL}</a></p>
                     </div>""")
         except Exception as e:
             print(f"Welcome email error: {e}")
@@ -7317,7 +7321,7 @@ class PushSubscribeResponse(BaseModel):
     subscription_id: int | None = None
 
 def _vapid_claims() -> dict:
-    email = _clean_env(os.getenv("VAPID_CONTACT_EMAIL", "")) or "support@soulmd.us"
+    email = _clean_env(os.getenv("VAPID_CONTACT_EMAIL", "")) or SUPPORT_EMAIL
     return {"sub": f"mailto:{email}"}
 
 def send_push_to_user(user_id: int, title: str, body: str, url: str = "/concierge", db: Session | None = None) -> int:
@@ -8725,7 +8729,7 @@ def _send_anderson_notification(subject: str, body_html: str) -> bool:
             subject=subject,
             html_content=body_html,
         )
-        msg.reply_to = "support@soulmd.us"
+        msg.reply_to = SUPPORT_EMAIL
         sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
         sg.send(msg)
         return True
