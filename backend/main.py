@@ -27,6 +27,7 @@ from database import (
     MeditateIntention, MeditateOracleFavorite, MeditateMedFavorite,
     MeditatePlayHistory, MeditateAiInsight,
     ToolTrialUse,
+    MembershipStatus,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
@@ -3413,6 +3414,114 @@ def concierge_provision_comp_patient(
         "is_new": is_new,
         "magic_link_sent": sent_link,
         "onboarding_pending": p.onboarding_completed_at is None,
+    }
+
+
+# ───── Stripe — remaining-balance one-time prices (3-month → annual) ──
+# Year-1 patients pay 3 monthlies, then a single one-time invoice for
+# (annual − 3×monthly). We seed those one-time Stripe prices once per
+# environment, attached to the EXISTING per-tier products by
+# metadata.slug. Re-running is safe — find-or-create matches on
+# metadata.slug=="<tier>_remaining" + the exact unit amount, so an
+# accidental second call won't duplicate prices.
+
+# (slug,                    tier_product_slug,  amount_cents, nickname)
+_REMAINING_BALANCE_PRICES = [
+    ("concierge_awaken_remaining", "concierge_awaken", 366800, "Awaken Annual Remaining Balance"),
+    ("concierge_align_remaining",  "concierge_align",  733600, "Align Annual Remaining Balance"),
+    ("concierge_ascend_remaining", "concierge_ascend", 966700, "Ascend Annual Remaining Balance"),
+]
+
+
+def _find_concierge_product_by_slug(slug: str):
+    """Returns the live Stripe Product whose metadata.slug == slug, or
+    None. Walks all active products since Stripe doesn't index
+    metadata."""
+    for p in stripe.Product.list(limit=100, active=True).auto_paging_iter():
+        if getattr(p.metadata, "slug", None) == slug:
+            return p
+    return None
+
+
+@app.post("/concierge/admin/seed-remaining-prices")
+def concierge_seed_remaining_prices(
+    _: User = Depends(verify_concierge_owner),
+):
+    """Owner-only. Creates (or finds) the three one-time remaining-balance
+    prices on the live Stripe account and returns their IDs. Idempotent:
+    re-running returns the same IDs without creating new prices.
+
+    After this returns, paste the IDs into Railway as:
+      STRIPE_PRICE_CONCIERGE_AWAKEN_REMAINING
+      STRIPE_PRICE_CONCIERGE_ALIGN_REMAINING
+      STRIPE_PRICE_CONCIERGE_ASCEND_REMAINING
+    The webhook + cron paths read these env vars when generating
+    payment links — the IDs are deliberately NOT hardcoded."""
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe not configured (STRIPE_SECRET_KEY missing).")
+
+    out: dict[str, dict] = {}
+    for slug, tier_product_slug, amount_cents, nickname in _REMAINING_BALANCE_PRICES:
+        product = _find_concierge_product_by_slug(tier_product_slug)
+        if not product:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Stripe product with metadata.slug='{tier_product_slug}' not found. "
+                    f"Run backend/scripts/seed_stripe.py once to seed the tier products before calling this endpoint."
+                ),
+            )
+
+        # Find existing one-time price with matching slug + amount (idempotency).
+        existing = None
+        for pr in stripe.Price.list(product=product.id, active=True, limit=100).auto_paging_iter():
+            if (
+                getattr(pr.metadata, "slug", None) == slug
+                and pr.unit_amount == amount_cents
+                and pr.recurring is None  # one-time only
+            ):
+                existing = pr
+                break
+
+        if existing:
+            out[slug] = {
+                "price_id": existing.id,
+                "product_id": product.id,
+                "amount_cents": existing.unit_amount,
+                "nickname": existing.nickname,
+                "created": False,
+            }
+            continue
+
+        pr = stripe.Price.create(
+            product=product.id,
+            unit_amount=amount_cents,
+            currency="usd",
+            nickname=nickname,
+            metadata={"slug": slug, "kind": "remaining_balance"},
+            # No `recurring=...` → Stripe creates a one-time price.
+        )
+        out[slug] = {
+            "price_id": pr.id,
+            "product_id": product.id,
+            "amount_cents": pr.unit_amount,
+            "nickname": pr.nickname,
+            "created": True,
+        }
+
+    # Map to the env var names the rest of the codebase will read.
+    env_names = {
+        "concierge_awaken_remaining": "STRIPE_PRICE_CONCIERGE_AWAKEN_REMAINING",
+        "concierge_align_remaining":  "STRIPE_PRICE_CONCIERGE_ALIGN_REMAINING",
+        "concierge_ascend_remaining": "STRIPE_PRICE_CONCIERGE_ASCEND_REMAINING",
+    }
+    railway_env = {env_names[k]: v["price_id"] for k, v in out.items()}
+
+    return {
+        "ok": True,
+        "prices": out,
+        "railway_env_to_set": railway_env,
+        "stripe_mode": ("live" if stripe.api_key.startswith("sk_live_") else "test"),
     }
 
 

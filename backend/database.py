@@ -1,11 +1,27 @@
 # Copyright 2026 SoulMD, LLC. All Rights Reserved.
 # Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
 
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, JSON, text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, JSON, Enum as SAEnum, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
+import enum
 import os
+
+
+# ─── Membership lifecycle states ──────────────────────────────────────
+# Drives the 3-month-trial-to-annual policy. Values are deliberately
+# verb-noun_role so log lines and dashboards read naturally. Stored on
+# concierge_patients.membership_status as a Postgres ENUM so an invalid
+# string can never be persisted.
+class MembershipStatus(str, enum.Enum):
+    ACTIVE_MONTHLY        = "active_monthly"          # in months 1–3 of the trial
+    BALANCE_INVOICE_SENT  = "balance_invoice_sent"    # 3rd payment cleared, balance invoice emailed
+    GRACE_PERIOD          = "grace_period"            # within the 14-day grace before downgrade
+    ACTIVE_ANNUAL         = "active_annual"           # paid the balance OR renewed annually
+    RENEWAL_INVOICE_SENT  = "renewal_invoice_sent"    # year 2+: 30-day renewal window opened
+    RENEWAL_GRACE_PERIOD  = "renewal_grace_period"    # year 2+: in 14-day post-due grace
+    DOWNGRADED_ALACARTE   = "downgraded_alacarte"     # portal-only, à la carte rates apply
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ekgscan.db")
 if DATABASE_URL.startswith("postgres://"):
@@ -157,6 +173,28 @@ class ConciergePatient(Base):
     # onboarding overlay until this is set; afterwards the regular tabs
     # become reachable.
     onboarding_completed_at = Column(DateTime, nullable=True)
+    # ─── 3-month trial → annual commitment policy ────────────────────
+    # Year-1 membership runs as 3 monthly invoices, then a one-time
+    # remaining-balance invoice (annual − 3×monthly) with a 14-day
+    # grace window. Year-2+ renewals require the full annual payment.
+    # All non-NULL columns below participate in the lifecycle cron
+    # sweep at /internal/jobs/membership-lifecycle.
+    monthly_payment_count        = Column(Integer, default=0, index=True)  # incremented on each successful monthly invoice
+    trial_end_date               = Column(DateTime, nullable=True)         # joined_at + 90 days; informational
+    remaining_balance_invoice_sent_at = Column(DateTime, nullable=True)
+    remaining_balance_due_at     = Column(DateTime, nullable=True)         # invoice_sent_at + 14d
+    annual_start_date            = Column(DateTime, nullable=True)         # set when remaining-balance invoice clears
+    annual_renewal_due_at        = Column(DateTime, nullable=True)         # annual_start_date + 365d
+    renewal_invoice_sent_at      = Column(DateTime, nullable=True)
+    grace_period_end             = Column(DateTime, nullable=True)         # repurposed across both balance + renewal grace
+    downgraded_at                = Column(DateTime, nullable=True)
+    is_first_year                = Column(Boolean, default=True, index=True)
+    membership_status            = Column(
+        SAEnum(MembershipStatus, name="membership_status_enum", values_callable=lambda x: [e.value for e in x]),
+        default=MembershipStatus.ACTIVE_MONTHLY,
+        nullable=False,
+        index=True,
+    )
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -702,6 +740,50 @@ with engine.begin() as conn:
         # when the dropdown was retired. Drop the column at boot so the
         # schema matches the model — IF EXISTS keeps fresh installs happy.
         conn.execute(text("ALTER TABLE concierge_inquiries DROP COLUMN IF EXISTS heard_from"))
+
+        # ─── 3-month-trial → annual lifecycle columns ───────────────
+        # Idempotent. Postgres ENUM type is created first; the column then
+        # references it. SQLAlchemy on a fresh table creates the enum for
+        # us, but ALTER TABLE ADD COLUMN against an already-deployed table
+        # needs the type to exist explicitly. The DO $$…$$ block makes the
+        # CREATE TYPE itself idempotent (Postgres has no IF NOT EXISTS for
+        # CREATE TYPE).
+        conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'membership_status_enum') THEN
+                    CREATE TYPE membership_status_enum AS ENUM (
+                        'active_monthly',
+                        'balance_invoice_sent',
+                        'grace_period',
+                        'active_annual',
+                        'renewal_invoice_sent',
+                        'renewal_grace_period',
+                        'downgraded_alacarte'
+                    );
+                END IF;
+            END$$;
+        """))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS monthly_payment_count INTEGER DEFAULT 0"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS trial_end_date TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS remaining_balance_invoice_sent_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS remaining_balance_due_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS annual_start_date TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS annual_renewal_due_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS renewal_invoice_sent_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS grace_period_end TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS downgraded_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS is_first_year BOOLEAN DEFAULT TRUE"))
+        conn.execute(text(
+            "ALTER TABLE concierge_patients "
+            "ADD COLUMN IF NOT EXISTS membership_status membership_status_enum "
+            "DEFAULT 'active_monthly' NOT NULL"
+        ))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_monthly_payment_count ON concierge_patients(monthly_payment_count)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_is_first_year ON concierge_patients(is_first_year)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_membership_status ON concierge_patients(membership_status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_remaining_balance_due_at ON concierge_patients(remaining_balance_due_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_annual_renewal_due_at ON concierge_patients(annual_renewal_due_at)"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 
