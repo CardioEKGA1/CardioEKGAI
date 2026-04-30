@@ -67,7 +67,7 @@ const TIERS: Tier[] = [
     id: 'awaken', name: 'Awaken',
     monthly: '$444', annual: 'or $5,000/year',
     features: [
-      '2 medical visits (30 min)',
+      '2 visits (30 min)',
       '1 guided meditation',
       'Direct physician messaging',
     ],
@@ -76,7 +76,7 @@ const TIERS: Tier[] = [
     id: 'align', name: 'Align', featured: true,
     monthly: '$888', annual: 'or $10,000/year',
     features: [
-      '3 medical visits (30 min)',
+      '3 visits (30 min)',
       '2 guided meditations',
       'Direct physician messaging',
     ],
@@ -85,7 +85,7 @@ const TIERS: Tier[] = [
     id: 'ascend', name: 'Ascend',
     monthly: '$1,111', annual: 'or $13,000/year',
     features: [
-      '5 medical visits/month (30 min each)',
+      '5 visits/month (30 min each)',
       '4 guided meditations/month',
       'Same-day scheduling',
       'Monthly integrative wellness review',

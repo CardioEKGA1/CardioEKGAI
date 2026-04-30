@@ -647,7 +647,7 @@ const DetailPanel: React.FC<{API:string; token:string; accent:string; patient:Bi
           {/* Visits */}
           <div style={{...CARD}}>
             <div style={{fontSize:'10px', letterSpacing:'1.5px', textTransform:'uppercase', color: INK_SOFT, fontWeight:800, marginBottom:'10px'}}>This cycle</div>
-            <UsageRow label="Medical visits"     used={patient.visits_used}      allowed={patient.visits_allowed}/>
+            <UsageRow label="Visits"             used={patient.visits_used}      allowed={patient.visits_allowed}/>
             <div style={{height:'10px'}}/>
             <UsageRow label="Guided meditations" used={patient.meditations_used} allowed={patient.meditations_allowed}/>
             {patient.current_period_end && (

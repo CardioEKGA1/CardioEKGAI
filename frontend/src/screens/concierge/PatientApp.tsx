@@ -362,7 +362,7 @@ const HomeTab: React.FC<{
       <Card>
         <Label>Your next session</Label>
         <div style={{marginTop:'6px', fontSize:'13px', color:DEEPP, opacity:0.8, lineHeight:1.5}}>
-          No sessions booked yet. Tap <b>Book</b> to schedule your next medical visit or guided meditation.
+          No sessions booked yet. Tap <b>Book</b> to schedule your next visit or guided meditation.
         </div>
         <button onClick={() => onGo('book')} style={smallCtaStyle}>Open calendar →</button>
       </Card>
@@ -463,7 +463,7 @@ const VisitTracker: React.FC<{patient: PatientPayload}> = ({ patient }) => {
           {patient.current_period_end ? `Renews ${new Date(patient.current_period_end).toLocaleDateString()}` : ''}
         </div>
       </div>
-      <TrackerRow icon="🩺" label="Medical visits" used={patient.visits_used} total={patient.visits_allowed} dots={visits} color={TEAL}/>
+      <TrackerRow icon="🩺" label="Visits" used={patient.visits_used} total={patient.visits_allowed} dots={visits} color={TEAL}/>
       <div style={{height:'10px'}}/>
       <TrackerRow icon="🧘" label="Guided meditations" used={patient.meditations_used} total={patient.meditations_allowed} dots={meds} color={ROSE}/>
     </Card>

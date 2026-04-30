@@ -6786,7 +6786,7 @@ def patient_bookings_create(
     # Ping the physician so they can confirm promptly.
     owner = db.query(User).filter(User.email.ilike(CONCIERGE_OWNER_EMAIL)).first()
     if owner:
-        svc_label = {"medical_visit": "Medical visit", "guided_meditation": "Guided meditation", "urgent_same_day": "Urgent same-day"}.get(data.service_type, data.service_type)
+        svc_label = {"medical_visit": "Visit", "guided_meditation": "Guided meditation", "urgent_same_day": "Urgent same-day"}.get(data.service_type, data.service_type)
         send_push_to_user(owner.id, f"New booking · {p.name}", f"{svc_label} · {starts.strftime('%a %b %d %I:%M %p')} MST", url="/concierge", db=db)
     return {
         "id": appt.id,

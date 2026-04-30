@@ -19,7 +19,7 @@ interface Appointment {
 interface PatientMini { id: number; name: string; email: string; }
 
 const APPT_TYPES: {id: string; label: string; icon: string; color: string}[] = [
-  { id: 'medical_visit', label: 'Medical Visit',       icon: '🩺', color: '#3a7ad0' },
+  { id: 'medical_visit', label: 'Visit',                icon: '🩺', color: '#3a7ad0' },
   { id: 'life_coaching', label: 'Life Coaching',       icon: '🧭', color: '#4a7ad0' },
   { id: 'guided_meditation', label: 'Guided Meditation', icon: '🧘', color: '#a070c0' },
   { id: 'telehealth',    label: 'Telehealth',          icon: '💻', color: '#4a9a7a' },

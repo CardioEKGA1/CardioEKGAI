@@ -37,7 +37,7 @@ const TIERS: Tier[] = [
     visits: 2,
     meditations: 1,
     included: [
-      '2 medical visits / month (up to 30 min each)',
+      '2 visits / month (up to 30 min each)',
       '1 guided meditation / month',
       'Secure direct messaging with Dr. Anderson',
       'Daily oracle card and energy log',
@@ -54,7 +54,7 @@ const TIERS: Tier[] = [
     visits: 3,
     meditations: 2,
     included: [
-      '3 medical visits / month (up to 30 min each)',
+      '3 visits / month (up to 30 min each)',
       '2 guided meditations / month',
       'Lab-review turnaround within 48 hours',
       'Priority messaging',
@@ -72,7 +72,7 @@ const TIERS: Tier[] = [
     visits: 5,
     meditations: 4,
     included: [
-      '5 medical visits / month (up to 30 min each)',
+      '5 visits / month (up to 30 min each)',
       '4 guided meditations / month',
       'Same-day scheduling',
       'Monthly integrative review with Dr. Anderson',

@@ -105,19 +105,19 @@ const NotEnrolled: React.FC<{email: string; onBack: () => void}> = ({ email, onB
     {
       id: 'awaken', label: 'Awaken', monthly: 444, yearly: 5000,
       tagline: 'Begin the practice',
-      bullets: ['2 medical visits / month (max 30 min)', '1 guided meditation / month', 'Secure direct messaging with Dr. Anderson'],
+      bullets: ['2 visits / month (max 30 min)', '1 guided meditation / month', 'Secure direct messaging with Dr. Anderson'],
       accent: '#7ab0f0',
     },
     {
       id: 'align',  label: 'Align',  monthly: 888, yearly: 10000,
       tagline: 'Deepen the work',
-      bullets: ['3 medical visits / month (max 30 min)', '2 guided meditations / month', 'Lab-review turnaround within 48h'],
+      bullets: ['3 visits / month (max 30 min)', '2 guided meditations / month', 'Lab-review turnaround within 48h'],
       accent: TEAL, featured: true,
     },
     {
       id: 'ascend', label: 'Ascend', monthly: 1111, yearly: 13000,
       tagline: 'Fully integrated care',
-      bullets: ['5 medical visits / month (max 30 min)', '4 guided meditations / month', 'Same-day scheduling', 'Monthly integrative review'],
+      bullets: ['5 visits / month (max 30 min)', '4 guided meditations / month', 'Same-day scheduling', 'Monthly integrative review'],
       accent: '#1a2a4a',
     },
   ];
