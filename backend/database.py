@@ -132,6 +132,14 @@ class ConciergePatient(Base):
     # aggregates and billing so the practice owner can exercise the full
     # patient PWA without polluting real panel metrics.
     test_account = Column(Boolean, default=False, index=True)
+    # Provenance of the patient's enrollment payment. 'stripe' is the
+    # standard path (inquiry → checkout → webhook). 'manual' is a comp /
+    # internal account (e.g. Dr. Anderson testing on her own personal
+    # email) provisioned via /concierge/admin/provision-comp-patient,
+    # bypassing Stripe entirely. Distinct from test_account: a manual
+    # patient can still be a real production user; we just billed them
+    # outside the system.
+    payment_method = Column(String, default="stripe", index=True)
     # Patient onboarding checkpoints. Both null on a freshly-provisioned row;
     # set to a timestamp when the patient accepts the Terms step and
     # completes the intake form at /patient/{terms,intake}.
@@ -650,6 +658,10 @@ with engine.begin() as conn:
         conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_24h_sent_at TIMESTAMP"))
         conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_1h_sent_at TIMESTAMP"))
         conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_followup_sent_at TIMESTAMP"))
+        # Distinguish stripe-paid vs comp/manual enrollments. Default
+        # 'stripe' so existing rows are unchanged.
+        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS payment_method VARCHAR DEFAULT 'stripe'"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_payment_method ON concierge_patients(payment_method)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_zoom_meeting_id ON concierge_appointments(zoom_meeting_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_session_request_id ON concierge_appointments(session_request_id)"))
         # Pre-approve the test patient so dev sign-in continues to work

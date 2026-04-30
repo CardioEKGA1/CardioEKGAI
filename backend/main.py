@@ -3090,6 +3090,8 @@ def _patient_dict(p: ConciergePatient) -> dict:
         "intake_completed_at": p.intake_completed_at.isoformat() if getattr(p, "intake_completed_at", None) else None,
         "is_approved": bool(getattr(p, "is_approved", False)),
         "approved_at": p.approved_at.isoformat() if getattr(p, "approved_at", None) else None,
+        "payment_method": getattr(p, "payment_method", "stripe") or "stripe",
+        "onboarding_completed_at": p.onboarding_completed_at.isoformat() if getattr(p, "onboarding_completed_at", None) else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -3320,6 +3322,95 @@ def concierge_revoke_patient(
     db.commit()
     db.refresh(p)
     return _patient_dict(p)
+
+
+# ───── Comp / manual patient provisioning ─────────────────────────────
+# Owner-only escape hatch for provisioning a fully-active patient row
+# WITHOUT going through the inquiry → Stripe checkout → webhook flow.
+# Use cases:
+#   • Dr. Anderson's personal account for end-to-end PWA testing
+#   • Comp accounts for partners / family
+#   • Restoring a patient whose Stripe was handled out-of-band
+#
+# Critically: this endpoint provisions the patient but does NOT touch
+# concierge_patient_consents or concierge_patient_intake. The first /patient
+# login still triggers the full 6-step onboarding gate. payment_method is
+# stamped 'manual' so billing analytics can exclude these rows from MRR.
+
+class _ProvisionCompPatientRequest(BaseModel):
+    email: str
+    name: str | None = None
+    tier: str = "ascend"          # awaken | align | ascend
+    send_magic_link: bool = True  # set false to provision silently
+
+@app.post("/concierge/admin/provision-comp-patient")
+def concierge_provision_comp_patient(
+    data: _ProvisionCompPatientRequest,
+    _: User = Depends(verify_concierge_owner),
+    db: Session = Depends(get_db),
+):
+    email = (data.email or "").strip().lower()
+    if "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Valid email required.")
+    tier = (data.tier or "ascend").strip().lower()
+    if tier not in {"awaken", "align", "ascend"}:
+        raise HTTPException(status_code=400, detail="tier must be awaken | align | ascend")
+    name = (data.name or email.split("@")[0]).strip()
+
+    # Idempotent upsert by email. If the row already exists, refresh its
+    # status fields but do NOT clear consents/intake (the caller may have
+    # already onboarded). The onboarding gate is reset only on first
+    # provision (when the row was just created).
+    existing = db.query(ConciergePatient).filter(
+        func.lower(ConciergePatient.email) == email
+    ).first()
+
+    is_new = existing is None
+    if existing:
+        p = existing
+        p.name = name or p.name
+        p.membership_tier = tier
+        p.subscription_status = "active"
+        p.is_approved = True
+        if not p.approved_at:
+            p.approved_at = datetime.utcnow()
+        p.payment_method = "manual"
+        p.updated_at = datetime.utcnow()
+    else:
+        p = ConciergePatient(
+            name=name, email=email,
+            membership_tier=tier,
+            subscription_status="active",
+            is_approved=True, approved_at=datetime.utcnow(),
+            payment_method="manual",
+            test_account=False,
+            # Onboarding deliberately left unset so the 6-step gate
+            # triggers on first /patient login.
+            terms_accepted_at=None,
+            intake_completed_at=None,
+            onboarding_completed_at=None,
+            visits_used=0,
+            meditations_used=0,
+        )
+        db.add(p)
+    db.commit()
+    db.refresh(p)
+
+    sent_link = False
+    if data.send_magic_link:
+        try:
+            _send_concierge_welcome_link(p.email, p.name)
+            sent_link = True
+        except Exception as e:
+            print(f"comp patient magic link failed for {p.email}: {e}")
+
+    return {
+        "ok": True,
+        "patient": _patient_dict(p),
+        "is_new": is_new,
+        "magic_link_sent": sent_link,
+        "onboarding_pending": p.onboarding_completed_at is None,
+    }
 
 
 # ───── Concierge Inquiries (physician dashboard tab) ──────────────────
