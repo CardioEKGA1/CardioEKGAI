@@ -433,7 +433,7 @@ const ConciergeLandingPage: React.FC<Props> = (_props) => {
               fontSize:'clamp(15px, 2vw, 17px)', lineHeight:1.9,
               color:'rgba(255,255,255,0.85)', margin:'0 0 18px',
             }}>
-              Trained at the University of Utah and UC San Diego, N. Anderson, MD has practiced across more than ten states as a hospitalist physician — from academic medical centers to bedside acute care. She currently practices inpatient medicine with Intermountain Health.
+              Trained at the University of Utah and UC San Diego, N. Anderson, MD has practiced across more than ten states as a hospitalist physician — from academic medical centers to critical access hospitals. She currently practices inpatient medicine with Intermountain Health.
             </p>
             <p style={{
               fontFamily: SERIF, fontStyle:'italic',
