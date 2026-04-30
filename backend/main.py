@@ -4376,6 +4376,27 @@ def concierge_list_session_types(
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
     rows = db.query(ConciergeSessionType).order_by(ConciergeSessionType.sort_order.asc(), ConciergeSessionType.id.asc()).all()
+    # Resolve the caller's patient row (if any) so we can flag which
+    # session types they're actually allowed to book — the booking
+    # POST will re-check, but this lets the frontend grey out
+    # forbidden options with a clear "Ascend only" or "Re-enroll to
+    # restore" hint instead of letting the user click and fail.
+    patient = _lookup_concierge_patient_for_user(current_user, db) if current_user else None
+    patient_tier = ((patient.membership_tier if patient else None) or "").lower()
+    ms = getattr(patient, "membership_status", None) if patient else None
+    ms_value = ms.value if hasattr(ms, "value") else (ms or "")
+    is_downgraded = ms_value == MembershipStatus.DOWNGRADED_ALACARTE.value
+
+    def _availability(r: "ConciergeSessionType") -> tuple[bool, str]:
+        # Same-day (urgent) is Ascend-only; downgraded à la carte loses
+        # it immediately even if the patient was previously Ascend.
+        if r.tier_required == "ascend":
+            if is_downgraded:
+                return False, "Same-day visits are not available on à la carte. Contact support@soulmd.us to re-enroll."
+            if patient_tier != "ascend":
+                return False, "Reserved for Ascend members."
+        return True, ""
+
     return {
         "session_types": [
             {
@@ -4383,6 +4404,8 @@ def concierge_list_session_types(
                 "duration_minutes": r.duration_minutes,
                 "tier_required": r.tier_required,
                 "is_async": bool(r.is_async),
+                "available_to_patient": _availability(r)[0],
+                "unavailable_reason":   _availability(r)[1],
             } for r in rows
         ],
     }
@@ -4435,8 +4458,17 @@ def concierge_patient_create_session_request(
     st = db.query(ConciergeSessionType).filter(ConciergeSessionType.id == data.session_type_id).first()
     if not st:
         raise HTTPException(status_code=404, detail="Unknown session type")
-    if st.tier_required == "ascend" and (p.membership_tier or "").lower() != "ascend":
-        raise HTTPException(status_code=403, detail="This session type is reserved for Ascend members.")
+    if st.tier_required == "ascend":
+        # Two distinct rejections so the patient sees the right reason:
+        ms_now = getattr(p, "membership_status", None)
+        ms_now_value = ms_now.value if hasattr(ms_now, "value") else (ms_now or "")
+        if ms_now_value == MembershipStatus.DOWNGRADED_ALACARTE.value:
+            raise HTTPException(
+                status_code=403,
+                detail="Same-day visits are not available on à la carte. Contact support@soulmd.us to re-enroll.",
+            )
+        if (p.membership_tier or "").lower() != "ascend":
+            raise HTTPException(status_code=403, detail="This session type is reserved for Ascend members.")
     times = [t for t in (data.preferred_times or []) if t and t.strip()][:3]
     if not st.is_async and not times:
         raise HTTPException(status_code=400, detail="Please choose at least one preferred time.")
@@ -8812,16 +8844,33 @@ def job_membership_lifecycle(
     # >= 3 monthly payments on the books. Trigger the balance flow now.
     # We trust monthly_payment_count if non-zero, else fall back to
     # "created_at older than 90 days" as the heuristic per spec option (a).
+    #
+    # Manual / comp accounts (payment_method=manual) are NOT excluded
+    # — Stripe never fires invoice.paid for them, so monthly_payment_
+    # count stays at 0 forever. For these patients the cron uses the
+    # created_at-age clock exclusively to decide when the 3-month
+    # window has elapsed, then fires the balance-invoice email +
+    # Stripe Checkout Session same as any other patient. test_account
+    # rows (separate flag — actual internal test users) DO stay
+    # excluded so we don't email Dr. Anderson's own test patient
+    # billing notices.
     candidates = db.query(ConciergePatient).filter(
         ConciergePatient.membership_status == MembershipStatus.ACTIVE_MONTHLY,
         ConciergePatient.is_first_year == True,  # noqa: E712
-        ConciergePatient.payment_method != "manual",  # comp accounts skip the policy
+        ConciergePatient.test_account == False,  # noqa: E712
     ).all()
     for p in candidates:
+        is_manual = (getattr(p, "payment_method", "stripe") or "stripe") == "manual"
         already_three = (p.monthly_payment_count or 0) >= 3
         old_enough = p.created_at and (now - p.created_at).days >= 90
-        if not (already_three or old_enough):
-            continue
+        # Manual patients have no Stripe webhook signal — the only
+        # safe trigger is the created_at clock.
+        if is_manual:
+            if not old_enough:
+                continue
+        else:
+            if not (already_three or old_enough):
+                continue
         tier = (p.membership_tier or "").lower()
         if tier not in {"awaken", "align", "ascend"}:
             continue
@@ -8902,10 +8951,14 @@ def job_membership_lifecycle(
             print(f"[lifecycle] balance downgrade failed for #{p.id}: {e}")
 
     # ── 4. Renewal invoice + warnings (year 2+) ───────────────────────
+    # Manual patients participate in the renewal flow same as Stripe-
+    # paid patients — Checkout Session falls back to customer_email
+    # when stripe_customer_id is unset, so the renewal URL still works
+    # for them. test_account rows stay excluded.
     annuals = db.query(ConciergePatient).filter(
         ConciergePatient.membership_status.in_([MembershipStatus.ACTIVE_ANNUAL, MembershipStatus.RENEWAL_INVOICE_SENT, MembershipStatus.RENEWAL_GRACE_PERIOD]),
         ConciergePatient.annual_renewal_due_at.isnot(None),
-        ConciergePatient.payment_method != "manual",
+        ConciergePatient.test_account == False,  # noqa: E712
     ).all()
     for p in annuals:
         days_left = (p.annual_renewal_due_at - now).days
