@@ -1458,7 +1458,6 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                         membership_tier=concierge_tier,
                         intake_data={
                             "reason_for_visit": inquiry.health_history or inquiry.message or "",
-                            "heard_from": inquiry.heard_from,
                             "insurance_acknowledged": bool(inquiry.insurance_acknowledged),
                             "source_inquiry_id": inquiry.id,
                         },
@@ -3431,7 +3430,6 @@ def _inquiry_dict(r: "ConciergeInquiry") -> dict:
         "message": r.message or "",
         "dob": r.dob,
         "health_history": r.health_history or "",
-        "heard_from": r.heard_from,
         "insurance_acknowledged": bool(r.insurance_acknowledged),
         "status": r.status or "pending",
         "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -8746,7 +8744,6 @@ class _ConciergeInquiryRequest(BaseModel):
     # Richer intake added with the per-tier flippable form.
     dob: str | None = None
     health_history: str | None = None
-    heard_from: str | None = None
     insurance_acknowledged: bool | None = None
 
 
@@ -8949,7 +8946,6 @@ def public_concierge_inquiry(
     legacy_msg     = (data.message or "").strip()
     primary_text   = health_history or legacy_msg
     dob = (data.dob or "").strip() or None
-    heard_from = (data.heard_from or "").strip() or None
     insurance_acked = bool(data.insurance_acknowledged)
 
     if not name or "@" not in email:
@@ -8963,7 +8959,6 @@ def public_concierge_inquiry(
         message=legacy_msg or "",
         dob=dob,
         health_history=primary_text,
-        heard_from=heard_from,
         insurance_acknowledged=insurance_acked,
     )
     db.add(row); db.commit(); db.refresh(row)
@@ -8984,7 +8979,6 @@ def public_concierge_inquiry(
             f'  <p style="margin:6px 0;font-size:13px"><b>Phone:</b> {_esc(phone) or _EMPTY_DASH_HTML}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Date of birth:</b> {_esc(dob) or _EMPTY_DASH_HTML}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Tier interest:</b> {tier_label}</p>'
-            f'  <p style="margin:6px 0;font-size:13px"><b>Heard from:</b> {_esc(heard_from) or _EMPTY_DASH_HTML}</p>'
             f'  <p style="margin:6px 0;font-size:13px"><b>Insurance acknowledged:</b> {"Yes" if insurance_acked else "No"}</p>'
             f'  <p style="margin:14px 0 6px;font-size:13px;font-weight:700">Health history &amp; reason for joining:</p>'
             f'  <div style="background:#FAF7EE;border:0.5px solid #C9A84C44;border-radius:10px;padding:12px;font-size:13px;line-height:1.6;color:#2a3a5a">{_esc(primary_text) or _EMPTY_FIELD_HTML}</div>'

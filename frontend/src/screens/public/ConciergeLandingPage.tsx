@@ -33,17 +33,6 @@ const HAIRLINE  = '#EDE8E3';
 const SERIF     = 'Georgia, "Cormorant Garamond", "Times New Roman", serif';
 const SANS      = '-apple-system, BlinkMacSystemFont, system-ui, sans-serif';
 
-// "How did you hear about us?" dropdown options for the tier-card form.
-// Same source-of-truth used on the back of every flippable tier card.
-const HEARD_FROM_OPTIONS: string[] = [
-  'Gabby Bernstein retreat',
-  'Doximity',
-  'LinkedIn',
-  'Referral',
-  'Instagram',
-  'Other',
-];
-
 // ───── Tier data ──────────────────────────────────────────────────────
 // `features` accepts ReactNode so Ascend can embed footnote markers
 // (¹ ²) styled per spec without breaking the rest of the bullet's type
@@ -904,7 +893,7 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
   const showBack = lockedBack || (hoverCapable && hovering);
 
   const [form, setForm] = useState({
-    name: '', email: '', phone: '', why: '', heard_from: HEARD_FROM_OPTIONS[0],
+    name: '', email: '', phone: '', why: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -930,7 +919,6 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
           tier_interest: tier.id,
           // Backend persists the narrative into health_history.
           health_history: form.why.trim() || undefined,
-          heard_from: form.heard_from || undefined,
         }),
       });
       if (!res.ok) {
@@ -1165,17 +1153,6 @@ const TierCard: React.FC<{tier: Tier; API: string}> = ({ tier, API }) => {
                     style={{...flipInputStyle, resize:'vertical', minHeight:'62px', fontFamily:'inherit'}}
                     placeholder="Optional"
                   />
-                </label>
-
-                <label style={flipLabelStyle}>
-                  How did you hear about us?
-                  <select
-                    value={form.heard_from}
-                    onChange={e => setForm(f => ({...f, heard_from: e.target.value}))}
-                    style={{...flipInputStyle, appearance:'auto'}}
-                  >
-                    {HEARD_FROM_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
                 </label>
 
                 {err && (

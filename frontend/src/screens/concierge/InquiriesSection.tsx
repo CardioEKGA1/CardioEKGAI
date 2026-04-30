@@ -21,7 +21,6 @@ interface Inquiry {
   message: string;
   dob: string | null;
   health_history: string;
-  heard_from: string | null;
   insurance_acknowledged: boolean;
   status: 'pending' | 'responded' | 'enrolled' | 'declined' | string;
   created_at: string | null;
@@ -204,7 +203,6 @@ const InquiriesSection: React.FC<Props> = ({ API, token, accent }) => {
                       <div style={{marginTop:'8px', padding:'12px 14px', background:'rgba(247,244,254,0.7)', border:'1px solid rgba(83,74,183,0.12)', borderRadius:'10px', fontSize:'12.5px', color:'#1a2a4a', lineHeight:1.65, whiteSpace:'pre-wrap'}}>
                         {i.health_history || i.message}
                         {i.dob && <div style={{marginTop:'8px', fontSize:'11px', color:'#6B6889'}}><b>DOB:</b> {i.dob}</div>}
-                        {i.heard_from && <div style={{marginTop:'4px', fontSize:'11px', color:'#6B6889'}}><b>Heard from:</b> {i.heard_from}</div>}
                         {i.insurance_acknowledged && <div style={{marginTop:'4px', fontSize:'11px', color:'#6B6889'}}><b>Insurance acknowledgment:</b> ✓</div>}
                       </div>
                     )}

@@ -581,7 +581,6 @@ class ConciergeInquiry(Base):
     # Richer intake added with the flippable tier-card request form:
     dob = Column(String, nullable=True)                       # ISO date string
     health_history = Column(String, default="")               # primary narrative field
-    heard_from = Column(String, nullable=True)                # social/referral/etc.
     insurance_acknowledged = Column(Boolean, default=False)   # required checkbox
     status = Column(String, default="pending", index=True)  # pending | responded | enrolled | declined
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -698,8 +697,11 @@ with engine.begin() as conn:
         # Richer concierge inquiry intake (flippable tier-card form).
         conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS dob VARCHAR"))
         conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS health_history VARCHAR DEFAULT ''"))
-        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS heard_from VARCHAR"))
         conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS insurance_acknowledged BOOLEAN DEFAULT FALSE"))
+        # heard_from was added with the original tier-card form and removed
+        # when the dropdown was retired. Drop the column at boot so the
+        # schema matches the model — IF EXISTS keeps fresh installs happy.
+        conn.execute(text("ALTER TABLE concierge_inquiries DROP COLUMN IF EXISTS heard_from"))
     except Exception as e:
         print(f"Concierge billing column migration skipped: {e}")
 
