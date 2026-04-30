@@ -6,7 +6,16 @@ import PhysicianDashboard from './PhysicianDashboard';
 import PatientApp from './PatientApp';
 import ChoKuRei from './ChoKuRei';
 
-interface Props { API: string; token: string; onBack: () => void; }
+interface Props {
+  API: string;
+  token: string;
+  onBack: () => void;
+  // When true (page mounted at /patient), force the patient PWA role
+  // regardless of URL query string. Lets the practice owner exercise
+  // the PWA from the canonical patient URL with no ?view=patient
+  // suffix.
+  patientOnly?: boolean;
+}
 
 type MePayload =
   | { role: 'physician'; email: string; owner_email?: string }
@@ -15,26 +24,26 @@ type MePayload =
 
 const HIPAA_ACK_KEY = 'concierge_hipaa_ack_v2';
 
-const Concierge: React.FC<Props> = ({ API, token, onBack }) => {
+const Concierge: React.FC<Props> = ({ API, token, onBack, patientOnly }) => {
   const [me, setMe] = useState<MePayload | null>(null);
   const [err, setErr] = useState<string>('');
   const [hipaaAcked, setHipaaAcked] = useState<boolean>(() => {
     try { return localStorage.getItem(HIPAA_ACK_KEY) === '1'; } catch { return false; }
   });
 
-  // Superuser override: when the URL carries ?view=patient, ask the backend
-  // to hand back patient-role for the Concierge owner/superuser so the
-  // practice owner can exercise the patient PWA on their own account.
-  // Backend auto-provisions a test-flagged ConciergePatient row on first hit.
+  // Patient-role override sources, in priority order:
+  //   1. patientOnly prop (set by App.tsx when mounting at /patient).
+  //   2. /concierge/journal/new (patient-only by definition — superusers
+  //      should land on the PatientApp so the journal overlay fires).
+  //   3. Legacy ?view=patient query string for backward-compat with
+  //      bookmarks and any cached browser state.
   const viewOverride = React.useMemo(() => {
     try {
-      // /concierge/journal/new is patient-only by definition — force patient
-      // role on superusers so they don't bounce to the physician dashboard
-      // and miss the journal overlay PatientApp opens on mount.
+      if (patientOnly) return 'patient';
       if (window.location.pathname === '/concierge/journal/new') return 'patient';
       return new URLSearchParams(window.location.search).get('view');
     } catch { return null; }
-  }, []);
+  }, [patientOnly]);
 
   useEffect(() => {
     const url = viewOverride === 'patient'

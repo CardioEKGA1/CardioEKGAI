@@ -84,7 +84,7 @@ const ConciergeAccess: React.FC<Props> = ({ API, token, onBack, onNavigateDashbo
             <div style={{fontSize:'18px', fontWeight:800, marginTop:'6px'}}>Open /concierge →</div>
             <div style={{fontSize:'12px', opacity:0.85, marginTop:'4px'}}>Members · Conversations · Appointments · Insights</div>
           </button>
-          <a href="/concierge?view=patient"
+          <a href="/patient"
             style={{textDecoration:'none', background:'#FFFFFF', color: INK, border:`0.5px solid ${BORDER}`, borderRadius:'18px', padding:'20px 22px', display:'block', boxShadow:'0 4px 14px rgba(20,18,40,0.05)'}}>
             <div style={{fontSize:'11px', letterSpacing:'2px', textTransform:'uppercase', color: PURPLE, fontWeight:800}}>Patient PWA</div>
             <div style={{fontSize:'18px', fontWeight:800, marginTop:'6px'}}>View as test patient →</div>
@@ -109,7 +109,7 @@ const ConciergeAccess: React.FC<Props> = ({ API, token, onBack, onNavigateDashbo
             </div>
           ) : (
             <div style={{marginTop:'8px', fontSize:'13px', color: INK_SOFT, fontStyle:'italic'}}>
-              No card pulled today yet. <a href="/concierge?view=patient" style={{color: PURPLE, fontWeight:700}}>Pull today's card →</a>
+              No card pulled today yet. <a href="/patient" style={{color: PURPLE, fontWeight:700}}>Pull today's card →</a>
             </div>
           )}
         </Card>

@@ -11,11 +11,12 @@
  * placeholder push handler here so future backend work can deliver messages
  * without shipping a new SW.
  */
-const VERSION = 'soulmd-v5';
+const VERSION = 'soulmd-v6';
 const STATIC_CACHE = `${VERSION}-static`;
 const SHELL = [
   '/',
   '/concierge',
+  '/patient',
   '/manifest.json',
   '/manifest-concierge.json',
   '/favicon.svg',
@@ -123,12 +124,12 @@ self.addEventListener('push', (event) => {
     icon: '/logo192.png',
     badge: '/favicon.svg',
     tag: data.tag || 'soulmd-concierge',
-    data: data.url || '/concierge',
+    data: data.url || '/patient',
   }));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = event.notification.data || '/concierge';
+  const url = event.notification.data || '/patient';
   event.waitUntil(self.clients.openWindow(url));
 });

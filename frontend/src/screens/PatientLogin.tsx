@@ -14,7 +14,7 @@ interface Props { API: string; onRequestMembership?: () => void; }
 
 // The onboarding gate lives at /patient (see App.tsx) — it reads the
 // onboarding status and routes to /patient/terms, /patient/intake, or
-// /concierge?view=patient as appropriate.
+// the patient PWA at /patient as appropriate.
 const POST_AUTH_REDIRECT = '/patient';
 // App.tsx writes this when it boots an authed-but-unapproved patient
 // off the PWA. PatientLogin reads + clears it on mount.

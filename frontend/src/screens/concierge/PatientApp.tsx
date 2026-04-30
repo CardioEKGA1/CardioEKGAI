@@ -112,7 +112,7 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
     if (window.location.pathname === '/concierge/journal/new') {
       setJournalFor({ id: null, title: '' });
       try {
-        window.history.replaceState({}, '', '/concierge?view=patient');
+        window.history.replaceState({}, '', '/patient');
       } catch {}
     }
   }, []);

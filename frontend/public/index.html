@@ -51,7 +51,11 @@
           if (h.indexOf('ekgscan') !== -1) {
             document.title = 'EKGScan — 12-lead EKG interpretation in seconds';
           }
-          if (window.location.pathname.indexOf('/concierge') === 0) {
+          // Patient PWA territory: /patient is the canonical patient app
+          // URL; /concierge stays supported for backward-compat with
+          // installed PWAs whose scope is fixed to /concierge.
+          var path = window.location.pathname;
+          if (path.indexOf('/patient') === 0 || path.indexOf('/concierge') === 0) {
             var m = document.getElementById('pwa-manifest');
             if (m) m.setAttribute('href', '/manifest-concierge.json');
             var tc = document.querySelector('meta[name="theme-color"]');

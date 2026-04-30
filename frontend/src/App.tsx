@@ -62,6 +62,7 @@ type Screen =
   | 'concierge'
   | 'meditations_library' | 'concierge_access'
   | 'patient_login' | 'patient_terms' | 'patient_intake'
+  | 'patient_pwa'           // authed patient PWA at /patient
   | 'concierge_medicine'    // public landing at /concierge-medicine
   | 'meditations_public'    // public landing at /meditations
   | 'marketing_admin'
@@ -95,7 +96,16 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/meditations')         return 'meditations_public';
   if (path === '/meditations/library') return 'meditations_library';
   if (path === '/concierge-access')  return 'concierge_access';
-  if (path === '/patient')           return 'patient_login';
+  if (path === '/patient') {
+    // /patient is the canonical patient PWA URL. Unauthed visitors
+    // land on PatientLogin; authed visitors render the PWA directly
+    // (the onboarding gate further refines that to terms / intake /
+    // pwa). Reading localStorage avoids the brief PatientLogin flash
+    // when a returning patient reloads /patient with a valid token.
+    let hasToken = false;
+    try { hasToken = !!localStorage.getItem('token'); } catch {}
+    return hasToken ? 'patient_pwa' : 'patient_login';
+  }
   if (path === '/patient/terms')     return 'patient_terms';
   if (path === '/patient/intake')    return 'patient_intake';
   if (path === '/concierge-medicine') return 'concierge_medicine';
@@ -133,6 +143,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'meditations_public')  return '/meditations';
   if (s === 'concierge_access')    return '/concierge-access';
   if (s === 'patient_login')       return '/patient';
+  if (s === 'patient_pwa')         return '/patient';
   if (s === 'patient_terms')       return '/patient/terms';
   if (s === 'patient_intake')      return '/patient/intake';
   if (s === 'concierge_medicine')  return '/concierge-medicine';
@@ -340,6 +351,7 @@ const App: React.FC = () => {
       meditations_library: `Meditations Library · ${brand}`,
       concierge_access:    `Concierge Portal · ${brand}`,
       patient_login:       'SoulMD Concierge · Sign in',
+      patient_pwa:         'SoulMD Concierge',
       patient_terms:       'Before We Begin · SoulMD Concierge',
       patient_intake:      'Tell Us About You · SoulMD Concierge',
       concierge_medicine:  'Concierge Medicine · Dr. Anderson · SoulMD',
@@ -394,13 +406,13 @@ const App: React.FC = () => {
   // dashboard instead.
   //
   //   not enrolled                   → /dashboard
-  //   superuser                      → /concierge?view=patient (skip onboarding)
-  //   enrolled, not approved         → stay on /patient (form stays visible)
+  //   superuser                      → /patient (PWA renders directly)
+  //   enrolled, not approved         → stay on /patient (banner shown)
   //   enrolled+approved, no terms    → /patient/terms
   //   enrolled+approved, no intake   → /patient/intake
-  //   enrolled+approved, fully done  → /concierge?view=patient
+  //   enrolled+approved, fully done  → /patient (PWA renders directly)
   useEffect(() => {
-    if (screen !== 'patient_login' || !user || !token) return;
+    if ((screen !== 'patient_login' && screen !== 'patient_pwa') || !user || !token) return;
     let cancelled = false;
     fetch(`${API}/concierge/patient/onboarding-status`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -409,29 +421,42 @@ const App: React.FC = () => {
       .then(data => {
         if (cancelled || !data) return;
         if (!data.enrolled)              { navigate('dashboard'); return; }
-        if (data.is_superuser)           { window.location.href = '/concierge?view=patient'; return; }
+        if (data.is_superuser)           { if (screen !== 'patient_pwa') navigate('patient_pwa'); return; }
         // Approval gate: a concierge_patients row exists but Dr. Anderson
         // hasn't approved (or has revoked) this patient. Surface the
         // "access restricted" banner via the existing PatientLogin
         // sessionStorage channel so they understand why they're stuck
-        // here. We do NOT navigate away — they're already on the right
-        // page.
+        // here.
         if (!data.is_approved) {
           try { sessionStorage.setItem('soulmd_patient_login_message', 'Access restricted to approved members.'); } catch {}
-          // Force a remount of PatientLogin so the banner reads
-          // sessionStorage again. Cheap: just nudge the URL hash.
-          if (window.location.hash !== '#restricted') {
-            window.location.hash = 'restricted';
-          }
+          // Drop the user back to the login form so the banner shows.
+          // pathToScreen optimistically promoted them to patient_pwa
+          // because their token is valid; we walk that back here.
+          if (screen === 'patient_pwa') navigate('patient_login');
           return;
         }
         if (!data.terms_accepted)        navigate('patient_terms');
         else if (!data.intake_completed) navigate('patient_intake');
-        else                             window.location.href = '/concierge?view=patient';
+        else if (screen !== 'patient_pwa') navigate('patient_pwa');
       })
       .catch(() => { /* network blip — leave them on the page; they can retry */ });
     return () => { cancelled = true; };
   }, [screen, user, token, navigate]);
+
+  // Backward compat: legacy /concierge?view=patient links land here. Bounce
+  // them to the new canonical /patient URL on mount so deep-links from
+  // emails, dev login, and any cached history survive the migration.
+  useEffect(() => {
+    try {
+      const p = window.location.pathname;
+      const view = new URLSearchParams(window.location.search).get('view');
+      if (p === '/concierge' && view === 'patient') {
+        window.history.replaceState({}, '', '/patient');
+        const fromUrl = pathToScreen('/patient');
+        if (fromUrl) setScreen(fromUrl);
+      }
+    } catch {}
+  }, []);
 
   // Patient PWA route guard. /concierge with view=patient (or any
   // non-owner accessing /concierge) must verify the user is still
@@ -567,6 +592,14 @@ const App: React.FC = () => {
       )}
       {screen==='auth' && <Login API={API} onBack={goBack} isSoulMD={isSoulMD}/>}
       {screen==='patient_login' && !user && <PatientLogin API={API} onRequestMembership={() => navigate('landing')}/>}
+      {/* Authed patient PWA at /patient. Uses the existing Concierge
+          router with a forced patient role so the practice owner can
+          also exercise the PWA from /patient (no more ?view=patient
+          query string). */}
+      {screen==='patient_pwa' && user && token && (
+        <Concierge API={API} token={token} onBack={()=>navigate('dashboard')} patientOnly/>
+      )}
+      {screen==='patient_pwa' && !token && <PatientLogin API={API} onRequestMembership={() => navigate('landing')}/>}
       {screen==='patient_terms' && token && (
         <PatientTerms
           API={API}
@@ -579,7 +612,7 @@ const App: React.FC = () => {
         <PatientIntake
           API={API}
           token={token}
-          onComplete={() => { window.location.href = '/concierge?view=patient'; }}
+          onComplete={() => navigate('patient_pwa')}
           onSignInRequired={() => navigate('patient_login')}
         />
       )}
@@ -679,7 +712,7 @@ const DevLogin: React.FC<{API: string; onAuth: (d: any) => void}> = ({ API, onAu
         </button>
         <button
           disabled={!!loading}
-          onClick={() => signIn('spicymolecule@gmail.com', '/concierge?view=patient')}
+          onClick={() => signIn('spicymolecule@gmail.com', '/patient')}
           style={{
             width:'100%', padding:'14px 18px',
             background:'rgba(255,255,255,0.9)',

@@ -163,7 +163,7 @@ const PhysicianDashboard: React.FC<Props> = ({ API, token, onBack }) => {
           </div>
 
           <div style={{padding:'6px 14px 0', display:'flex', flexDirection:'column', gap:'6px'}}>
-            <a href={`${window.location.pathname}?view=patient`}
+            <a href="/patient"
               style={{display:'block', padding:'8px 10px', fontSize:'11px', color: PURPLE, fontWeight:600, textDecoration:'none', borderRadius:'8px', background: 'rgba(83,74,183,0.06)', textAlign:'center'}}>
               View as test patient →
             </a>
@@ -318,7 +318,7 @@ const MoreSheet: React.FC<{section: Section; onChange: (s: Section) => void; onC
             );
           })}
           <div style={{height:'1px', background: BORDER, margin:'8px 4px'}}/>
-          <a href={`${window.location.pathname}?view=patient`}
+          <a href="/patient"
             style={{display:'flex', alignItems:'center', gap:'14px', padding:'14px 12px', borderRadius:'10px', background: 'rgba(83,74,183,0.06)', color: PURPLE, fontSize:'14px', fontWeight:700, textDecoration:'none'}}>
             <span style={{fontSize:'16px', width:'20px', textAlign:'center'}}>◈</span>
             View as test patient →
