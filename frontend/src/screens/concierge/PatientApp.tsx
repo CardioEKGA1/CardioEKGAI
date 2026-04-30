@@ -142,6 +142,12 @@ const PatientApp: React.FC<Props> = ({ API, token, onBack, isSuperuser }) => {
         {/* Top mini-header */}
         <TopHeader patient={patient} onBack={onBack}/>
 
+        {/* Stripe success banner — fires when Stripe Checkout's
+            success_url lands at /patient?paid=1 after the inquiry-
+            approval flow. One-shot: scrubs ?paid from the URL on
+            mount so a refresh doesn't keep showing it. */}
+        <PaymentSuccessBanner/>
+
         {/* Beta disclaimer — every screen. */}
         <BetaDisclaimer/>
 
@@ -1310,5 +1316,43 @@ const LoadingShell: React.FC = () => (
     </div>
   </div>
 );
+
+// One-shot Stripe success banner. /patient?paid=1 lands here from the
+// Stripe Checkout success_url after an inquiry-approval payment lands.
+// We strip the query param after first render so a refresh doesn't keep
+// re-showing the banner, but the banner itself persists for the session.
+const PaymentSuccessBanner: React.FC = () => {
+  const [visible, setVisible] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('paid') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    if (!visible) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('paid');
+      window.history.replaceState({}, '', url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : ''));
+    } catch {}
+  }, [visible]);
+  if (!visible) return null;
+  return (
+    <div style={{
+      marginTop:'12px', padding:'14px 16px',
+      background:'rgba(40,160,90,0.10)',
+      border:'1px solid rgba(40,160,90,0.45)',
+      borderRadius:'14px',
+      display:'flex', alignItems:'flex-start', gap:'10px',
+      color:'#1d6a3a', fontSize:'13px', lineHeight:1.55,
+    }}>
+      <span style={{fontSize:'18px', lineHeight:1, marginTop:'1px'}}>✓</span>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:800, marginBottom:'2px'}}>Payment received — welcome to SoulMD Concierge.</div>
+        <div style={{fontSize:'12px', opacity:0.85}}>
+          Your enrollment is active. Dr. Anderson will reach out personally within 48 hours.
+        </div>
+      </div>
+      <button onClick={() => setVisible(false)} aria-label="Dismiss" style={{background:'transparent', border:'none', color:'#1d6a3a', fontSize:'18px', cursor:'pointer', padding:0, lineHeight:1}}>×</button>
+    </div>
+  );
+};
 
 export default PatientApp;

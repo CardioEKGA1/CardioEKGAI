@@ -67,7 +67,8 @@ type Screen =
   | 'meditations_public'    // public landing at /meditations
   | 'marketing_admin'
   | 'meditate'
-  | 'dev_login';
+  | 'dev_login'
+  | 'not_found';
 
 const API = 'https://ekgscan.com';
 
@@ -125,6 +126,10 @@ const pathToScreen = (path: string): Screen | null => {
       'tool_labread','tool_cliniscore',
     ];
     if (valid.includes(candidate)) return candidate;
+    // Unknown tool slug — drop to 404 instead of silently re-routing
+    // to the landing screen (which used to leave the URL stranded
+    // pointing at a tool page that didn't exist).
+    return 'not_found';
   }
   return null;
 };
@@ -150,6 +155,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'marketing_admin')     return '/admin/marketing';
   if (s === 'meditate')            return '/meditate';
   if (s === 'dev_login')           return '/dev-login';
+  if (s === 'not_found')           return window.location.pathname || '/';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
 };
@@ -177,9 +183,16 @@ const App: React.FC = () => {
 
   // Single source of truth for what's rendered.
   // Initialized from the URL so /privacy and /terms are refresh-safe and deep-linkable.
+  // Unknown paths render the NotFound screen instead of silently falling
+  // back to landing (which used to leave users stranded on a confusing
+  // page whose URL didn't match the content).
   const [screen, setScreen] = useState<Screen>(() => {
     const fromUrl = pathToScreen(window.location.pathname);
-    return fromUrl ?? 'landing';
+    if (fromUrl) return fromUrl;
+    // Treat root-equivalents as landing; everything else is a 404.
+    const p = window.location.pathname;
+    if (p === '' || p === '/' || p === '/index.html') return 'landing';
+    return 'not_found';
   });
 
   const [result, setResult] = useState<EkgResult | null>(null);
@@ -220,9 +233,14 @@ const App: React.FC = () => {
         setScreen(fromUrl);
         return;
       }
-      // Fallback for unrecognized URLs (shouldn't happen — pathToScreen
-      // now recognizes every defined Screen).
-      setScreen(isSoulMD && user ? 'dashboard' : 'landing');
+      const p = window.location.pathname;
+      if (p === '' || p === '/' || p === '/index.html') {
+        setScreen('landing');
+        return;
+      }
+      // Unknown URL via back/forward — surface the NotFound screen
+      // rather than dropping the user onto landing with a stale URL.
+      setScreen('not_found');
     };
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
@@ -359,6 +377,7 @@ const App: React.FC = () => {
       marketing_admin:     `Marketing Agent · ${brand}`,
       meditate:            'SoulMD Meditate',
       dev_login:           `Dev Login · ${brand}`,
+      not_found:           `Page not found · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
   }, [screen, isSoulMD]);
@@ -542,7 +561,8 @@ const App: React.FC = () => {
       }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}
         onNavigateMeditations={()=>navigate('meditations_library')}
         onNavigateConciergeAccess={()=>navigate('concierge_access')}
-        onNavigateConciergeMedicine={()=>navigate('concierge_medicine')}/>}
+        onNavigateConciergeMedicine={()=>navigate('concierge_medicine')}
+        onNavigateMarketing={()=>navigate('marketing_admin')}/>}
       {/* Tool screens are accessible WITHOUT auth — the 8 trial tools run
           one free call per browser via the server-side trial gate. labread
           and cliniscore still allow 5/day for everyone. Tools themselves
@@ -567,6 +587,7 @@ const App: React.FC = () => {
           onBack={()=>navigate('dashboard')}
           onNavigateDashboard={()=>navigate('dashboard')}
           onNavigateConciergeAccess={()=>navigate('concierge_access')}
+          onNavigateMarketing={()=>navigate('marketing_admin')}
         />
       )}
       {screen==='concierge_access' && user && user.is_superuser && (
@@ -575,6 +596,7 @@ const App: React.FC = () => {
           onBack={()=>navigate('dashboard')}
           onNavigateDashboard={()=>navigate('dashboard')}
           onNavigateMeditations={()=>navigate('meditations_library')}
+          onNavigateMarketing={()=>navigate('marketing_admin')}
           onOpenConcierge={()=>navigate('concierge')}
         />
       )}
@@ -644,6 +666,7 @@ const App: React.FC = () => {
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
       {screen==='paywall' && <Paywall API={API} token={token} onBack={goBack}/>}
+      {screen==='not_found' && <NotFound onHome={() => navigate(isSoulMD ? 'landing' : 'landing')} onBack={goBack} brand={isSoulMD ? 'SoulMD' : 'EKGScan'}/>}
       <TrialSignupModal
         userAuthenticated={!!user}
         onSignUp={() => navigate('auth')}
@@ -653,6 +676,30 @@ const App: React.FC = () => {
     </div>
   );
 };
+// ─── NotFound (404) ────────────────────────────────────────────────────────
+// Rendered for any URL pathToScreen can't resolve. Keeps the visited URL
+// in the address bar so the user (and any error reporter) can see what
+// they tried, plus two clear escape hatches: home and browser back.
+const NotFound: React.FC<{onHome: () => void; onBack: () => void; brand: string}> = ({ onHome, onBack, brand }) => (
+  <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)', fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif'}}>
+    <div style={{maxWidth:'440px', width:'100%', textAlign:'center', background:'rgba(255,255,255,0.85)', backdropFilter:'blur(10px)', borderRadius:'22px', padding:'40px 28px', boxShadow:'0 20px 40px rgba(20,18,40,0.10)', border:'0.5px solid rgba(83,74,183,0.15)'}}>
+      <div style={{fontFamily:'Georgia, "Times New Roman", serif', fontSize:'56px', fontWeight:400, color:'#1a2a4a', letterSpacing:'0.02em', lineHeight:1, marginBottom:'12px'}}>404</div>
+      <div style={{fontFamily:'Georgia, "Times New Roman", serif', fontSize:'22px', fontWeight:400, color:'#1a2a4a', letterSpacing:'0.02em', marginBottom:'10px'}}>Page not found</div>
+      <p style={{fontSize:'13.5px', color:'#6B7280', lineHeight:1.7, margin:'0 0 24px', wordBreak:'break-all'}}>
+        We couldn't find <code style={{background:'rgba(83,74,183,0.08)', padding:'2px 6px', borderRadius:'4px', color:'#534AB7'}}>{(typeof window !== 'undefined' ? window.location.pathname : '') || '/'}</code> in {brand}.
+      </p>
+      <div style={{display:'flex', gap:'10px', justifyContent:'center', flexWrap:'wrap'}}>
+        <button onClick={onHome} style={{background:'#1a2a4a', color:'white', border:'none', borderRadius:'2px', padding:'14px 28px', fontFamily:'Georgia, serif', fontSize:'13px', letterSpacing:'0.08em', textTransform:'uppercase', cursor:'pointer'}}>
+          Go home
+        </button>
+        <button onClick={onBack} style={{background:'transparent', color:'#534AB7', border:'1px solid rgba(83,74,183,0.3)', borderRadius:'2px', padding:'14px 24px', fontFamily:'Georgia, serif', fontSize:'13px', letterSpacing:'0.08em', textTransform:'uppercase', cursor:'pointer'}}>
+          ← Back
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 // ─── Dev Login ─────────────────────────────────────────────────────────────
 // Hidden superuser fast-login page at /dev-login. Not linked anywhere;
 // reach it by typing the URL. Two buttons, no email input. Calls a

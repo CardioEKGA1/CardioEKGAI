@@ -16,6 +16,7 @@ interface Props {
   onBack: () => void;
   onNavigateDashboard: () => void;
   onNavigateConciergeAccess: () => void;
+  onNavigateMarketing?: () => void;
 }
 
 interface LibraryMeditation {
@@ -82,7 +83,7 @@ const saveFavorites = (favs: Set<number>) => {
   try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(Array.from(favs))); } catch {}
 };
 
-const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDashboard, onNavigateConciergeAccess }) => {
+const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDashboard, onNavigateConciergeAccess, onNavigateMarketing }) => {
   const [meds, setMeds] = useState<LibraryMeditation[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -189,7 +190,7 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
         </div>
       </header>
 
-      <SuperuserTabNav active="meditations" onDashboard={onNavigateDashboard} onMeditations={() => {}} onConcierge={onNavigateConciergeAccess} onMarketing={() => { window.location.href = '/admin/marketing'; }}/>
+      <SuperuserTabNav active="meditations" onDashboard={onNavigateDashboard} onMeditations={() => {}} onConcierge={onNavigateConciergeAccess} onMarketing={onNavigateMarketing || (() => { window.location.href = '/admin/marketing'; })}/>
 
       <main style={{padding:'clamp(16px,3vw,28px)', maxWidth:'1120px', margin:'0 auto'}}>
         <div style={{display:'flex', gap:'10px', flexWrap:'wrap', marginBottom:'16px'}}>

@@ -20,6 +20,7 @@ interface Props {
   onNavigateMeditations?: () => void;
   onNavigateConciergeAccess?: () => void;
   onNavigateConciergeMedicine?: () => void;
+  onNavigateMarketing?: () => void;
 }
 
 interface Tool { slug: string; name: string; icon: React.ReactNode; desc: string; monthly: number; yearly: number; keywords: string; free?: boolean; }
@@ -113,7 +114,7 @@ interface CasesResp {
   retention_days: number;
 }
 
-const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, onPrivacy, onTerms, checkoutResult, onNavigateMeditations, onNavigateConciergeAccess, onNavigateConciergeMedicine }) => {
+const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkgscan, onOpenTool, onPrivacy, onTerms, checkoutResult, onNavigateMeditations, onNavigateConciergeAccess, onNavigateConciergeMedicine, onNavigateMarketing }) => {
   const [access, setAccess] = useState<AccessResp | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [cases, setCases] = useState<CasesResp | null>(null);
@@ -325,7 +326,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
         onDashboard={() => {}}
         onMeditations={onNavigateMeditations}
         onConcierge={onNavigateConciergeAccess}
-        onMarketing={() => { window.location.href = '/admin/marketing'; }}
+        onMarketing={onNavigateMarketing || (() => { window.location.href = '/admin/marketing'; })}
       />
     )}
     <div style={{padding:'20px 16px', maxWidth:'1200px', margin:'0 auto'}}>
@@ -482,7 +483,7 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
             // landing. Superuser keeps the standard tile (clicks through
             // to /concierge physician dashboard).
             if (t.slug === 'concierge' && !isSuper) {
-              return <ConciergeInviteCard key={t.slug} name={t.name} icon={t.icon} desc={t.desc}/>;
+              return <ConciergeInviteCard key={t.slug} name={t.name} icon={t.icon} desc={t.desc} onOpen={onNavigateConciergeMedicine}/>;
             }
             const active = hasAccess(t.slug);
             const mLoading = checkoutLoading === `${t.slug}_monthly`;
@@ -664,8 +665,13 @@ const SuiteDashboard: React.FC<Props> = ({ API, token, user, onLogout, onOpenEkg
 // invitation-only badge + a gold "Request an Invitation →" button that
 // hard-navigates to /concierge-medicine (the public landing where the
 // inquiry form lives).
-const ConciergeInviteCard: React.FC<{name: string; icon: React.ReactNode; desc: string}> = ({ name, icon, desc }) => {
-  const goLanding = () => { window.location.href = '/concierge-medicine'; };
+const ConciergeInviteCard: React.FC<{name: string; icon: React.ReactNode; desc: string; onOpen?: () => void}> = ({ name, icon, desc, onOpen }) => {
+  const goLanding = () => {
+    if (onOpen) { onOpen(); return; }
+    // Fallback for callers that didn't wire onOpen — preserves the
+    // landing-page entry point even if the prop chain missed.
+    window.location.href = '/concierge-medicine';
+  };
   return (
     <div style={{...CARD, display:'flex', flexDirection:'column', gap:'8px', position:'relative', border:'1px solid rgba(201,168,76,0.45)', boxShadow:'0 6px 20px rgba(201,168,76,0.14)'}}>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
