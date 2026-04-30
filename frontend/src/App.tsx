@@ -355,6 +355,22 @@ const App: React.FC = () => {
   const goPrivacy = useCallback(() => navigate('privacy'), [navigate]);
   const goTerms = useCallback(() => navigate('terms'), [navigate]);
 
+  // /dashboard render guard requires `user` to be truthy. Unauthed
+  // visitors landing here would otherwise get a permanent blank page.
+  // Pre-pivot, this case was masked because soulmd.us / auto-redirected
+  // signed-in users to /dashboard; post-pivot the / → concierge change
+  // means more users may arrive at /dashboard without a session. Stash
+  // the intent so handleAuth lands them back on the dashboard after the
+  // magic-link round-trip. Guarded on `!token` too so a still-loading
+  // auth bootstrap (token in localStorage but /auth/me pending) doesn't
+  // bounce a returning clinician away.
+  useEffect(() => {
+    if (screen === 'dashboard' && !user && !token) {
+      try { sessionStorage.setItem('soulmd_post_auth_redirect', '/dashboard'); } catch {}
+      navigate('auth');
+    }
+  }, [screen, user, token, navigate]);
+
   // If someone lands directly on /concierge without being signed in, redirect
   // to the sign-in screen. Without this, the concierge render guard leaves
   // the page blank forever (waiting for a user that will never exist).
