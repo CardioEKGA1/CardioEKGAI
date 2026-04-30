@@ -839,6 +839,8 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
           <a href="/privacy" style={{color: MUTED, textDecoration:'none'}}>Notice of Privacy Practices</a>
         </div>
       </footer>
+
+      <BottomDisclaimers/>
     </div>
   );
 };
@@ -1288,6 +1290,40 @@ const disclaimerSupStyle: React.CSSProperties = {
   fontWeight: 600,
   fontSize:'0.9em',
   marginRight:'4px',
+};
+
+// ───── Bottom-of-page disclaimers ─────────────────────────────────────
+// Last block on the page, below the legal footer. Quiet legal/footnote
+// rail at 11px Georgia italic in muted lavender (#a89fc0) — distinct
+// from the inline AscendDisclaimers that lives directly under the tier
+// grid. Spec is locked verbatim by the practice owner.
+const BottomDisclaimers: React.FC = () => {
+  const para: React.CSSProperties = {
+    fontFamily: 'Georgia, serif',
+    fontStyle: 'italic',
+    fontSize: '11px',
+    color: '#a89fc0',
+    textAlign: 'center',
+    lineHeight: 1.75,
+    margin: 0,
+    letterSpacing: '0.01em',
+  };
+  return (
+    <div style={{
+      maxWidth: '800px',
+      margin: '0 auto',
+      padding: '40px 20px 60px',
+      borderTop: '1px solid #e8d8f8',
+      background: 'transparent',
+    }}>
+      <p style={para}>
+        ¹ The Annual SoulMD Retreat is an exclusive, invitation-only experience held once per year at a curated destination worldwide — locations rotate annually and may include places such as Japan, Costa Rica, and Patagonia. Each retreat is thoughtfully designed to immerse members in healing, consciousness, and transformation within some of the world's most extraordinary natural and cultural landscapes. Retreat attendance fees including travel, accommodations, and event programming are separate from and not included in membership pricing, and are the sole responsibility of the member. Retreat access is exclusive to Ascend members in active good standing at the time of the event.
+      </p>
+      <p style={{...para, marginTop: '16px'}}>
+        ² Mystical Features include access to psychic and mediumship experiences and other consciousness-expanding offerings curated by Dr. Anderson. Features are introduced over time and are exclusive to active Ascend members. Specific offerings may vary and are subject to availability.
+      </p>
+    </div>
+  );
 };
 
 export default ConciergeLandingPage;
