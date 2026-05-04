@@ -277,37 +277,13 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
     }
   };
 
-  // Patient Sign In modal state. Lives at the page level so the
-  // top-right pill can open it from anywhere without prop drilling.
-  const [signinOpen, setSigninOpen] = useState(false);
-
   return (
     <div style={{background: BG_BASE, color: NAVY, fontFamily: SANS, lineHeight: 1.8}}>
-      {/* Patient Sign In — fixed top-right pill. Opal outline so it
-          doesn't compete with primary CTAs. Hover fills with opal,
-          text stays navy. */}
-      <button
-        onClick={() => setSigninOpen(true)}
-        style={{
-          position:'fixed', top:'clamp(14px, 2.5vw, 22px)',
-          right:'clamp(14px, 2.5vw, 22px)', zIndex: 1000,
-          background:'rgba(255,255,255,0.85)',
-          border:`1px solid ${OPAL}`,
-          color: NAVY,
-          fontFamily: SANS, fontSize:'13px', fontWeight: 600,
-          letterSpacing:'0.02em',
-          padding:'9px 18px', borderRadius:'999px',
-          cursor:'pointer', backdropFilter:'blur(8px)',
-          transition:'background-color 180ms ease, color 180ms ease',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = OPAL; }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.85)'; }}
-      >
-        Patient Sign In
-      </button>
-      {signinOpen && (
-        <PatientSigninModal API={API} onClose={() => setSigninOpen(false)} onScrollToTiers={scrollToTiers}/>
-      )}
+      {/* Site lockdown: soulmd.us is invitation-only. The Patient Sign In
+          pill (and its modal) was removed — every authed destination it
+          would lead to is locked down in App.tsx, so there's no public
+          login surface left on the landing. PatientSigninModal is still
+          imported below and remains a no-op until the lockdown is lifted. */}
 
       {/* ───── SECTION 1 — HERO ────────────────────────────────────── */}
       <section style={{
@@ -873,19 +849,11 @@ const ConciergeLandingPage: React.FC<Props> = ({ API }) => {
           }}>
             © 2026 SoulMD<TM/>, LLC
           </div>
-          <div style={{justifySelf:'end'}}>
-            <a href="/dashboard" style={{
-              fontFamily: SERIF, fontSize:'12px',
-              color: MUTED, opacity: 0.7,
-              textDecoration:'none',
-              letterSpacing:'0.04em',
-              transition:'opacity 220ms ease',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-            onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}>
-              For Clinicians →
-            </a>
-          </div>
+          {/* "For Clinicians →" link to /dashboard removed under the
+              soulmd.us public lockdown — /dashboard now renders the
+              placeholder, so the link would loop back here. Empty
+              grid cell preserves the 3-column layout (logo · © · ·). */}
+          <div style={{justifySelf:'end'}} aria-hidden/>
         </div>
         <div style={{
           maxWidth:'1180px', margin:'18px auto 0',

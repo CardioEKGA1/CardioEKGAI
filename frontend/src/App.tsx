@@ -97,6 +97,26 @@ const API = 'https://ekgscan.com';
 // naturally. Ephemeral sub-states (modal overlays, tabs inside a screen)
 // stay as component-local React state.
 const pathToScreen = (path: string): Screen | null => {
+  // ─── soulmd.us public lockdown ──────────────────────────────────
+  // soulmd.us is invitation-only. Every public-facing route renders
+  // the ConciergeLandingPage placeholder. Carve-outs: the admin
+  // token console, the /dev-login superuser fast-login, the
+  // /concierge superuser dashboard (incl. ?view=patient and any
+  // /concierge/* subpath), and /api/* (backend — doesn't reach
+  // React anyway, listed for completeness). EKGScan and other hosts
+  // are unaffected.
+  if (typeof window !== 'undefined') {
+    const h = window.location.host.toLowerCase();
+    const isSoulMD = h === 'soulmd.us' || h === 'www.soulmd.us' || h.endsWith('.soulmd.us');
+    if (isSoulMD) {
+      const allowed =
+        path.startsWith('/admin') ||
+        path === '/dev-login' ||
+        path === '/concierge' || path.startsWith('/concierge/') ||
+        path.startsWith('/api/');
+      if (!allowed) return 'concierge_medicine';
+    }
+  }
   if (path === '/' || path === '')   return 'landing';
   if (path === '/auth')              return 'auth';
   if (path === '/dashboard')         return 'dashboard';
