@@ -313,57 +313,28 @@ const App: React.FC = () => {
     });
 
     // Concierge patients ALWAYS land on /patient and nowhere else.
-    // Wins over every other redirect mechanism so a hand-crafted ?rt=
-    // or stored sessionStorage intent can't divert them onto a clinical
-    // suite URL. window.history.replaceState scrubs the magic-link query
-    // string from the address bar AND prevents the back button from
-    // returning to the URL that contained the token. window.location
-    // .replace then drops the `landing` history entry from this very
-    // load so the back button can't reach it either.
+    // window.history.replaceState scrubs the magic-link query string
+    // from the address bar AND prevents the back button from returning
+    // to the URL that contained the token. window.location.replace
+    // then drops the `landing` history entry from this very load so
+    // the back button can't reach it either.
     if (data && data.is_concierge_patient && !data.is_superuser) {
       try { window.history.replaceState({}, '', '/patient'); } catch {}
       window.location.replace('/patient');
       return;
     }
 
-    // Post-auth redirect precedence:
-    //   1. sessionStorage['soulmd_post_auth_redirect'] — explicit intent set
-    //      before the magic-link request was made (e.g. the user clicked
-    //      "Sign in" from the concierge patient portal). Highest priority.
-    //   2. ?rt=… query param on the magic-link landing URL (cross-device
-    //      case — the magic-link itself carries the intent).
-    //   3. Default: SoulMD → dashboard, EKGScan → upload.
-    let redirected = false;
-    try {
-      const stored =
-        sessionStorage.getItem('soulmd_post_auth_redirect') ||
-        localStorage.getItem('post_auth_redirect');
-      if (stored && stored.startsWith('/')) {
-        try { sessionStorage.removeItem('soulmd_post_auth_redirect'); } catch {}
-        try { localStorage.removeItem('post_auth_redirect'); } catch {}
-        // Using window.location so we preserve the full path + query exactly,
-        // which the in-app navigate() can't do for ephemeral state like
-        // ?view=patient.
-        window.location.href = stored;
-        redirected = true;
-      }
-      if (!redirected) {
-        const rt = new URLSearchParams(window.location.search).get('rt');
-        if (rt && rt.startsWith('/')) {
-          window.location.href = rt;
-          redirected = true;
-        }
-      }
-    } catch {}
-    if (!redirected) {
-      // Site lockdown: post-auth always lands on /concierge regardless
-      // of host or session intent. /dashboard and /upload are public-
-      // locked on soulmd.us and aren't a useful default anywhere else
-      // while the placeholder is up. The earlier stored-redirect / rt
-      // query branches above still win when an explicit destination
-      // was set (e.g. dev-login → /patient for the test patient).
-      navigate('concierge');
-    }
+    // Site lockdown: post-auth ALWAYS lands on /concierge. The previous
+    // sessionStorage('soulmd_post_auth_redirect') / localStorage
+    // ('post_auth_redirect') / ?rt= precedence chain was removed so
+    // there's no path for an explicit intent (e.g. dev-login →
+    // /patient, magic-link rt=/dashboard) to divert away from the
+    // single allowed destination. Drain any leftover stored hints from
+    // prior sessions on the way through so a stale value doesn't haunt
+    // the next sign-in if the lockdown is later lifted.
+    try { sessionStorage.removeItem('soulmd_post_auth_redirect'); } catch {}
+    try { localStorage.removeItem('post_auth_redirect'); } catch {}
+    navigate('concierge');
   }, [navigate]);
 
   // Initial auth bootstrap — runs once, at mount.
