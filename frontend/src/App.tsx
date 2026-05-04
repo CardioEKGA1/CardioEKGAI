@@ -356,9 +356,15 @@ const App: React.FC = () => {
       }
     } catch {}
     if (!redirected) {
-      navigate(isSoulMD ? 'dashboard' : 'upload');
+      // Site lockdown: post-auth always lands on /concierge regardless
+      // of host or session intent. /dashboard and /upload are public-
+      // locked on soulmd.us and aren't a useful default anywhere else
+      // while the placeholder is up. The earlier stored-redirect / rt
+      // query branches above still win when an explicit destination
+      // was set (e.g. dev-login → /patient for the test patient).
+      navigate('concierge');
     }
-  }, [isSoulMD, navigate]);
+  }, [navigate]);
 
   // Initial auth bootstrap — runs once, at mount.
   useEffect(() => {
