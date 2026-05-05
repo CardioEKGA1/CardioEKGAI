@@ -190,7 +190,7 @@ const MeditationsLibrary: React.FC<Props> = ({ API, token, onBack, onNavigateDas
         </div>
       </header>
 
-      <SuperuserTabNav active="meditations" onDashboard={onNavigateDashboard} onMeditations={() => {}} onConcierge={onNavigateConciergeAccess} onMarketing={onNavigateMarketing || (() => { window.location.href = '/admin/marketing'; })} onShiftMD={() => { window.location.href = '/shiftmd'; }}/>
+      <SuperuserTabNav active="meditations" onDashboard={onNavigateDashboard} onMeditations={() => {}} onConcierge={onNavigateConciergeAccess} onMarketing={onNavigateMarketing || (() => { window.location.href = '/admin/marketing'; })} onScheduleMD={() => { window.location.href = '/schedulemd'; }}/>
 
       <main style={{padding:'clamp(16px,3vw,28px)', maxWidth:'1120px', margin:'0 auto'}}>
         <div style={{display:'flex', gap:'10px', flexWrap:'wrap', marginBottom:'16px'}}>

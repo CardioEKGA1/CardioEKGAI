@@ -29,7 +29,9 @@ from database import (
     ToolTrialUse,
     MembershipStatus,
     ConciergeInquiryLog, MagicLinkConsumed,
-    ShiftMDHospital, ShiftMDShift, ShiftMDAssignment, ShiftMDProvider,
+    ScheduleMDHospital, ScheduleMDShift, ScheduleMDBlock, ScheduleMDProvider,
+    ScheduleMDPreference, ScheduleMDTimeOff, ScheduleMDAssignment,
+    ScheduleMDSwapRequest, ScheduleMDEquity,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
@@ -10826,122 +10828,623 @@ def public_config():
         },
     }
 
-# ─── ShiftMD: hospital shift scheduler ─────────────────────────────────────
-# All endpoints owner-gated via verify_concierge_owner (Anderson +
-# is_superuser). Path prefix /api/shiftmd/* — sits under the React
-# SPA catch-all at the bottom of this file, but FastAPI evaluates
-# decorated routes first so direct /api/* fetches resolve here, not
-# index.html. Schedule date format on the wire: "YYYY-MM-DD" string.
 
-class ShiftMDAssignmentIn(BaseModel):
-    shift_id: int
-    schedule_date: str          # "YYYY-MM-DD"
-    provider_name: str | None = None
-    is_unavailable: bool = False
+# ─── ScheduleMD: hospital scheduling platform ─────────────────────────────
+# v2 endpoints. Admin endpoints (POST/PATCH/DELETE schedule, providers,
+# blocks, time-off review, swap review, equity) are owner-gated via
+# verify_concierge_owner. The /portal/* endpoints are gated by a
+# provider's magic_link_token (no JWT required) so external physicians
+# can sign in by clicking an emailed link.
 
-class ShiftMDSwapIn(BaseModel):
-    new_provider_name: str
-    swap_note: str | None = None
+import secrets as _smd_secrets
+from datetime import date as _smd_date, timedelta as _smd_td
+from email_utils import (
+    send_schedulemd_magic_link as _smd_send_magic,
+    send_schedulemd_block_published as _smd_send_published,
+    send_schedulemd_time_off_admin as _smd_send_to_admin,
+    send_schedulemd_time_off_decision as _smd_send_to_decision,
+    send_schedulemd_swap_decision as _smd_send_swap_decision,
+    send_schedulemd_swap_admin as _smd_send_swap_admin,
+)
 
-class ShiftMDProviderIn(BaseModel):
-    name: str
-    role: str
-    hospitals: list[str] = []
+_SMD_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SMD_VALID_TYPES = {"day", "swing", "night", "app", "backup", "admin"}
+_SMD_VALID_ROLES = {"MD", "DO", "APP", "NP", "PA"}
+_SMD_VALID_EMP   = {"fte", "part_time", "moonlighter", "locum"}
+_SMD_VALID_BLOCK_STATUS = {"draft", "preference_open", "published"}
+_SMD_VALID_TIME_OFF_STATUS = {"pending", "approved", "denied"}
+_SMD_VALID_SWAP_STATUS = {"pending", "auto_approved", "approved", "denied"}
+_SMD_ADMIN_NOTIFY_EMAIL = os.getenv("SCHEDULEMD_ADMIN_EMAIL", "anderson@soulmd.us")
+_SMD_MAGIC_LINK_TTL_DAYS = 30
 
-class ShiftMDInsightIn(BaseModel):
-    date: str                   # "YYYY-MM-DD"
+def _smd_assert_date(d: str, field: str = "date") -> None:
+    if not d or not _SMD_DATE_RE.match(d):
+        raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DD")
 
-_SHIFTMD_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_SHIFTMD_VALID_TYPES = {"day", "swing", "night", "app", "backup", "admin"}
-_SHIFTMD_VALID_ROLES = {"MD", "DO", "APP", "NP", "PA"}
+def _smd_today() -> str:
+    return _smd_date.today().isoformat()
 
-def _shiftmd_assert_date(d: str) -> None:
-    if not d or not _SHIFTMD_DATE_RE.match(d):
-        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+def _smd_ser_hospital(h: ScheduleMDHospital) -> dict:
+    return {"id": h.id, "name": h.name, "color": h.color}
 
-def _shiftmd_serialize_shift(s: ShiftMDShift) -> dict:
+def _smd_ser_shift(s: ScheduleMDShift) -> dict:
     return {
-        "id": s.id,
-        "hospital_id": s.hospital_id,
-        "name": s.name,
-        "shift_type": s.shift_type,
-        "start_time": s.start_time,
-        "end_time": s.end_time,
-        "sort_order": s.sort_order,
+        "id": s.id, "hospital_id": s.hospital_id, "name": s.name,
+        "shift_type": s.shift_type, "start_time": s.start_time,
+        "end_time": s.end_time, "sort_order": s.sort_order,
     }
 
-def _shiftmd_serialize_assignment(a: ShiftMDAssignment) -> dict:
+def _smd_ser_block(b: ScheduleMDBlock) -> dict:
     return {
-        "id": a.id,
-        "shift_id": a.shift_id,
-        "schedule_date": a.schedule_date,
-        "provider_name": a.provider_name,
+        "id": b.id, "name": b.name, "start_date": b.start_date, "end_date": b.end_date,
+        "status": b.status,
+        "published_at": b.published_at.isoformat() if b.published_at else None,
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+    }
+
+def _smd_ser_provider(p: ScheduleMDProvider, *, redact_token: bool = True) -> dict:
+    return {
+        "id": p.id, "name": p.name, "full_name": p.full_name, "email": p.email,
+        "role": p.role, "employment_type": p.employment_type,
+        "hospitals": list(p.hospitals or []),
+        "no_nights": bool(p.no_nights),
+        "contracted_shifts_per_block": p.contracted_shifts_per_block,
+        "min_shifts_per_block": p.min_shifts_per_block,
+        "max_shifts_per_block": p.max_shifts_per_block,
+        "has_active_link": bool(p.magic_link_token and p.magic_link_expires_at and p.magic_link_expires_at > datetime.utcnow()),
+        # Token only included for admin contexts that need it (e.g. just
+        # after generation). Default redact so the field never leaks
+        # through general /providers GETs.
+        **({} if redact_token else {"magic_link_token": p.magic_link_token}),
+        "last_login": p.last_login.isoformat() if p.last_login else None,
+    }
+
+def _smd_ser_assignment(a: ScheduleMDAssignment, provider: ScheduleMDProvider | None = None) -> dict:
+    return {
+        "id": a.id, "shift_id": a.shift_id, "block_id": a.block_id,
+        "schedule_date": a.schedule_date, "provider_id": a.provider_id,
+        "provider_name": (provider.name if provider else None),
+        "provider_full_name": (provider.full_name if provider else None),
         "is_swapped": bool(a.is_swapped),
+        "swapped_from_provider_id": a.swapped_from_provider_id,
         "swap_note": a.swap_note,
-        "is_unavailable": bool(a.is_unavailable),
+        "is_open": bool(a.is_open),
+        "source": a.source or "admin",
         "updated_at": a.updated_at.isoformat() if a.updated_at else None,
     }
 
-@app.get("/api/shiftmd/hospitals")
-def shiftmd_hospitals(
-    db: Session = Depends(get_db),
-    _user: User = Depends(verify_concierge_owner),
-):
-    """List all hospitals with their shift catalog. Sort by hospital
-    creation order, shifts by sort_order within each hospital."""
-    hospitals = db.query(ShiftMDHospital).order_by(ShiftMDHospital.id.asc()).all()
-    shifts_by_hospital: dict[int, list[dict]] = {}
-    for s in db.query(ShiftMDShift).order_by(ShiftMDShift.sort_order.asc()).all():
-        shifts_by_hospital.setdefault(s.hospital_id, []).append(_shiftmd_serialize_shift(s))
+def _smd_ser_time_off(t: ScheduleMDTimeOff, provider: ScheduleMDProvider | None = None) -> dict:
     return {
-        "hospitals": [
-            {
-                "id": h.id,
-                "name": h.name,
-                "color": h.color,
-                "shifts": shifts_by_hospital.get(h.id, []),
-            }
-            for h in hospitals
-        ],
+        "id": t.id, "provider_id": t.provider_id,
+        "provider_name": provider.name if provider else None,
+        "provider_full_name": provider.full_name if provider else None,
+        "block_id": t.block_id,
+        "start_date": t.start_date, "end_date": t.end_date,
+        "reason": t.reason, "note": t.note, "status": t.status,
+        "requested_at": t.requested_at.isoformat() if t.requested_at else None,
+        "reviewed_at": t.reviewed_at.isoformat() if t.reviewed_at else None,
     }
 
-@app.get("/api/shiftmd/schedule")
-def shiftmd_schedule(
-    date: str,
+def _smd_ser_swap(s: ScheduleMDSwapRequest, providers_by_id: dict | None = None) -> dict:
+    pb = providers_by_id or {}
+    req = pb.get(s.requesting_provider_id)
+    rec = pb.get(s.receiving_provider_id) if s.receiving_provider_id else None
+    return {
+        "id": s.id, "assignment_id": s.assignment_id,
+        "requesting_provider_id": s.requesting_provider_id,
+        "requesting_provider_name": (req.name if req else None),
+        "receiving_provider_id": s.receiving_provider_id,
+        "receiving_provider_name": (rec.name if rec else None),
+        "swap_type": s.swap_type, "status": s.status,
+        "rule_violations": list(s.rule_violations or []),
+        "requested_at": s.requested_at.isoformat() if s.requested_at else None,
+        "resolved_at": s.resolved_at.isoformat() if s.resolved_at else None,
+    }
+
+# ─── Magic-link auth (provider portal) ───────────────────────────────
+def _smd_lookup_provider_by_token(db: Session, token: str) -> ScheduleMDProvider:
+    """Look up a provider by their magic_link_token, asserting it's
+    present and unexpired. Raises HTTPException(401) on failure so the
+    portal endpoints can `Depends(_smd_lookup_provider_by_token)`-like
+    pattern. Side-effect: stamps last_login on success."""
+    if not token or not token.strip():
+        raise HTTPException(status_code=401, detail="Sign-in link required")
+    row = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.magic_link_token == token.strip()).first()
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid sign-in link")
+    if not row.magic_link_expires_at or row.magic_link_expires_at < datetime.utcnow():
+        raise HTTPException(status_code=401, detail="Sign-in link expired — request a new one")
+    row.last_login = datetime.utcnow()
+    db.commit()
+    return row
+
+def _smd_mint_magic_link(provider: ScheduleMDProvider, db: Session) -> str:
+    token = _smd_secrets.token_urlsafe(32)
+    provider.magic_link_token = token
+    provider.magic_link_expires_at = datetime.utcnow() + timedelta(days=_SMD_MAGIC_LINK_TTL_DAYS)
+    db.commit()
+    return token
+
+# ─── Rules engine ────────────────────────────────────────────────────
+# Pure function — given a candidate (provider, shift, date), returns
+# the list of soft-warning codes that apply. Empty list = clean.
+# Never blocks; the API surface returns warnings + ok=True so the UI
+# can decide to proceed with a yellow toast.
+def check_scheduling_rules(db: Session, provider_id: int, shift_id: int, schedule_date: str, block_id: int | None = None) -> list:
+    violations: list[str] = []
+    provider = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == provider_id).first()
+    shift = db.query(ScheduleMDShift).filter(ScheduleMDShift.id == shift_id).first()
+    if not provider or not shift:
+        return violations  # callers will 404 separately; rules don't add noise
+
+    # 1) NO_DUAL_HOSPITAL — assigned to a *different* hospital on the same date
+    same_day = db.query(ScheduleMDAssignment).filter(
+        ScheduleMDAssignment.schedule_date == schedule_date,
+        ScheduleMDAssignment.provider_id == provider_id,
+        ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+    ).all()
+    for a in same_day:
+        other_shift = db.query(ScheduleMDShift).filter(ScheduleMDShift.id == a.shift_id).first()
+        if other_shift and other_shift.hospital_id != shift.hospital_id:
+            violations.append("NO_DUAL_HOSPITAL")
+            break
+
+    # 2) NO_NIGHT_AFTER_DAY — provider has a day shift on the same date and
+    #    this candidate is a night shift (note: same-day is a strict reading
+    #    of the spec's "ending same date" — back-to-back fatigue check).
+    if shift.shift_type == "night":
+        for a in same_day:
+            other_shift = db.query(ScheduleMDShift).filter(ScheduleMDShift.id == a.shift_id).first()
+            if other_shift and other_shift.shift_type == "day":
+                violations.append("NO_NIGHT_AFTER_DAY")
+                break
+
+    # 3) NO_NIGHTS_FLAG
+    if shift.shift_type == "night" and bool(provider.no_nights):
+        violations.append("NO_NIGHTS_FLAG")
+
+    # 4) MAX_SHIFTS — block-scoped
+    if provider.max_shifts_per_block is not None and block_id is not None:
+        worked = db.query(ScheduleMDAssignment).filter(
+            ScheduleMDAssignment.provider_id == provider_id,
+            ScheduleMDAssignment.block_id == block_id,
+            ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+        ).count()
+        if worked >= provider.max_shifts_per_block:
+            violations.append("MAX_SHIFTS")
+
+    # 5) TIME_OFF_CONFLICT — date falls within an approved time-off range
+    approved_off = db.query(ScheduleMDTimeOff).filter(
+        ScheduleMDTimeOff.provider_id == provider_id,
+        ScheduleMDTimeOff.status == "approved",
+    ).all()
+    for t in approved_off:
+        if t.start_date <= schedule_date <= t.end_date:
+            violations.append("TIME_OFF_CONFLICT")
+            break
+
+    return violations
+
+# ─── Equity rollup ───────────────────────────────────────────────────
+# Computed from assignments + provider contracts on demand. The
+# schedulemd_equity table caches the latest snapshot per (provider, block);
+# this helper recomputes and upserts.
+def _smd_recompute_equity(db: Session, block_id: int) -> list[ScheduleMDEquity]:
+    block = db.query(ScheduleMDBlock).filter(ScheduleMDBlock.id == block_id).first()
+    if not block:
+        return []
+    providers = db.query(ScheduleMDProvider).all()
+    shifts_by_id = {s.id: s for s in db.query(ScheduleMDShift).all()}
+    assignments = db.query(ScheduleMDAssignment).filter(
+        ScheduleMDAssignment.block_id == block_id,
+        ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+    ).all()
+
+    rows: list[ScheduleMDEquity] = []
+    for p in providers:
+        worked = nights = weekends = holidays = 0
+        for a in assignments:
+            if a.provider_id != p.id:
+                continue
+            worked += 1
+            sh = shifts_by_id.get(a.shift_id)
+            if sh and sh.shift_type == "night":
+                nights += 1
+            try:
+                d = _smd_date.fromisoformat(a.schedule_date)
+                if d.weekday() >= 5:  # Sat/Sun
+                    weekends += 1
+            except Exception:
+                pass
+        eq = db.query(ScheduleMDEquity).filter(
+            ScheduleMDEquity.provider_id == p.id,
+            ScheduleMDEquity.block_id == block_id,
+        ).first()
+        if not eq:
+            eq = ScheduleMDEquity(provider_id=p.id, block_id=block_id)
+            db.add(eq)
+        eq.contracted_shifts = p.contracted_shifts_per_block or 0
+        eq.worked_shifts = worked
+        eq.night_shifts = nights
+        eq.weekend_shifts = weekends
+        eq.holiday_shifts = 0  # holiday calendar TBD; column reserved
+        eq.updated_at = datetime.utcnow()
+        rows.append(eq)
+    db.commit()
+    return rows
+
+# ─── iCal (.ics) builder ─────────────────────────────────────────────
+# Minimal RFC-5545-compliant calendar — one VEVENT per assignment.
+# Used by send_schedulemd_block_published to attach a personal schedule
+# to the publish notification email.
+def _smd_build_ics(provider_name: str, items: list[dict]) -> str:
+    """items: [{date, start, end, shift_name, hospital, type}]"""
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//SoulMD//ScheduleMD//EN",
+        "CALSCALE:GREGORIAN",
+        f"X-WR-CALNAME:ScheduleMD — {provider_name}",
+    ]
+    for it in items:
+        date = it["date"].replace("-", "")
+        start = (it.get("start") or "06:00").replace(":", "")
+        end = (it.get("end") or "18:00").replace(":", "")
+        # End-time wrap to next day for night shifts (start > end).
+        end_date = date
+        if start > end:
+            try:
+                d = _smd_date.fromisoformat(it["date"])
+                end_date = (d + _smd_td(days=1)).isoformat().replace("-", "")
+            except Exception:
+                pass
+        uid = f"smd-{date}-{it.get('shift_id', '')}-{provider_name}"
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{uid}@soulmd.us",
+            f"DTSTAMP:{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}",
+            f"DTSTART:{date}T{start}00",
+            f"DTEND:{end_date}T{end}00",
+            f"SUMMARY:{it.get('shift_name','Shift')} ({it.get('hospital','?')})",
+            f"DESCRIPTION:{it.get('type','')} · ScheduleMD",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+# ─── Pydantic request bodies ─────────────────────────────────────────
+class SMDBlockIn(BaseModel):
+    name: str
+    start_date: str
+    end_date: str
+
+class SMDBlockStatusIn(BaseModel):
+    status: str  # draft|preference_open|published
+
+class SMDProviderIn(BaseModel):
+    name: str
+    full_name: str | None = None
+    email: str | None = None
+    role: str
+    employment_type: str | None = None
+    hospitals: list[str] = []
+    no_nights: bool = False
+    contracted_shifts_per_block: int | None = None
+    min_shifts_per_block: int | None = None
+    max_shifts_per_block: int | None = None
+
+class SMDProviderPatchIn(BaseModel):
+    full_name: str | None = None
+    email: str | None = None
+    role: str | None = None
+    employment_type: str | None = None
+    hospitals: list[str] | None = None
+    no_nights: bool | None = None
+    contracted_shifts_per_block: int | None = None
+    min_shifts_per_block: int | None = None
+    max_shifts_per_block: int | None = None
+
+class SMDAssignmentIn(BaseModel):
+    shift_id: int
+    block_id: int | None = None
+    schedule_date: str
+    provider_id: int | None = None       # null = create open shift
+    is_open: bool = False
+
+class SMDTimeOffStatusIn(BaseModel):
+    status: str  # approved|denied
+
+class SMDSwapStatusIn(BaseModel):
+    status: str  # approved|denied
+
+class SMDPortalPreferencesIn(BaseModel):
+    token: str
+    block_id: int
+    preferred_days: list[str] = []
+    preferred_shift_types: list[str] = []
+    preferred_hospitals: list[str] = []
+    avoid_hospitals: list[str] = []
+
+class SMDPortalTimeOffIn(BaseModel):
+    token: str
+    block_id: int | None = None
+    start_date: str
+    end_date: str
+    reason: str | None = None
+    note: str | None = None
+
+class SMDPortalSwapIn(BaseModel):
+    token: str
+    assignment_id: int
+    swap_type: str                       # direct|donate
+    receiving_provider_id: int | None = None  # required when swap_type='direct'
+
+class SMDPortalPickupIn(BaseModel):
+    token: str
+    assignment_id: int
+
+# ─── Hospitals + shifts catalog ──────────────────────────────────────
+@app.get("/api/schedulemd/hospitals")
+def smd_hospitals(
     db: Session = Depends(get_db),
     _user: User = Depends(verify_concierge_owner),
 ):
-    """Assignments for a given date, grouped by hospital. Both the
-    swap-original (is_swapped=True) and the replacement (is_swapped=False)
-    rows are returned — the UI renders the original strikethrough above
-    the new provider."""
-    _shiftmd_assert_date(date)
-    hospitals = db.query(ShiftMDHospital).order_by(ShiftMDHospital.id.asc()).all()
-    shifts = db.query(ShiftMDShift).order_by(ShiftMDShift.sort_order.asc()).all()
-    assignments = db.query(ShiftMDAssignment).filter(
-        ShiftMDAssignment.schedule_date == date
-    ).all()
+    hospitals = db.query(ScheduleMDHospital).order_by(ScheduleMDHospital.id.asc()).all()
+    shifts = db.query(ScheduleMDShift).order_by(ScheduleMDShift.sort_order.asc()).all()
+    by_h: dict[int, list[dict]] = {}
+    for s in shifts:
+        by_h.setdefault(s.hospital_id, []).append(_smd_ser_shift(s))
+    return {"hospitals": [{**_smd_ser_hospital(h), "shifts": by_h.get(h.id, [])} for h in hospitals]}
 
-    assignments_by_shift: dict[int, list[dict]] = {}
+# ─── Blocks ──────────────────────────────────────────────────────────
+@app.get("/api/schedulemd/blocks")
+def smd_blocks(
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    rows = db.query(ScheduleMDBlock).order_by(ScheduleMDBlock.start_date.asc()).all()
+    return {"blocks": [_smd_ser_block(b) for b in rows]}
+
+@app.post("/api/schedulemd/blocks")
+def smd_block_create(
+    body: SMDBlockIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    _smd_assert_date(body.start_date, "start_date")
+    _smd_assert_date(body.end_date, "end_date")
+    if body.end_date < body.start_date:
+        raise HTTPException(status_code=400, detail="end_date must be ≥ start_date")
+    b = ScheduleMDBlock(
+        name=body.name.strip(), start_date=body.start_date,
+        end_date=body.end_date, status="draft",
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return _smd_ser_block(b)
+
+@app.patch("/api/schedulemd/blocks/{block_id}/status")
+def smd_block_status(
+    block_id: int,
+    body: SMDBlockStatusIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    if body.status not in _SMD_VALID_BLOCK_STATUS:
+        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_SMD_VALID_BLOCK_STATUS)}")
+    b = db.query(ScheduleMDBlock).filter(ScheduleMDBlock.id == block_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="block not found")
+    prev = b.status
+    b.status = body.status
+    if body.status == "published" and prev != "published":
+        b.published_at = datetime.utcnow()
+    db.commit()
+    db.refresh(b)
+
+    # Side-effect: on publish, send a personalized schedule + iCal to
+    # every provider with at least one assignment in the block. Failures
+    # don't roll back the publish; logged to stderr.
+    if body.status == "published" and prev != "published":
+        try:
+            providers_by_id = {p.id: p for p in db.query(ScheduleMDProvider).all()}
+            shifts_by_id = {s.id: s for s in db.query(ScheduleMDShift).all()}
+            hospitals_by_id = {h.id: h for h in db.query(ScheduleMDHospital).all()}
+            assignments = db.query(ScheduleMDAssignment).filter(
+                ScheduleMDAssignment.block_id == block_id,
+                ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+                ScheduleMDAssignment.provider_id.isnot(None),
+            ).order_by(ScheduleMDAssignment.schedule_date.asc()).all()
+            by_provider: dict[int, list[dict]] = {}
+            for a in assignments:
+                sh = shifts_by_id.get(a.shift_id)
+                if not sh:
+                    continue
+                hos = hospitals_by_id.get(sh.hospital_id)
+                by_provider.setdefault(a.provider_id, []).append({
+                    "date": a.schedule_date,
+                    "shift_id": sh.id,
+                    "shift_name": sh.name,
+                    "hospital": hos.name if hos else "?",
+                    "type": sh.shift_type,
+                    "start": sh.start_time,
+                    "end": sh.end_time,
+                })
+            for pid, items in by_provider.items():
+                p = providers_by_id.get(pid)
+                if not p or not p.email:
+                    continue
+                summary_rows = "".join(
+                    f"<tr><td style='padding:4px 8px'>{it['date']}</td>"
+                    f"<td style='padding:4px 8px'>{it['shift_name']}</td>"
+                    f"<td style='padding:4px 8px'>{it['hospital']}</td>"
+                    f"<td style='padding:4px 8px'>{it['start']}–{it['end']}</td></tr>"
+                    for it in items
+                )
+                schedule_html = (
+                    f"<table style='border-collapse:collapse;font-size:13px;margin:14px 0'>"
+                    f"<thead><tr><th style='text-align:left;padding:4px 8px'>Date</th>"
+                    f"<th style='text-align:left;padding:4px 8px'>Shift</th>"
+                    f"<th style='text-align:left;padding:4px 8px'>Hospital</th>"
+                    f"<th style='text-align:left;padding:4px 8px'>Time</th></tr></thead>"
+                    f"<tbody>{summary_rows}</tbody></table>"
+                )
+                ics = _smd_build_ics(p.name, items)
+                _smd_send_published(p.email, p.full_name or p.name, b.name, ics, schedule_html)
+        except Exception as e:
+            print(f"schedulemd publish-notify error: {e}")
+    return _smd_ser_block(b)
+
+# ─── Providers ───────────────────────────────────────────────────────
+@app.get("/api/schedulemd/providers")
+def smd_providers(
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    rows = db.query(ScheduleMDProvider).order_by(ScheduleMDProvider.name.asc()).all()
+    return {"providers": [_smd_ser_provider(p) for p in rows]}
+
+@app.post("/api/schedulemd/providers")
+def smd_provider_create(
+    body: SMDProviderIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    name = (body.name or "").strip()
+    role = (body.role or "").strip().upper()
+    emp = (body.employment_type or "").strip().lower() or None
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    if role not in _SMD_VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {sorted(_SMD_VALID_ROLES)}")
+    if emp is not None and emp not in _SMD_VALID_EMP:
+        raise HTTPException(status_code=400, detail=f"employment_type must be one of {sorted(_SMD_VALID_EMP)}")
+    if db.query(ScheduleMDProvider).filter(ScheduleMDProvider.name == name).first():
+        raise HTTPException(status_code=400, detail=f"provider name '{name}' already exists")
+    email = (body.email or "").strip().lower() or None
+    if email and db.query(ScheduleMDProvider).filter(ScheduleMDProvider.email == email).first():
+        raise HTTPException(status_code=400, detail=f"email '{email}' already in use")
+    p = ScheduleMDProvider(
+        name=name, full_name=(body.full_name or "").strip() or None, email=email,
+        role=role, employment_type=emp,
+        hospitals=[h.strip() for h in (body.hospitals or []) if h and h.strip()],
+        no_nights=bool(body.no_nights),
+        contracted_shifts_per_block=body.contracted_shifts_per_block,
+        min_shifts_per_block=body.min_shifts_per_block,
+        max_shifts_per_block=body.max_shifts_per_block,
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return _smd_ser_provider(p)
+
+@app.patch("/api/schedulemd/providers/{provider_id}")
+def smd_provider_patch(
+    provider_id: int,
+    body: SMDProviderPatchIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    p = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == provider_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="provider not found")
+    if body.full_name is not None:
+        p.full_name = body.full_name.strip() or None
+    if body.email is not None:
+        new_email = body.email.strip().lower() or None
+        if new_email and new_email != p.email and db.query(ScheduleMDProvider).filter(ScheduleMDProvider.email == new_email).first():
+            raise HTTPException(status_code=400, detail=f"email '{new_email}' already in use")
+        p.email = new_email
+    if body.role is not None:
+        r = body.role.strip().upper()
+        if r not in _SMD_VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"role must be one of {sorted(_SMD_VALID_ROLES)}")
+        p.role = r
+    if body.employment_type is not None:
+        e = body.employment_type.strip().lower() or None
+        if e is not None and e not in _SMD_VALID_EMP:
+            raise HTTPException(status_code=400, detail=f"employment_type must be one of {sorted(_SMD_VALID_EMP)}")
+        p.employment_type = e
+    if body.hospitals is not None:
+        p.hospitals = [h.strip() for h in body.hospitals if h and h.strip()]
+    if body.no_nights is not None:
+        p.no_nights = bool(body.no_nights)
+    if body.contracted_shifts_per_block is not None:
+        p.contracted_shifts_per_block = body.contracted_shifts_per_block
+    if body.min_shifts_per_block is not None:
+        p.min_shifts_per_block = body.min_shifts_per_block
+    if body.max_shifts_per_block is not None:
+        p.max_shifts_per_block = body.max_shifts_per_block
+    db.commit()
+    db.refresh(p)
+    return _smd_ser_provider(p)
+
+@app.delete("/api/schedulemd/providers/{provider_id}")
+def smd_provider_delete(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    p = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == provider_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="provider not found")
+    # Null out their assignments rather than cascade-deleting — preserves
+    # the historical record and surfaces the slot as an open shift.
+    db.query(ScheduleMDAssignment).filter(ScheduleMDAssignment.provider_id == provider_id).update(
+        {"provider_id": None, "is_open": True}
+    )
+    db.delete(p)
+    db.commit()
+    return {"ok": True}
+
+@app.post("/api/schedulemd/providers/{provider_id}/send-magic-link")
+def smd_send_magic_link(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    p = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == provider_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="provider not found")
+    if not p.email:
+        raise HTTPException(status_code=400, detail="provider has no email on file")
+    token = _smd_mint_magic_link(p, db)
+    sent = _smd_send_magic(p.email, p.full_name or p.name, token)
+    return {"ok": True, "sent": bool(sent), "expires_at": p.magic_link_expires_at.isoformat()}
+
+# ─── Schedule (admin) ────────────────────────────────────────────────
+@app.get("/api/schedulemd/schedule")
+def smd_schedule(
+    block_id: int | None = None,
+    date: str | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    if date:
+        _smd_assert_date(date)
+    hospitals = db.query(ScheduleMDHospital).order_by(ScheduleMDHospital.id.asc()).all()
+    shifts = db.query(ScheduleMDShift).order_by(ScheduleMDShift.sort_order.asc()).all()
+    q = db.query(ScheduleMDAssignment)
+    if block_id is not None:
+        q = q.filter(ScheduleMDAssignment.block_id == block_id)
+    if date:
+        q = q.filter(ScheduleMDAssignment.schedule_date == date)
+    assignments = q.all()
+    providers_by_id = {p.id: p for p in db.query(ScheduleMDProvider).all()}
+    by_shift: dict[int, list[dict]] = {}
     for a in assignments:
-        assignments_by_shift.setdefault(a.shift_id, []).append(_shiftmd_serialize_assignment(a))
-    # Order each shift's assignments: swap-originals first (rendered
-    # strikethrough), then the active row.
-    for k in assignments_by_shift:
-        assignments_by_shift[k].sort(key=lambda a: (0 if a["is_swapped"] else 1, a["id"]))
-
+        by_shift.setdefault(a.shift_id, []).append(_smd_ser_assignment(a, providers_by_id.get(a.provider_id) if a.provider_id else None))
+    for k in by_shift:
+        by_shift[k].sort(key=lambda a: (0 if a["is_swapped"] else 1, a["id"]))
     return {
         "date": date,
+        "block_id": block_id,
         "hospitals": [
             {
-                "id": h.id,
-                "name": h.name,
-                "color": h.color,
+                **_smd_ser_hospital(h),
                 "shifts": [
-                    {
-                        **_shiftmd_serialize_shift(s),
-                        "assignments": assignments_by_shift.get(s.id, []),
-                    }
+                    {**_smd_ser_shift(s), "assignments": by_shift.get(s.id, [])}
                     for s in shifts if s.hospital_id == h.id
                 ],
             }
@@ -10949,272 +11452,540 @@ def shiftmd_schedule(
         ],
     }
 
-@app.post("/api/shiftmd/assignment")
-def shiftmd_assignment_upsert(
-    body: ShiftMDAssignmentIn,
+@app.post("/api/schedulemd/assignments")
+def smd_assignment_create(
+    body: SMDAssignmentIn,
     db: Session = Depends(get_db),
     _user: User = Depends(verify_concierge_owner),
 ):
-    """Create-or-update the active assignment for shift+date. Targets
-    the row with is_swapped=False — swap-originals are immutable from
-    this endpoint and only mutated by /swap."""
-    _shiftmd_assert_date(body.schedule_date)
-    shift = db.query(ShiftMDShift).filter(ShiftMDShift.id == body.shift_id).first()
+    _smd_assert_date(body.schedule_date, "schedule_date")
+    shift = db.query(ScheduleMDShift).filter(ScheduleMDShift.id == body.shift_id).first()
     if not shift:
         raise HTTPException(status_code=404, detail="shift not found")
-    if not body.is_unavailable and not (body.provider_name and body.provider_name.strip()):
-        raise HTTPException(status_code=400, detail="provider_name required unless is_unavailable=true")
-    existing = db.query(ShiftMDAssignment).filter(
-        ShiftMDAssignment.shift_id == body.shift_id,
-        ShiftMDAssignment.schedule_date == body.schedule_date,
-        ShiftMDAssignment.is_swapped == False,  # noqa: E712
+    if body.block_id is not None and not db.query(ScheduleMDBlock).filter(ScheduleMDBlock.id == body.block_id).first():
+        raise HTTPException(status_code=404, detail="block not found")
+    if body.provider_id is not None and not db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == body.provider_id).first():
+        raise HTTPException(status_code=404, detail="provider not found")
+    violations: list[str] = []
+    if body.provider_id is not None:
+        violations = check_scheduling_rules(db, body.provider_id, body.shift_id, body.schedule_date, body.block_id)
+    # Upsert active row (is_swapped=False) for this shift+date
+    existing = db.query(ScheduleMDAssignment).filter(
+        ScheduleMDAssignment.shift_id == body.shift_id,
+        ScheduleMDAssignment.schedule_date == body.schedule_date,
+        ScheduleMDAssignment.is_swapped == False,  # noqa: E712
     ).first()
     if existing:
-        existing.provider_name = (body.provider_name or "").strip() or None
-        existing.is_unavailable = bool(body.is_unavailable)
+        existing.provider_id = body.provider_id
+        existing.block_id = body.block_id
+        existing.is_open = bool(body.is_open) and body.provider_id is None
+        existing.source = "admin"
         existing.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(existing)
-        return _shiftmd_serialize_assignment(existing)
-    a = ShiftMDAssignment(
-        shift_id=body.shift_id,
-        schedule_date=body.schedule_date,
-        provider_name=(body.provider_name or "").strip() or None,
-        is_unavailable=bool(body.is_unavailable),
-        is_swapped=False,
-    )
-    db.add(a)
+        a = existing
+    else:
+        a = ScheduleMDAssignment(
+            shift_id=body.shift_id, block_id=body.block_id,
+            schedule_date=body.schedule_date,
+            provider_id=body.provider_id,
+            is_open=bool(body.is_open) and body.provider_id is None,
+            source="admin",
+        )
+        db.add(a)
     db.commit()
     db.refresh(a)
-    return _shiftmd_serialize_assignment(a)
-
-@app.patch("/api/shiftmd/assignment/{assignment_id}/swap")
-def shiftmd_assignment_swap(
-    assignment_id: int,
-    body: ShiftMDSwapIn,
-    db: Session = Depends(get_db),
-    _user: User = Depends(verify_concierge_owner),
-):
-    """Mark the existing assignment as swapped (renders strikethrough)
-    and create a fresh active assignment with the replacement provider.
-    Idempotent against double-clicks: re-swapping a row already flagged
-    is_swapped=True returns the prior new-row instead of stacking."""
-    original = db.query(ShiftMDAssignment).filter(ShiftMDAssignment.id == assignment_id).first()
-    if not original:
-        raise HTTPException(status_code=404, detail="assignment not found")
-    new_name = (body.new_provider_name or "").strip()
-    if not new_name:
-        raise HTTPException(status_code=400, detail="new_provider_name required")
-    note = (body.swap_note or "").strip() or None
-    if not original.is_swapped:
-        original.is_swapped = True
-        original.swap_note = note
-        original.updated_at = datetime.utcnow()
-        # If a non-swapped active row already exists for this shift+date
-        # (the very assignment we just flagged), we still need to create
-        # a *new* active row for the replacement. There's a brief moment
-        # below where two rows share the (shift_id, date, is_swapped)
-        # tuple; commit the flag first so the unique-active invariant
-        # holds again as soon as the new row lands.
-        db.commit()
-    else:
-        # Already swapped — find the existing replacement so we don't
-        # create stacked duplicates on a double-click.
-        replacement = db.query(ShiftMDAssignment).filter(
-            ShiftMDAssignment.shift_id == original.shift_id,
-            ShiftMDAssignment.schedule_date == original.schedule_date,
-            ShiftMDAssignment.is_swapped == False,  # noqa: E712
-        ).first()
-        if replacement:
-            replacement.provider_name = new_name
-            replacement.updated_at = datetime.utcnow()
-            db.commit()
-            db.refresh(replacement)
-            return {
-                "original": _shiftmd_serialize_assignment(original),
-                "replacement": _shiftmd_serialize_assignment(replacement),
-            }
-    replacement = ShiftMDAssignment(
-        shift_id=original.shift_id,
-        schedule_date=original.schedule_date,
-        provider_name=new_name,
-        is_swapped=False,
-        is_unavailable=False,
-    )
-    db.add(replacement)
-    db.commit()
-    db.refresh(original)
-    db.refresh(replacement)
+    provider = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == a.provider_id).first() if a.provider_id else None
     return {
-        "original": _shiftmd_serialize_assignment(original),
-        "replacement": _shiftmd_serialize_assignment(replacement),
+        "assignment": _smd_ser_assignment(a, provider),
+        "warnings": violations,
+        "ok": True,
     }
 
-@app.delete("/api/shiftmd/assignment/{assignment_id}")
-def shiftmd_assignment_delete(
+@app.delete("/api/schedulemd/assignments/{assignment_id}")
+def smd_assignment_delete(
     assignment_id: int,
     db: Session = Depends(get_db),
     _user: User = Depends(verify_concierge_owner),
 ):
-    a = db.query(ShiftMDAssignment).filter(ShiftMDAssignment.id == assignment_id).first()
+    a = db.query(ScheduleMDAssignment).filter(ScheduleMDAssignment.id == assignment_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="assignment not found")
     db.delete(a)
     db.commit()
     return {"ok": True}
 
-@app.get("/api/shiftmd/providers")
-def shiftmd_providers(
+# ─── Time off (admin) ────────────────────────────────────────────────
+@app.get("/api/schedulemd/time-off")
+def smd_time_off_list(
+    block_id: int | None = None,
+    status: str | None = None,
     db: Session = Depends(get_db),
     _user: User = Depends(verify_concierge_owner),
 ):
-    rows = db.query(ShiftMDProvider).order_by(ShiftMDProvider.name.asc()).all()
+    q = db.query(ScheduleMDTimeOff)
+    if block_id is not None:
+        q = q.filter(ScheduleMDTimeOff.block_id == block_id)
+    if status:
+        if status not in _SMD_VALID_TIME_OFF_STATUS:
+            raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_SMD_VALID_TIME_OFF_STATUS)}")
+        q = q.filter(ScheduleMDTimeOff.status == status)
+    rows = q.order_by(ScheduleMDTimeOff.requested_at.desc()).all()
+    pb = {p.id: p for p in db.query(ScheduleMDProvider).all()}
+    return {"requests": [_smd_ser_time_off(t, pb.get(t.provider_id)) for t in rows]}
+
+@app.patch("/api/schedulemd/time-off/{time_off_id}")
+def smd_time_off_decide(
+    time_off_id: int,
+    body: SMDTimeOffStatusIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    if body.status not in {"approved", "denied"}:
+        raise HTTPException(status_code=400, detail="status must be approved|denied")
+    t = db.query(ScheduleMDTimeOff).filter(ScheduleMDTimeOff.id == time_off_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="time-off not found")
+    t.status = body.status
+    t.reviewed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(t)
+    provider = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == t.provider_id).first()
+    if provider and provider.email:
+        try:
+            _smd_send_to_decision(provider.email, provider.full_name or provider.name, t.start_date, t.end_date, t.status)
+        except Exception as e:
+            print(f"time-off decision email error: {e}")
+    return _smd_ser_time_off(t, provider)
+
+# ─── Swaps (admin) ───────────────────────────────────────────────────
+@app.get("/api/schedulemd/swaps")
+def smd_swaps_list(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    q = db.query(ScheduleMDSwapRequest)
+    if status:
+        if status not in _SMD_VALID_SWAP_STATUS:
+            raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_SMD_VALID_SWAP_STATUS)}")
+        q = q.filter(ScheduleMDSwapRequest.status == status)
+    rows = q.order_by(ScheduleMDSwapRequest.requested_at.desc()).all()
+    pb = {p.id: p for p in db.query(ScheduleMDProvider).all()}
+    return {"swaps": [_smd_ser_swap(s, pb) for s in rows]}
+
+@app.patch("/api/schedulemd/swaps/{swap_id}")
+def smd_swap_decide(
+    swap_id: int,
+    body: SMDSwapStatusIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    if body.status not in {"approved", "denied"}:
+        raise HTTPException(status_code=400, detail="status must be approved|denied")
+    s = db.query(ScheduleMDSwapRequest).filter(ScheduleMDSwapRequest.id == swap_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="swap not found")
+    s.status = body.status
+    s.resolved_at = datetime.utcnow()
+    if body.status == "approved":
+        # Apply the swap: move the assignment to receiving_provider_id and
+        # mark the original as a strikethrough copy.
+        a = db.query(ScheduleMDAssignment).filter(ScheduleMDAssignment.id == s.assignment_id).first()
+        if a:
+            old_provider_id = a.provider_id
+            if s.swap_type == "donate":
+                a.provider_id = None
+                a.is_open = True
+            elif s.swap_type == "direct" and s.receiving_provider_id:
+                a.provider_id = s.receiving_provider_id
+                a.is_open = False
+            a.swapped_from_provider_id = old_provider_id
+            a.source = "swap"
+            a.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(s)
+    pb = {p.id: p for p in db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id.in_([s.requesting_provider_id, s.receiving_provider_id or 0])).all()}
+    requester = pb.get(s.requesting_provider_id)
+    receiver = pb.get(s.receiving_provider_id) if s.receiving_provider_id else None
+    a = db.query(ScheduleMDAssignment).filter(ScheduleMDAssignment.id == s.assignment_id).first()
+    label = ""
+    if a:
+        sh = db.query(ScheduleMDShift).filter(ScheduleMDShift.id == a.shift_id).first()
+        label = f"{sh.name if sh else 'Shift'} on {a.schedule_date}"
+    for who in (requester, receiver):
+        if who and who.email:
+            try:
+                _smd_send_swap_decision(who.email, who.full_name or who.name, body.status, label)
+            except Exception as e:
+                print(f"swap decision email error: {e}")
+    return _smd_ser_swap(s, {p.id: p for p in db.query(ScheduleMDProvider).all()})
+
+# ─── Equity ──────────────────────────────────────────────────────────
+@app.get("/api/schedulemd/equity")
+def smd_equity(
+    block_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    rows = _smd_recompute_equity(db, block_id)
+    pb = {p.id: p for p in db.query(ScheduleMDProvider).all()}
+    out = []
+    for eq in rows:
+        p = pb.get(eq.provider_id)
+        if not p:
+            continue
+        out.append({
+            "provider_id": p.id, "name": p.name, "full_name": p.full_name, "role": p.role,
+            "contracted": eq.contracted_shifts, "worked": eq.worked_shifts,
+            "remaining": (eq.contracted_shifts or 0) - eq.worked_shifts,
+            "nights": eq.night_shifts, "weekends": eq.weekend_shifts, "holidays": eq.holiday_shifts,
+        })
+    return {"block_id": block_id, "rows": out}
+
+# ─── Coverage gaps ──────────────────────────────────────────────────
+@app.get("/api/schedulemd/coverage-gaps")
+def smd_coverage_gaps(
+    date: str,
+    block_id: int | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    _smd_assert_date(date)
+    hospitals = db.query(ScheduleMDHospital).order_by(ScheduleMDHospital.id.asc()).all()
+    shifts = db.query(ScheduleMDShift).order_by(ScheduleMDShift.sort_order.asc()).all()
+    q = db.query(ScheduleMDAssignment).filter(
+        ScheduleMDAssignment.schedule_date == date,
+        ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+    )
+    if block_id is not None:
+        q = q.filter(ScheduleMDAssignment.block_id == block_id)
+    filled = {a.shift_id for a in q.all() if a.provider_id is not None}
+    out = []
+    for h in hospitals:
+        gaps = [_smd_ser_shift(s) for s in shifts if s.hospital_id == h.id and s.id not in filled]
+        out.append({**_smd_ser_hospital(h),
+                    "total_shifts": sum(1 for s in shifts if s.hospital_id == h.id),
+                    "filled": sum(1 for s in shifts if s.hospital_id == h.id and s.id in filled),
+                    "gaps": gaps})
+    return {"date": date, "block_id": block_id, "hospitals": out, "total_gaps": sum(len(h["gaps"]) for h in out)}
+
+# ─── CSV export ─────────────────────────────────────────────────────
+@app.post("/api/schedulemd/export/csv")
+def smd_export_csv(
+    block_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    """One row per assignment for the given block. PDF export is handled
+    client-side via window.print() — no server endpoint needed."""
+    block = db.query(ScheduleMDBlock).filter(ScheduleMDBlock.id == block_id).first()
+    if not block:
+        raise HTTPException(status_code=404, detail="block not found")
+    rows = db.query(ScheduleMDAssignment).filter(
+        ScheduleMDAssignment.block_id == block_id,
+        ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+    ).order_by(ScheduleMDAssignment.schedule_date.asc()).all()
+    pb = {p.id: p for p in db.query(ScheduleMDProvider).all()}
+    sb = {s.id: s for s in db.query(ScheduleMDShift).all()}
+    hb = {h.id: h for h in db.query(ScheduleMDHospital).all()}
+    import csv, io
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["date", "hospital", "shift", "type", "start", "end", "provider", "role", "open", "source"])
+    for a in rows:
+        sh = sb.get(a.shift_id)
+        ho = hb.get(sh.hospital_id) if sh else None
+        pr = pb.get(a.provider_id) if a.provider_id else None
+        writer.writerow([
+            a.schedule_date,
+            ho.name if ho else "",
+            sh.name if sh else "",
+            sh.shift_type if sh else "",
+            sh.start_time if sh else "",
+            sh.end_time if sh else "",
+            pr.name if pr else "",
+            pr.role if pr else "",
+            "yes" if a.is_open else "",
+            a.source or "admin",
+        ])
+    from fastapi.responses import Response
+    filename = f"schedulemd_{block.name.replace(' ', '_')}.csv"
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+# ─── Portal endpoints (token-gated) ──────────────────────────────────
+@app.get("/api/schedulemd/portal/me")
+def smd_portal_me(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    p = _smd_lookup_provider_by_token(db, token)
+    blocks = db.query(ScheduleMDBlock).order_by(ScheduleMDBlock.start_date.desc()).all()
+    today = _smd_today()
+    current = next((b for b in blocks if b.start_date <= today <= b.end_date), None) or (blocks[0] if blocks else None)
     return {
-        "providers": [
+        "provider": _smd_ser_provider(p),
+        "current_block": _smd_ser_block(current) if current else None,
+        "blocks": [_smd_ser_block(b) for b in blocks],
+    }
+
+@app.get("/api/schedulemd/portal/my-schedule")
+def smd_portal_my_schedule(
+    token: str,
+    block_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    p = _smd_lookup_provider_by_token(db, token)
+    q = db.query(ScheduleMDAssignment).filter(
+        ScheduleMDAssignment.provider_id == p.id,
+        ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+    )
+    if block_id is not None:
+        q = q.filter(ScheduleMDAssignment.block_id == block_id)
+    rows = q.order_by(ScheduleMDAssignment.schedule_date.asc()).all()
+    sb = {s.id: s for s in db.query(ScheduleMDShift).all()}
+    hb = {h.id: h for h in db.query(ScheduleMDHospital).all()}
+    return {
+        "block_id": block_id,
+        "assignments": [
             {
-                "id": p.id,
-                "name": p.name,
-                "role": p.role,
-                "hospitals": list(p.hospitals or []),
+                **_smd_ser_assignment(a, p),
+                "shift": _smd_ser_shift(sb[a.shift_id]) if a.shift_id in sb else None,
+                "hospital": _smd_ser_hospital(hb[sb[a.shift_id].hospital_id]) if (a.shift_id in sb and sb[a.shift_id].hospital_id in hb) else None,
             }
-            for p in rows
+            for a in rows
         ],
     }
 
-@app.post("/api/shiftmd/providers")
-def shiftmd_provider_create(
-    body: ShiftMDProviderIn,
+@app.post("/api/schedulemd/portal/preferences")
+def smd_portal_preferences(
+    body: SMDPortalPreferencesIn,
     db: Session = Depends(get_db),
-    _user: User = Depends(verify_concierge_owner),
 ):
-    name = (body.name or "").strip()
-    role = (body.role or "").strip().upper()
-    if not name:
-        raise HTTPException(status_code=400, detail="name required")
-    if role not in _SHIFTMD_VALID_ROLES:
-        raise HTTPException(status_code=400, detail=f"role must be one of {sorted(_SHIFTMD_VALID_ROLES)}")
-    hospitals_clean = [h.strip() for h in (body.hospitals or []) if h and h.strip()]
-    existing = db.query(ShiftMDProvider).filter(ShiftMDProvider.name == name).first()
-    if existing:
-        existing.role = role
-        existing.hospitals = hospitals_clean
-        db.commit()
-        db.refresh(existing)
-        return {"id": existing.id, "name": existing.name, "role": existing.role, "hospitals": list(existing.hospitals or [])}
-    p = ShiftMDProvider(name=name, role=role, hospitals=hospitals_clean)
-    db.add(p)
+    p = _smd_lookup_provider_by_token(db, body.token)
+    pref = db.query(ScheduleMDPreference).filter(
+        ScheduleMDPreference.provider_id == p.id,
+        ScheduleMDPreference.block_id == body.block_id,
+    ).first()
+    if not pref:
+        pref = ScheduleMDPreference(provider_id=p.id, block_id=body.block_id)
+        db.add(pref)
+    pref.preferred_days = list(body.preferred_days or [])
+    pref.preferred_shift_types = list(body.preferred_shift_types or [])
+    pref.preferred_hospitals = list(body.preferred_hospitals or [])
+    pref.avoid_hospitals = list(body.avoid_hospitals or [])
+    pref.submitted_at = datetime.utcnow()
     db.commit()
-    db.refresh(p)
-    return {"id": p.id, "name": p.name, "role": p.role, "hospitals": list(p.hospitals or [])}
-
-@app.get("/api/shiftmd/coverage-gaps")
-def shiftmd_coverage_gaps(
-    date: str,
-    db: Session = Depends(get_db),
-    _user: User = Depends(verify_concierge_owner),
-):
-    """Shifts on `date` with no active provider assignment, grouped by
-    hospital. "No active" = no row with is_swapped=False AND
-    provider_name IS NOT NULL AND is_unavailable=False. Both the missing-
-    row case and the explicitly-marked-unavailable case count as gaps."""
-    _shiftmd_assert_date(date)
-    hospitals = db.query(ShiftMDHospital).order_by(ShiftMDHospital.id.asc()).all()
-    shifts = db.query(ShiftMDShift).order_by(ShiftMDShift.sort_order.asc()).all()
-    active = db.query(ShiftMDAssignment).filter(
-        ShiftMDAssignment.schedule_date == date,
-        ShiftMDAssignment.is_swapped == False,  # noqa: E712
-    ).all()
-    filled_shift_ids = {
-        a.shift_id for a in active
-        if a.provider_name and not a.is_unavailable
+    db.refresh(pref)
+    return {
+        "id": pref.id, "block_id": pref.block_id,
+        "preferred_days": pref.preferred_days,
+        "preferred_shift_types": pref.preferred_shift_types,
+        "preferred_hospitals": pref.preferred_hospitals,
+        "avoid_hospitals": pref.avoid_hospitals,
+        "submitted_at": pref.submitted_at.isoformat(),
     }
-    out = []
-    for h in hospitals:
-        gaps = [
-            _shiftmd_serialize_shift(s)
-            for s in shifts
-            if s.hospital_id == h.id and s.id not in filled_shift_ids
-        ]
-        out.append({
-            "id": h.id, "name": h.name, "color": h.color,
-            "total_shifts": sum(1 for s in shifts if s.hospital_id == h.id),
-            "filled": sum(1 for s in shifts if s.hospital_id == h.id and s.id in filled_shift_ids),
-            "gaps": gaps,
-        })
-    return {"date": date, "hospitals": out, "total_gaps": sum(len(h["gaps"]) for h in out)}
 
-@app.post("/api/shiftmd/ai-insight")
-def shiftmd_ai_insight(
-    body: ShiftMDInsightIn,
+@app.get("/api/schedulemd/portal/preferences")
+def smd_portal_preferences_get(
+    token: str,
+    block_id: int,
     db: Session = Depends(get_db),
-    _user: User = Depends(verify_concierge_owner),
 ):
-    """Plain-text Claude analysis of the schedule. Pulls the requested
-    date plus the prior 4 days (so consecutive-day patterns are visible)
-    and asks for coverage gaps, back-to-back nights, and >3-consecutive-
-    days flags. Plain text — not JSON — so we bypass _extract_json and
-    call client.messages.create directly."""
-    _shiftmd_assert_date(body.date)
-    from datetime import date as _date, timedelta as _td
-    target = _date.fromisoformat(body.date)
-    window_start = target - _td(days=4)
-    window_dates = [(window_start + _td(days=i)).isoformat() for i in range(5)]
+    p = _smd_lookup_provider_by_token(db, token)
+    pref = db.query(ScheduleMDPreference).filter(
+        ScheduleMDPreference.provider_id == p.id,
+        ScheduleMDPreference.block_id == block_id,
+    ).first()
+    if not pref:
+        return {"id": None, "block_id": block_id, "preferred_days": [], "preferred_shift_types": [], "preferred_hospitals": [], "avoid_hospitals": []}
+    return {
+        "id": pref.id, "block_id": pref.block_id,
+        "preferred_days": list(pref.preferred_days or []),
+        "preferred_shift_types": list(pref.preferred_shift_types or []),
+        "preferred_hospitals": list(pref.preferred_hospitals or []),
+        "avoid_hospitals": list(pref.avoid_hospitals or []),
+    }
 
-    hospitals = {h.id: h for h in db.query(ShiftMDHospital).all()}
-    shifts = {s.id: s for s in db.query(ShiftMDShift).all()}
-    rows = db.query(ShiftMDAssignment).filter(
-        ShiftMDAssignment.schedule_date.in_(window_dates),
-        ShiftMDAssignment.is_swapped == False,  # noqa: E712
-    ).all()
-
-    # Group: date → list of {hospital, shift_name, shift_type, time, provider}
-    by_date: dict[str, list[dict]] = {d: [] for d in window_dates}
-    for a in rows:
-        s = shifts.get(a.shift_id)
-        if not s:
-            continue
-        h = hospitals.get(s.hospital_id)
-        by_date[a.schedule_date].append({
-            "hospital": h.name if h else "?",
-            "shift": s.name,
-            "type": s.shift_type,
-            "time": f"{s.start_time}-{s.end_time}",
-            "provider": "🚫 unavailable" if a.is_unavailable else (a.provider_name or "?"),
-        })
-
-    lines = [f"Schedule window: {window_dates[0]} → {window_dates[-1]} (focus: {body.date})", ""]
-    for d in window_dates:
-        marker = "  ← TODAY" if d == body.date else ""
-        lines.append(f"=== {d}{marker} ===")
-        if not by_date[d]:
-            lines.append("(no assignments recorded)")
-        for entry in by_date[d]:
-            lines.append(f"  [{entry['hospital']}] {entry['shift']} ({entry['type']}, {entry['time']}) → {entry['provider']}")
-        lines.append("")
-    schedule_text = "\n".join(lines)
-
-    system_prompt = (
-        "You analyze hospitalist shift schedules. Given a 5-day window of "
-        "assignments, identify operational risks and surface them as a brief, "
-        "scannable plain-text summary. Look for: (1) coverage gaps — shifts "
-        "with no provider, especially nights, (2) back-to-back night shifts "
-        "for the same provider, (3) any provider working more than 3 "
-        "consecutive days. Format: short paragraphs or bullets, no JSON, no "
-        "markdown headers, no preamble. Lead with the most urgent issue. If "
-        "the schedule is healthy, say so in one sentence."
+@app.post("/api/schedulemd/portal/time-off")
+def smd_portal_time_off(
+    body: SMDPortalTimeOffIn,
+    db: Session = Depends(get_db),
+):
+    p = _smd_lookup_provider_by_token(db, body.token)
+    _smd_assert_date(body.start_date, "start_date")
+    _smd_assert_date(body.end_date, "end_date")
+    if body.end_date < body.start_date:
+        raise HTTPException(status_code=400, detail="end_date must be ≥ start_date")
+    t = ScheduleMDTimeOff(
+        provider_id=p.id, block_id=body.block_id,
+        start_date=body.start_date, end_date=body.end_date,
+        reason=(body.reason or "").strip() or None,
+        note=(body.note or "").strip() or None,
+        status="pending",
     )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
     try:
-        resp = client.messages.create(
-            model="claude-opus-4-6",
-            max_tokens=1200,
-            system=system_prompt,
-            messages=[{"role": "user", "content": f"Analyze this schedule for {body.date}:\n\n{schedule_text}"}],
-        )
-        text = resp.content[0].text if resp.content else ""
+        _smd_send_to_admin(_SMD_ADMIN_NOTIFY_EMAIL, p.full_name or p.name, t.start_date, t.end_date, t.reason or "", t.note or "")
     except Exception as e:
-        print(f"shiftmd ai-insight error: {e}")
-        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
-    return {"date": body.date, "insight": text}
+        print(f"time-off admin notify error: {e}")
+    return _smd_ser_time_off(t, p)
+
+@app.get("/api/schedulemd/portal/time-off")
+def smd_portal_time_off_list(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    p = _smd_lookup_provider_by_token(db, token)
+    rows = db.query(ScheduleMDTimeOff).filter(
+        ScheduleMDTimeOff.provider_id == p.id,
+    ).order_by(ScheduleMDTimeOff.requested_at.desc()).all()
+    return {"requests": [_smd_ser_time_off(t, p) for t in rows]}
+
+@app.post("/api/schedulemd/portal/swap-request")
+def smd_portal_swap_request(
+    body: SMDPortalSwapIn,
+    db: Session = Depends(get_db),
+):
+    p = _smd_lookup_provider_by_token(db, body.token)
+    if body.swap_type not in {"direct", "donate"}:
+        raise HTTPException(status_code=400, detail="swap_type must be direct|donate")
+    a = db.query(ScheduleMDAssignment).filter(ScheduleMDAssignment.id == body.assignment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="assignment not found")
+    if a.provider_id != p.id:
+        raise HTTPException(status_code=403, detail="not your assignment")
+    if body.swap_type == "direct" and not body.receiving_provider_id:
+        raise HTTPException(status_code=400, detail="receiving_provider_id required for direct swap")
+    receiving = None
+    if body.receiving_provider_id:
+        receiving = db.query(ScheduleMDProvider).filter(ScheduleMDProvider.id == body.receiving_provider_id).first()
+        if not receiving:
+            raise HTTPException(status_code=404, detail="receiving_provider not found")
+    # Run rules: if a direct swap, evaluate against the receiving provider.
+    violations: list[str] = []
+    if body.swap_type == "direct" and receiving:
+        violations = check_scheduling_rules(db, receiving.id, a.shift_id, a.schedule_date, a.block_id)
+
+    auto_ok = (len(violations) == 0)
+    swap = ScheduleMDSwapRequest(
+        assignment_id=a.id,
+        requesting_provider_id=p.id,
+        receiving_provider_id=body.receiving_provider_id,
+        swap_type=body.swap_type,
+        status="auto_approved" if auto_ok else "pending",
+        rule_violations=violations,
+    )
+    db.add(swap)
+    if auto_ok:
+        # Apply immediately
+        old_provider_id = a.provider_id
+        if body.swap_type == "donate":
+            a.provider_id = None
+            a.is_open = True
+        else:
+            a.provider_id = receiving.id
+            a.is_open = False
+        a.swapped_from_provider_id = old_provider_id
+        a.source = "swap"
+        a.updated_at = datetime.utcnow()
+        swap.resolved_at = datetime.utcnow()
+    db.commit()
+    db.refresh(swap)
+    # Notify
+    sh = db.query(ScheduleMDShift).filter(ScheduleMDShift.id == a.shift_id).first()
+    label = f"{sh.name if sh else 'Shift'} on {a.schedule_date}"
+    if auto_ok:
+        for who in (p, receiving):
+            if who and who.email:
+                try:
+                    _smd_send_swap_decision(who.email, who.full_name or who.name, "auto_approved", label)
+                except Exception as e:
+                    print(f"swap auto email error: {e}")
+    else:
+        try:
+            _smd_send_swap_admin(_SMD_ADMIN_NOTIFY_EMAIL,
+                                 (p.full_name or p.name),
+                                 (receiving.full_name or receiving.name) if receiving else None,
+                                 label, violations)
+        except Exception as e:
+            print(f"swap admin email error: {e}")
+    pb = {x.id: x for x in db.query(ScheduleMDProvider).all()}
+    return _smd_ser_swap(swap, pb)
+
+@app.get("/api/schedulemd/portal/open-shifts")
+def smd_portal_open_shifts(
+    token: str,
+    block_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    p = _smd_lookup_provider_by_token(db, token)
+    q = db.query(ScheduleMDAssignment).filter(
+        ScheduleMDAssignment.is_open == True,  # noqa: E712
+        ScheduleMDAssignment.is_swapped == False,  # noqa: E712
+        ScheduleMDAssignment.provider_id.is_(None),
+    )
+    if block_id is not None:
+        q = q.filter(ScheduleMDAssignment.block_id == block_id)
+    rows = q.order_by(ScheduleMDAssignment.schedule_date.asc()).all()
+    sb = {s.id: s for s in db.query(ScheduleMDShift).all()}
+    hb = {h.id: h for h in db.query(ScheduleMDHospital).all()}
+    items = []
+    for a in rows:
+        sh = sb.get(a.shift_id)
+        if not sh:
+            continue
+        ho = hb.get(sh.hospital_id)
+        # Filter to shifts at hospitals this provider covers.
+        if p.hospitals and ho and ho.name not in p.hospitals:
+            continue
+        items.append({
+            **_smd_ser_assignment(a, None),
+            "shift": _smd_ser_shift(sh),
+            "hospital": _smd_ser_hospital(ho) if ho else None,
+        })
+    return {"items": items}
+
+@app.post("/api/schedulemd/portal/pickup")
+def smd_portal_pickup(
+    body: SMDPortalPickupIn,
+    db: Session = Depends(get_db),
+):
+    p = _smd_lookup_provider_by_token(db, body.token)
+    a = db.query(ScheduleMDAssignment).filter(ScheduleMDAssignment.id == body.assignment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="assignment not found")
+    if not a.is_open or a.provider_id is not None:
+        raise HTTPException(status_code=400, detail="not an open shift")
+    violations = check_scheduling_rules(db, p.id, a.shift_id, a.schedule_date, a.block_id)
+    if violations:
+        # Flag for admin review — leave the slot open until resolved.
+        swap = ScheduleMDSwapRequest(
+            assignment_id=a.id,
+            requesting_provider_id=p.id,
+            receiving_provider_id=p.id,
+            swap_type="direct",
+            status="pending",
+            rule_violations=violations,
+        )
+        db.add(swap)
+        db.commit()
+        sh = db.query(ScheduleMDShift).filter(ScheduleMDShift.id == a.shift_id).first()
+        label = f"{sh.name if sh else 'Shift'} on {a.schedule_date}"
+        try:
+            _smd_send_swap_admin(_SMD_ADMIN_NOTIFY_EMAIL, p.full_name or p.name, p.full_name or p.name, label, violations)
+        except Exception as e:
+            print(f"pickup admin email error: {e}")
+        return {"status": "pending", "violations": violations}
+    # Clean → assign immediately.
+    a.provider_id = p.id
+    a.is_open = False
+    a.source = "pickup"
+    a.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(a)
+    return {"status": "auto_approved", "violations": [], "assignment": _smd_ser_assignment(a, p)}
 
 
 _build = os.path.join(os.path.dirname(__file__), "build")

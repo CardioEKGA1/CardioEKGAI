@@ -697,54 +697,127 @@ class HipaaAuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
-# ─── ShiftMD: hospital shift scheduler ────────────────────────────────
+# ─── ScheduleMD: hospital shift scheduling platform ───────────────────
 # Three-hospital roster (IMED, AV, LDS) with day/swing/night/app/backup/
-# admin shift types. Assignments are date-keyed; swaps are non-destructive
-# (the original is kept and flagged is_swapped=True so the UI can render
-# it strikethrough above the new provider). schedule_date is stored as a
-# "YYYY-MM-DD" string for cross-DB simplicity (SQLite/Postgres) — the API
-# accepts and returns the same shape, so no parsing layer is needed.
-# Owner-gated: every endpoint sits behind verify_concierge_owner.
-class ShiftMDHospital(Base):
-    __tablename__ = "shiftmd_hospitals"
+# admin shift types. v2 introduces blocks (multi-month scheduling
+# periods), an authenticated provider portal (magic-link tokens), shift
+# preferences, time-off requests, swap workflows with a rules engine,
+# and per-provider equity tracking. Date columns are stored as
+# "YYYY-MM-DD" strings (lexicographic sort matches chronological order)
+# for SQLite/Postgres parity. JSON arrays stand in for Postgres TEXT[]
+# for the same reason. Admin endpoints are owner-gated; portal
+# endpoints are gated by the provider's magic_link_token.
+#
+# The legacy shiftmd_* tables from v1 are deliberately left intact in
+# the database — orphaned, but cheap to keep so existing deploys don't
+# need a manual migration. The new schedulemd_* tables seed fresh.
+class ScheduleMDHospital(Base):
+    __tablename__ = "schedulemd_hospitals"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False, index=True)   # IMED, AV, LDS
     color = Column(String, nullable=False)                           # hex (#RRGGBB)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-class ShiftMDShift(Base):
-    __tablename__ = "shiftmd_shifts"
+class ScheduleMDShift(Base):
+    __tablename__ = "schedulemd_shifts"
     id = Column(Integer, primary_key=True, index=True)
-    hospital_id = Column(Integer, index=True, nullable=False)        # FK shiftmd_hospitals.id
-    name = Column(String, nullable=False)                            # "IMED Team 1", "AV NI", ...
+    hospital_id = Column(Integer, index=True, nullable=False)        # FK schedulemd_hospitals.id
+    name = Column(String, nullable=False)
     shift_type = Column(String, nullable=False, index=True)          # day|swing|night|app|backup|admin
     start_time = Column(String, nullable=False)                      # "HH:MM" 24-hour
     end_time = Column(String, nullable=False)                        # "HH:MM" — midnight = "00:00"
-    sort_order = Column(Integer, default=0, index=True)              # render order within a hospital column
+    sort_order = Column(Integer, default=0, index=True)
 
-class ShiftMDAssignment(Base):
-    __tablename__ = "shiftmd_assignments"
+class ScheduleMDBlock(Base):
+    __tablename__ = "schedulemd_blocks"
     id = Column(Integer, primary_key=True, index=True)
-    shift_id = Column(Integer, index=True, nullable=False)           # FK shiftmd_shifts.id
+    name = Column(String, nullable=False)                            # "Block 1 — Jan–Jun 2026"
+    start_date = Column(String, nullable=False)                      # "YYYY-MM-DD"
+    end_date = Column(String, nullable=False)
+    status = Column(String, default="draft", index=True)             # draft|preference_open|published
+    published_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ScheduleMDProvider(Base):
+    __tablename__ = "schedulemd_providers"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)   # LastnameInitials e.g. "AndersonNE"
+    full_name = Column(String, nullable=True)
+    email = Column(String, unique=True, nullable=True, index=True)
+    role = Column(String, nullable=False)                            # MD|DO|APP|NP|PA
+    employment_type = Column(String, nullable=True)                  # fte|part_time|moonlighter|locum
+    hospitals = Column(JSON, default=list)                           # ["IMED","AV"]
+    no_nights = Column(Boolean, default=False)
+    contracted_shifts_per_block = Column(Integer, nullable=True)     # null for locums/moonlighters
+    min_shifts_per_block = Column(Integer, nullable=True)
+    max_shifts_per_block = Column(Integer, nullable=True)
+    magic_link_token = Column(String, nullable=True, index=True)
+    magic_link_expires_at = Column(DateTime, nullable=True)
+    last_login = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ScheduleMDPreference(Base):
+    __tablename__ = "schedulemd_preferences"
+    id = Column(Integer, primary_key=True, index=True)
+    provider_id = Column(Integer, index=True, nullable=False)        # FK schedulemd_providers.id
+    block_id = Column(Integer, index=True, nullable=False)           # FK schedulemd_blocks.id
+    preferred_days = Column(JSON, default=list)                      # ["Monday","Tuesday",...]
+    preferred_shift_types = Column(JSON, default=list)               # ["day","swing"]
+    preferred_hospitals = Column(JSON, default=list)
+    avoid_hospitals = Column(JSON, default=list)
+    submitted_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class ScheduleMDTimeOff(Base):
+    __tablename__ = "schedulemd_time_off"
+    id = Column(Integer, primary_key=True, index=True)
+    provider_id = Column(Integer, index=True, nullable=False)
+    block_id = Column(Integer, index=True, nullable=True)            # nullable so requests can span blocks
+    start_date = Column(String, nullable=False)
+    end_date = Column(String, nullable=False)
+    reason = Column(String, nullable=True)                           # vacation|cme|personal|other
+    note = Column(String, nullable=True)
+    status = Column(String, default="pending", index=True)           # pending|approved|denied
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+
+class ScheduleMDAssignment(Base):
+    __tablename__ = "schedulemd_assignments"
+    id = Column(Integer, primary_key=True, index=True)
+    shift_id = Column(Integer, index=True, nullable=False)           # FK schedulemd_shifts.id
+    block_id = Column(Integer, index=True, nullable=True)            # FK schedulemd_blocks.id (nullable for ad-hoc)
     schedule_date = Column(String, index=True, nullable=False)       # "YYYY-MM-DD"
-    provider_name = Column(String, nullable=True)                    # null when only marking unavailable
-    is_swapped = Column(Boolean, default=False)                      # True on the original after a swap
-    swap_note = Column(String, nullable=True)                        # free-text reason on the swap row
-    is_unavailable = Column(Boolean, default=False)                  # 🚫 marker, no provider
+    provider_id = Column(Integer, index=True, nullable=True)         # null = open shift available for pickup
+    is_swapped = Column(Boolean, default=False, index=True)          # historical row left behind by a swap
+    swapped_from_provider_id = Column(Integer, nullable=True)        # the prior holder when source='swap'
+    swap_note = Column(String, nullable=True)
+    is_open = Column(Boolean, default=False, index=True)             # surfaced on the portal Open Shifts tab
+    source = Column(String, default="admin", index=True)             # admin|swap|pickup
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-class ShiftMDProvider(Base):
-    __tablename__ = "shiftmd_providers"
+class ScheduleMDSwapRequest(Base):
+    __tablename__ = "schedulemd_swap_requests"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False, index=True)   # LastnameInitials, e.g. "MillerJE"
-    role = Column(String, nullable=False)                            # MD|DO|APP|NP|PA
-    # JSON-of-strings instead of Postgres TEXT[] so the same model
-    # works against the SQLite fallback the test suite uses. Reads
-    # back as a Python list — empty list when not assigned to any
-    # hospital yet.
-    hospitals = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    assignment_id = Column(Integer, index=True, nullable=False)
+    requesting_provider_id = Column(Integer, index=True, nullable=False)
+    receiving_provider_id = Column(Integer, index=True, nullable=True)  # null for "donate to pool"
+    swap_type = Column(String, nullable=False)                          # direct|donate
+    status = Column(String, default="pending", index=True)              # pending|auto_approved|approved|denied
+    rule_violations = Column(JSON, default=list)                        # ["NO_NIGHT_AFTER_DAY", ...]
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+class ScheduleMDEquity(Base):
+    __tablename__ = "schedulemd_equity"
+    id = Column(Integer, primary_key=True, index=True)
+    provider_id = Column(Integer, index=True, nullable=False)
+    block_id = Column(Integer, index=True, nullable=False)
+    contracted_shifts = Column(Integer, default=0)
+    worked_shifts = Column(Integer, default=0)
+    night_shifts = Column(Integer, default=0)
+    weekend_shifts = Column(Integer, default=0)
+    holiday_shifts = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 Base.metadata.create_all(bind=engine)
@@ -975,16 +1048,16 @@ try:
 except Exception as e:  # never let seed failure block boot
     print(f"Yogananda seed skipped: {e}")
 
-# Seed ShiftMD's hospital + shift catalog if empty. Idempotent — gated on
-# the hospitals table being empty so existing deploys don't double-seed.
+# Seed ScheduleMD's hospital + shift catalog if empty. Idempotent — gated
+# on the hospitals table being empty so existing deploys don't double-seed.
 # Shifts are inserted with a global sort_order; the API filters by
 # hospital_id and orders by sort_order for stable column rendering.
 try:
     _seed_db = SessionLocal()
-    if _seed_db.query(ShiftMDHospital).count() == 0:
-        imed = ShiftMDHospital(name="IMED", color="#4A9B9B")
-        av   = ShiftMDHospital(name="AV",   color="#4CAF72")
-        lds  = ShiftMDHospital(name="LDS",  color="#7B68C8")
+    if _seed_db.query(ScheduleMDHospital).count() == 0:
+        imed = ScheduleMDHospital(name="IMED", color="#4A9B9B")
+        av   = ScheduleMDHospital(name="AV",   color="#4CAF72")
+        lds  = ScheduleMDHospital(name="LDS",  color="#7B68C8")
         _seed_db.add_all([imed, av, lds])
         _seed_db.flush()  # populate ids before referencing them below
 
@@ -1038,15 +1111,15 @@ try:
             (lds.id,  "LDS Moonlight",          "night",  "22:00", "06:00"),
         ]
         for idx, (h_id, name, stype, start, end) in enumerate(SHIFTS):
-            _seed_db.add(ShiftMDShift(
+            _seed_db.add(ScheduleMDShift(
                 hospital_id=h_id, name=name, shift_type=stype,
                 start_time=start, end_time=end, sort_order=idx,
             ))
         _seed_db.commit()
-        print(f"Seeded ShiftMD: 3 hospitals + {len(SHIFTS)} shifts.")
+        print(f"Seeded ScheduleMD: 3 hospitals + {len(SHIFTS)} shifts.")
     _seed_db.close()
 except Exception as e:  # never let seed failure block boot
-    print(f"ShiftMD seed skipped: {e}")
+    print(f"ScheduleMD seed skipped: {e}")
 
 def get_db():
     db = SessionLocal()

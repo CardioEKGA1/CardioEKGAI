@@ -28,7 +28,8 @@ import PatientLogin from './screens/PatientLogin';
 import PatientTerms from './screens/PatientTerms';
 import PatientIntake from './screens/PatientIntake';
 import MarketingAgent from './screens/MarketingAgent';
-import ShiftMD from './screens/ShiftMD';
+import ScheduleMD from './screens/ScheduleMD';
+import ScheduleMDPortal from './screens/ScheduleMDPortal';
 import MeditateApp from './screens/meditate/MeditateApp';
 import MeditationsLandingPage from './screens/public/MeditationsLandingPage';
 import ConciergeLandingPage from './screens/public/ConciergeLandingPage';
@@ -95,7 +96,8 @@ type Screen =
   | 'marketing_admin'
   | 'meditate'
   | 'dev_login'
-  | 'shiftmd'               // hospital shift scheduler at /shiftmd (superuser-only)
+  | 'schedulemd'            // hospital scheduling admin at /schedulemd (superuser-only)
+  | 'schedulemd_portal'     // physician portal at /schedulemd/portal?token=XXX (token-gated)
   | 'public_splash'         // soulmd.us "by invitation only" lockdown placeholder
   | 'not_found';
 
@@ -115,7 +117,8 @@ const pathToScreen = (path: string): Screen | null => {
   //   /concierge           superuser dashboard (incl. ?view=patient,
   //                        and /concierge/* subpaths)
   //   /concierge-medicine  superuser-gated rich landing
-  //   /shiftmd             scheduler (superuser-only)
+  //   /schedulemd          scheduler admin (superuser-only)
+  //   /schedulemd/portal   physician portal (magic-link token-gated)
   //   /api/*               backend (doesn't reach React anyway)
   //
   // Once a superuser is signed in, the lockdown is bypassed for that
@@ -139,7 +142,8 @@ const pathToScreen = (path: string): Screen | null => {
           path === '/dev-login' ||
           path === '/concierge' || path.startsWith('/concierge/') ||
           path === '/concierge-medicine' ||
-          path === '/shiftmd' ||
+          path === '/schedulemd' ||
+          path === '/schedulemd/portal' ||
           path.startsWith('/api/');
         if (!allowed) return 'public_splash';
       }
@@ -184,7 +188,8 @@ const pathToScreen = (path: string): Screen | null => {
   // shell renders MarketingAgent instead of the admin console.
   if (path === '/admin/marketing')   return 'marketing_admin';
   if (path === '/meditate')          return 'meditate';
-  if (path === '/shiftmd')           return 'shiftmd';
+  if (path === '/schedulemd')        return 'schedulemd';
+  if (path === '/schedulemd/portal') return 'schedulemd_portal';
   if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -223,7 +228,8 @@ const screenToPath = (s: Screen): string => {
   if (s === 'concierge_medicine')  return '/concierge-medicine';
   if (s === 'marketing_admin')     return '/admin/marketing';
   if (s === 'meditate')            return '/meditate';
-  if (s === 'shiftmd')             return '/shiftmd';
+  if (s === 'schedulemd')          return '/schedulemd';
+  if (s === 'schedulemd_portal')   return '/schedulemd/portal';
   if (s === 'dev_login')           return '/dev-login';
   // public_splash has no canonical path — it's the lockdown destination
   // for any URL not in the allowlist. Preserve whatever the user typed
@@ -484,7 +490,8 @@ const App: React.FC = () => {
       meditations_public:  'Guided Meditations · SoulMD',
       marketing_admin:     `Marketing Agent · ${brand}`,
       meditate:            'SoulMD Meditate',
-      shiftmd:             `ShiftMD · ${brand}`,
+      schedulemd:          `ScheduleMD · ${brand}`,
+      schedulemd_portal:   'ScheduleMD Portal · SoulMD',
       dev_login:           `Dev Login · ${brand}`,
       public_splash:       'SoulMD — Concierge Medicine, By Invitation Only',
       not_found:           `Page not found · ${brand}`,
@@ -684,12 +691,13 @@ const App: React.FC = () => {
     if (!user.is_superuser) navigate('dashboard');
   }, [screen, user, token, navigate]);
 
-  // /shiftmd — hospital shift scheduler. Superuser-only. Same shape as
-  // /meditate above. Unauthed visitors are bounced to /dev-login (the
-  // only signed-in surface that's reachable during the public lockdown);
-  // signed-in non-superusers fall through to the public splash.
+  // /schedulemd — admin scheduling dashboard. Superuser-only. Same
+  // shape as /meditate. The /schedulemd/portal route is intentionally
+  // NOT gated here — physician portal users authenticate via the
+  // magic-link token in the query string, so they don't have a SoulMD
+  // session at all.
   useEffect(() => {
-    if (screen !== 'shiftmd') return;
+    if (screen !== 'schedulemd') return;
     if (!token) { navigate('dev_login'); return; }
     if (!user) return;
     if (!user.is_superuser) {
@@ -850,8 +858,8 @@ const App: React.FC = () => {
           onBack={() => navigate(isSoulMD ? 'dashboard' : 'landing')}
         />
       )}
-      {screen==='shiftmd' && user && user.is_superuser && (
-        <ShiftMD
+      {screen==='schedulemd' && user && user.is_superuser && (
+        <ScheduleMD
           API={API}
           token={token}
           onBack={() => navigate('concierge')}
@@ -859,6 +867,15 @@ const App: React.FC = () => {
           onNavigateMeditations={() => navigate('meditations_library')}
           onNavigateConciergeAccess={() => navigate('concierge_access')}
           onNavigateMarketing={() => navigate('marketing_admin')}
+        />
+      )}
+      {screen==='schedulemd_portal' && (
+        <ScheduleMDPortal
+          API={API}
+          token={(() => {
+            try { return new URLSearchParams(window.location.search).get('token') || ''; }
+            catch { return ''; }
+          })()}
         />
       )}
       {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
