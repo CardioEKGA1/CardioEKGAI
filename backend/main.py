@@ -1580,6 +1580,52 @@ def sec_totp_status(current_user: User | None = Depends(get_current_user), db: S
     }
 
 
+@app.get("/api/auth/totp/diagnostics")
+def sec_totp_diagnostics(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Owner-only preflight reporting which preconditions for TOTP setup
+    are met on this deploy. Surfaces the three "503-class" failure modes
+    (missing libs, missing key, malformed key) plus the 409 case (stale
+    credential) without leaking any secrets. The setup wizard calls
+    this on mount so the user sees exactly what's wrong before clicking
+    Next, instead of getting an opaque error inside the flow."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    raw_key = os.getenv("TOTP_ENCRYPTION_KEY") or ""
+    fernet_ok = False
+    fernet_error: str | None = None
+    if not raw_key.strip():
+        fernet_error = "TOTP_ENCRYPTION_KEY env var is empty or unset"
+    elif _Fernet is None:
+        fernet_error = "cryptography package not installed"
+    else:
+        try:
+            _Fernet(raw_key.strip().encode())
+            fernet_ok = True
+        except Exception as e:  # noqa: BLE001
+            # Don't leak the key. Just the failure shape.
+            fernet_error = f"TOTP_ENCRYPTION_KEY invalid Fernet format ({type(e).__name__})"
+
+    cred = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
+    return {
+        "pyotp_installed": _pyotp is not None,
+        "qrcode_installed": _qrcode is not None,
+        "cryptography_installed": _Fernet is not None,
+        "totp_key_present": bool(raw_key.strip()),
+        "totp_key_length": len(raw_key.strip()),  # Fernet keys are 44 chars
+        "fernet_init_ok": fernet_ok,
+        "fernet_error": fernet_error,
+        "existing_credential": bool(cred),
+        "existing_credential_enabled_at": cred.enabled_at.isoformat() if cred and cred.enabled_at else None,
+        "ready_for_setup": (
+            _pyotp is not None and _qrcode is not None
+            and fernet_ok and not cred
+        ),
+    }
+
+
 @app.post("/api/auth/totp/setup")
 def sec_totp_setup(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user:

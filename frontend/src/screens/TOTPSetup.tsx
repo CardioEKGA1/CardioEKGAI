@@ -34,6 +34,19 @@ interface SetupResponse {
   secret: string;
 }
 
+interface Diagnostics {
+  pyotp_installed: boolean;
+  qrcode_installed: boolean;
+  cryptography_installed: boolean;
+  totp_key_present: boolean;
+  totp_key_length: number;
+  fernet_init_ok: boolean;
+  fernet_error: string | null;
+  existing_credential: boolean;
+  existing_credential_enabled_at: string | null;
+  ready_for_setup: boolean;
+}
+
 const TOTPSetup: React.FC<Props> = ({ API, token, onDone }) => {
   const [step, setStep] = useState<Step>(1);
   const [setup, setSetup] = useState<SetupResponse | null>(null);
@@ -41,18 +54,67 @@ const TOTPSetup: React.FC<Props> = ({ API, token, onDone }) => {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [verified, setVerified] = useState(false);
+  const [diag, setDiag] = useState<Diagnostics | null>(null);
+  const [diagLoading, setDiagLoading] = useState(true);
   const codeRef = useRef<HTMLInputElement>(null);
 
-  // Kick off the setup call when the user lands on step 2 — we want the
-  // QR + backup codes to render immediately so they can scan and confirm
-  // in one continuous flow.
+  const authHeaders = (): Record<string, string> => {
+    const h: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) h.Authorization = `Bearer ${token}`;
+    return h;
+  };
+
+  // Preflight: surface any 503/409 conditions on mount so the user
+  // sees exactly what's wrong before clicking Next, instead of getting
+  // an opaque error from inside the wizard.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/api/auth/totp/diagnostics`, {
+          credentials: 'include', headers: authHeaders(),
+        });
+        if (!r.ok) throw new Error(`diagnostics ${r.status}`);
+        const d = await r.json();
+        if (alive) setDiag(d);
+      } catch (e: any) {
+        if (alive) setErr(e.message || 'Could not load diagnostics.');
+      } finally {
+        if (alive) setDiagLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []); // eslint-disable-line
+
+  // Reset existing TOTP credential — used when the diagnostics surface
+  // shows an existing credential blocking the setup endpoint with 409.
+  // Calls DELETE /api/auth/totp/disable then refreshes diagnostics.
+  const resetExisting = async () => {
+    if (!window.confirm('Disable the current TOTP credential and start a fresh enrollment? Existing backup codes will stop working.')) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await fetch(`${API}/api/auth/totp/disable`, {
+        method: 'DELETE', credentials: 'include', headers: authHeaders(),
+      });
+      if (!r.ok) throw new Error(`disable failed (${r.status})`);
+      // Re-fetch diagnostics so the UI updates immediately.
+      const d = await fetch(`${API}/api/auth/totp/diagnostics`, {
+        credentials: 'include', headers: authHeaders(),
+      }).then(r2 => r2.json()).catch(() => null);
+      if (d) setDiag(d);
+    } catch (e: any) {
+      setErr(e.message || 'Could not reset existing credential.');
+    } finally { setBusy(false); }
+  };
+
+  // Kick off the setup call. Only fires when diagnostics show the
+  // server is ready (no missing libs, valid Fernet key, no existing
+  // credential row).
   const beginSetup = async () => {
     setErr(''); setBusy(true);
     try {
       const r = await fetch(`${API}/api/auth/totp/setup`, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` },
-        credentials:'include',
+        method: 'POST', credentials:'include', headers: authHeaders(),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
@@ -141,10 +203,14 @@ const TOTPSetup: React.FC<Props> = ({ API, token, onDone }) => {
               one before continuing — the next step shows a QR code that has to be
               scanned from inside the app.
             </p>
+            <DiagnosticsPanel diag={diag} loading={diagLoading} onReset={resetExisting} busy={busy}/>
             {err && <Banner severity="error" text={err}/>}
             <div style={btnRow}>
               <button onClick={onDone} style={secondaryBtn}>Cancel</button>
-              <button onClick={beginSetup} disabled={busy} style={{...primaryBtn, opacity: busy ? 0.6 : 1}}>
+              <button
+                onClick={beginSetup}
+                disabled={busy || !diag || !diag.ready_for_setup}
+                style={{...primaryBtn, opacity: (busy || !diag || !diag.ready_for_setup) ? 0.5 : 1, cursor: (busy || !diag || !diag.ready_for_setup) ? 'not-allowed' : 'pointer'}}>
                 {busy ? 'Starting…' : 'Next'}
               </button>
             </div>
@@ -280,6 +346,120 @@ const Stepper: React.FC<{step: Step}> = ({ step }) => (
     })}
   </div>
 );
+
+// Renders the GET /api/auth/totp/diagnostics output as a small grid of
+// preconditions. Each row shows a green ✓ when the precondition is met
+// or a red ✗ + remediation hint when it isn't. The "existing
+// credential" case includes a one-click Reset button so the user
+// doesn't have to leave the wizard to clear a stale row.
+const DiagnosticsPanel: React.FC<{
+  diag: Diagnostics | null;
+  loading: boolean;
+  onReset: () => void;
+  busy: boolean;
+}> = ({ diag, loading, onReset, busy }) => {
+  if (loading) {
+    return (
+      <div style={{
+        margin:'12px 0', padding:'12px 14px',
+        background:'rgba(83,74,183,0.04)', border:`1px solid ${BORDER}`,
+        borderRadius:'12px', fontSize:'12px', color: SOFT,
+      }}>
+        Checking server preconditions…
+      </div>
+    );
+  }
+  if (!diag) return null;
+
+  type Row = { ok: boolean; label: string; hint?: string; action?: React.ReactNode };
+  const rows: Row[] = [
+    {
+      ok: diag.pyotp_installed,
+      label: 'pyotp library',
+      hint: diag.pyotp_installed ? undefined : 'Not installed on this Railway build. Confirm requirements.txt was applied to the latest deploy.',
+    },
+    {
+      ok: diag.qrcode_installed,
+      label: 'qrcode + Pillow',
+      hint: diag.qrcode_installed ? undefined : 'Not installed. requirements.txt should include qrcode[pil].',
+    },
+    {
+      ok: diag.cryptography_installed,
+      label: 'cryptography (Fernet)',
+      hint: diag.cryptography_installed ? undefined : 'Package missing — required for at-rest secret encryption.',
+    },
+    {
+      ok: diag.totp_key_present,
+      label: `TOTP_ENCRYPTION_KEY env var${diag.totp_key_present ? ` (${diag.totp_key_length} chars)` : ''}`,
+      hint: diag.totp_key_present ? undefined : 'Add TOTP_ENCRYPTION_KEY to Railway and redeploy.',
+    },
+    {
+      ok: diag.fernet_init_ok,
+      label: 'TOTP_ENCRYPTION_KEY format',
+      hint: diag.fernet_init_ok ? undefined : (diag.fernet_error || 'Key did not initialize — must be a 44-char base64 Fernet key. Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'),
+    },
+    {
+      ok: !diag.existing_credential,
+      label: diag.existing_credential
+        ? `No prior TOTP credential ${diag.existing_credential_enabled_at ? `(found one from ${diag.existing_credential_enabled_at.slice(0,10)})` : ''}`
+        : 'No prior TOTP credential',
+      hint: diag.existing_credential ? 'A previous setup exists. Reset it to enroll a new authenticator.' : undefined,
+      action: diag.existing_credential ? (
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={busy}
+          style={{
+            marginTop:'6px',
+            padding:'6px 12px', borderRadius:'8px',
+            border:'1px solid rgba(196,74,74,0.3)',
+            background:'rgba(196,74,74,0.06)', color:'#7A1F1F',
+            fontSize:'11px', fontWeight:700, cursor: busy ? 'not-allowed' : 'pointer',
+            fontFamily:'inherit',
+          }}>
+          {busy ? 'Resetting…' : 'Reset existing credential'}
+        </button>
+      ) : null,
+    },
+  ];
+
+  const allOk = rows.every(r => r.ok);
+
+  return (
+    <div style={{
+      margin:'14px 0', padding:'14px 16px',
+      background: allOk ? 'rgba(42,122,74,0.06)' : 'rgba(83,74,183,0.04)',
+      border:`1px solid ${allOk ? 'rgba(42,122,74,0.20)' : BORDER}`,
+      borderRadius:'12px',
+    }}>
+      <div style={{
+        fontSize:'10px', letterSpacing:'1.4px', textTransform:'uppercase',
+        fontWeight:800, color: allOk ? '#2A7A4A' : PURPLE, marginBottom:'8px',
+      }}>
+        {allOk ? 'Ready for setup' : 'Server preconditions'}
+      </div>
+      <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
+        {rows.map((r, i) => (
+          <div key={i} style={{display:'flex', gap:'8px', alignItems:'flex-start', fontSize:'12px'}}>
+            <span style={{
+              flex:'0 0 auto', width:'16px', textAlign:'center',
+              color: r.ok ? '#2A7A4A' : '#9A2A2A', fontWeight:800,
+            }}>{r.ok ? '✓' : '✗'}</span>
+            <div style={{flex:1}}>
+              <div style={{color: r.ok ? INK : '#7A1F1F', fontWeight: r.ok ? 500 : 600}}>
+                {r.label}
+              </div>
+              {!r.ok && r.hint && (
+                <div style={{color: SOFT, marginTop:'2px', lineHeight:1.5}}>{r.hint}</div>
+              )}
+              {r.action}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const Banner: React.FC<{severity:'error'|'info'; text:string}> = ({ severity, text }) => {
   const palette = severity === 'error'
