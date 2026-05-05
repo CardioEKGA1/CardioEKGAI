@@ -245,6 +245,7 @@ const AnticoagAI: React.FC<Props> = ({ API, token, onBack }) => {
 
       <ChipSection
         label="Indication"
+        customNoun="indication"
         accent={ACCENTS.indication}
         options={INDICATIONS}
         selected={indications}
@@ -252,6 +253,7 @@ const AnticoagAI: React.FC<Props> = ({ API, token, onBack }) => {
       />
       <ChipSection
         label="CHA₂DS₂-VASc factors (age + sex auto-included)"
+        customNoun="risk factor"
         accent={ACCENTS.chads}
         options={CHADS_FACTORS}
         selected={chadsFactors}
@@ -259,6 +261,7 @@ const AnticoagAI: React.FC<Props> = ({ API, token, onBack }) => {
       />
       <ChipSection
         label="Bleeding risk factors (HAS-BLED + ORBIT)"
+        customNoun="bleeding factor"
         accent={ACCENTS.bleed}
         options={BLEED_FACTORS}
         selected={bleedFactors}
@@ -266,6 +269,7 @@ const AnticoagAI: React.FC<Props> = ({ API, token, onBack }) => {
       />
       <ChipSection
         label="Current medications"
+        customNoun="medication"
         accent={ACCENTS.meds}
         options={MEDS}
         selected={meds}
@@ -273,6 +277,7 @@ const AnticoagAI: React.FC<Props> = ({ API, token, onBack }) => {
       />
       <ChipSection
         label="Active conditions"
+        customNoun="condition"
         accent={ACCENTS.conditions}
         options={CONDITIONS}
         selected={conditions}
@@ -320,30 +325,103 @@ const Field: React.FC<{label: string; children: React.ReactNode}> = ({ label, ch
 
 const ChipSection: React.FC<{
   label: string;
+  customNoun: string;  // singular noun for placeholder copy ("medication", "indication", ...)
   accent: { bg: string; fg: string; border: string };
   options: { id: string; label: string }[];
   selected: Set<string>;
   onToggle: (id: string) => void;
-}> = ({ label, accent, options, selected, onToggle }) => (
-  <div style={CARD}>
-    <div style={LABEL}>{label}</div>
-    <div style={{display:'flex', flexWrap:'wrap', gap:'6px'}}>
-      {options.map(o => {
-        const on = selected.has(o.id);
-        return (
-          <button key={o.id} type="button" onClick={() => onToggle(o.id)} style={{
-            padding:'7px 12px', borderRadius:'999px',
-            border: `1px solid ${on ? accent.border : 'rgba(122,176,240,0.25)'}`,
-            background: on ? accent.bg : 'rgba(255,255,255,0.6)',
-            color: on ? accent.fg : '#6a8ab0',
-            fontSize:'12px', fontWeight: on ? 700 : 600, cursor:'pointer',
-            fontFamily:'inherit',
-          }}>{o.label}</button>
-        );
-      })}
+}> = ({ label, customNoun, accent, options, selected, onToggle }) => {
+  const [input, setInput] = useState('');
+  const presetIds = React.useMemo(() => new Set(options.map(o => o.id)), [options]);
+  // Anything in `selected` that isn't a preset id is a user-added custom chip.
+  // Rendered after the preset row with an × so it's obvious how to remove —
+  // clicking the chip body also removes (it's a normal toggle).
+  const customSelected = React.useMemo(
+    () => Array.from(selected).filter(id => !presetIds.has(id)),
+    [selected, presetIds],
+  );
+
+  const addCustom = () => {
+    const v = input.trim();
+    if (!v) return;
+    if (selected.has(v)) { setInput(''); return; }
+    onToggle(v);
+    setInput('');
+  };
+
+  return (
+    <div style={CARD}>
+      <div style={LABEL}>{label}</div>
+      <div style={{display:'flex', flexWrap:'wrap', gap:'6px'}}>
+        {options.map(o => {
+          const on = selected.has(o.id);
+          return (
+            <button key={o.id} type="button" onClick={() => onToggle(o.id)} style={{
+              padding:'7px 12px', borderRadius:'999px',
+              border: `1px solid ${on ? accent.border : 'rgba(122,176,240,0.25)'}`,
+              background: on ? accent.bg : 'rgba(255,255,255,0.6)',
+              color: on ? accent.fg : '#6a8ab0',
+              fontSize:'12px', fontWeight: on ? 700 : 600, cursor:'pointer',
+              fontFamily:'inherit',
+            }}>{o.label}</button>
+          );
+        })}
+        {customSelected.map(v => (
+          <button
+            key={`custom:${v}`}
+            type="button"
+            onClick={() => onToggle(v)}
+            title="Click to remove"
+            style={{
+              display:'inline-flex', alignItems:'center', gap:'5px',
+              padding:'7px 8px 7px 12px', borderRadius:'999px',
+              border: `1px solid ${accent.border}`,
+              background: accent.bg, color: accent.fg,
+              fontSize:'12px', fontWeight: 700, cursor:'pointer',
+              fontFamily:'inherit',
+            }}
+          >
+            <span>{v}</span>
+            <span aria-hidden style={{
+              display:'inline-flex', alignItems:'center', justifyContent:'center',
+              width:'16px', height:'16px', borderRadius:'50%',
+              background: 'rgba(255,255,255,0.55)',
+              fontSize:'12px', lineHeight:1, fontWeight: 700,
+            }}>×</span>
+          </button>
+        ))}
+      </div>
+      <div style={{display:'flex', gap:'6px', marginTop:'10px', alignItems:'center'}}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } }}
+          placeholder={`Type to add custom ${customNoun}…`}
+          style={{
+            ...INPUT, fontSize:'12px', padding:'8px 10px',
+            background:'rgba(255,255,255,0.7)',
+          }}
+        />
+        <button
+          type="button"
+          onClick={addCustom}
+          disabled={!input.trim()}
+          style={{
+            padding:'8px 14px', borderRadius:'10px',
+            border:`1px solid ${accent.border}`,
+            background: input.trim() ? accent.bg : 'rgba(255,255,255,0.5)',
+            color: input.trim() ? accent.fg : '#aab7cf',
+            fontSize:'12px', fontWeight:700,
+            cursor: input.trim() ? 'pointer' : 'not-allowed',
+            fontFamily:'inherit', whiteSpace:'nowrap',
+          }}
+        >
+          + Add
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Results ─────────────────────────────────────────────────────────────
 const Results: React.FC<{data: AnticoagResponse}> = ({ data }) => {
