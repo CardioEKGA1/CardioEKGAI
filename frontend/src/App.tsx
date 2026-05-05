@@ -998,7 +998,11 @@ const PublicSplash: React.FC<{API: string}> = ({ API: _API }) => {
           letterSpacing:'0.02em', lineHeight:1.2,
           margin:'0 0 12px', color: NAVY,
         }}>
-          SoulMD
+          SoulMD<sup aria-label="trademark" style={{
+            fontFamily: SERIF, fontSize:'0.38em', fontWeight:600,
+            letterSpacing:'0.05em', color: NAVY, opacity: 0.7,
+            verticalAlign:'super', marginLeft:'2px', userSelect:'none',
+          }}>™</sup>
         </h1>
         <div style={{
           fontFamily: SERIF, fontStyle:'italic',
