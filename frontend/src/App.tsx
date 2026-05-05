@@ -32,6 +32,8 @@ import MarketingAgent from './screens/MarketingAgent';
 import ScheduleMD from './screens/ScheduleMD';
 import ScheduleMDPortal from './screens/ScheduleMDPortal';
 import TOTPSetup from './screens/TOTPSetup';
+import SoulMDLogo from './SoulMDLogo';
+import ChoKuRei from './screens/concierge/ChoKuRei';
 import MeditateApp from './screens/meditate/MeditateApp';
 import MeditationsLandingPage from './screens/public/MeditationsLandingPage';
 import ConciergeLandingPage from './screens/public/ConciergeLandingPage';
@@ -100,7 +102,8 @@ type Screen =
   | 'totp_setup'            // /settings/authenticator — superuser-only TOTP wizard
   | 'schedulemd'            // hospital scheduling admin at /schedulemd (superuser-only)
   | 'schedulemd_portal'     // physician portal at /schedulemd/portal?token=XXX (token-gated)
-  | 'public_splash'         // soulmd.us "by invitation only" lockdown placeholder
+  | 'welcome'               // /welcome — public shareable rich landing (ConciergeLandingPage)
+  | 'public_splash'         // soulmd.us "coming soon" placeholder rendered at /
   | 'not_found';
 
 const API = 'https://ekgscan.com';
@@ -148,6 +151,7 @@ const pathToScreen = (path: string): Screen | null => {
           path === '/settings/authenticator' ||
           path === '/concierge' || path.startsWith('/concierge/') ||
           path === '/concierge-medicine' ||
+          path === '/welcome' ||
           path === '/schedulemd' ||
           path === '/schedulemd/portal' ||
           path.startsWith('/api/');
@@ -196,6 +200,7 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/meditate')          return 'meditate';
   if (path === '/schedulemd')        return 'schedulemd';
   if (path === '/schedulemd/portal') return 'schedulemd_portal';
+  if (path === '/welcome')           return 'welcome';
   if (path === '/login')             return 'auth';
   if (path === '/settings/authenticator') return 'totp_setup';
   if (path.startsWith('/tool/')) {
@@ -237,6 +242,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'meditate')            return '/meditate';
   if (s === 'schedulemd')          return '/schedulemd';
   if (s === 'schedulemd_portal')   return '/schedulemd/portal';
+  if (s === 'welcome')             return '/welcome';
   if (s === 'totp_setup')          return '/settings/authenticator';
   // public_splash has no canonical path — it's the lockdown destination
   // for any URL not in the allowlist. Preserve whatever the user typed
@@ -501,7 +507,8 @@ const App: React.FC = () => {
       schedulemd:          `ScheduleMD · ${brand}`,
       schedulemd_portal:   'ScheduleMD Portal · SoulMD',
       totp_setup:          'Authenticator setup · SoulMD',
-      public_splash:       'SoulMD — Concierge Medicine, By Invitation Only',
+      welcome:             'SoulMD — Concierge Medicine by Dr. Neysi Anderson',
+      public_splash:       'SoulMD — Where Science Meets the Soul',
       not_found:           `Page not found · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
@@ -845,7 +852,10 @@ const App: React.FC = () => {
       {screen==='concierge_medicine' && user && user.is_superuser && (
         <ConciergeLandingPage API={API} onHome={() => navigate('landing')}/>
       )}
-      {screen==='public_splash' && <PublicSplash/>}
+      {screen==='public_splash' && <PublicSplash API={API}/>}
+      {screen==='welcome' && (
+        <ConciergeLandingPage API={API} onHome={() => navigate('public_splash')}/>
+      )}
       {screen==='meditations_public' && (
         <MeditationsLandingPage API={API} onHome={() => navigate('landing')}/>
       )}
@@ -904,52 +914,160 @@ const App: React.FC = () => {
   );
 };
 // ─── PublicSplash ──────────────────────────────────────────────────────────
-// soulmd.us "by invitation only" lockdown placeholder. Rendered for every
-// public-facing route on soulmd.us (everything outside the carve-outs in
-// pathToScreen). Intentionally minimal — single headline + mailto. When the
-// lockdown is lifted, the rich ConciergeLandingPage at /concierge-medicine
-// is the launch-ready replacement; swap the public_splash render branch
-// in App for ConciergeLandingPage and remove the lockdown block from
-// pathToScreen.
-const PublicSplash: React.FC = () => (
-  <div style={{
-    minHeight:'100vh',
-    display:'flex', alignItems:'center', justifyContent:'center',
-    padding:'40px 24px',
-    background:'radial-gradient(circle at center, #F6EEF8 0%, #FDFBF8 70%)',
-    fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif',
-    color:'#1a2a4a',
-  }}>
-    <div style={{maxWidth:'520px', textAlign:'center'}}>
-      <h1 style={{
-        fontFamily:'Georgia, "Times New Roman", serif',
-        fontWeight:400,
-        fontSize:'clamp(26px, 4.6vw, 38px)',
-        letterSpacing:'0.01em',
-        lineHeight:1.3,
-        margin:'0 0 20px',
-        color:'#1a2a4a',
+// soulmd.us coming-soon landing rendered at "/" and at every public path
+// outside the lockdown allowlist. Single centered chakra-DNA logo, the
+// "Where Science Meets the Soul" tagline, and a minimal email-capture
+// form. Cho Ku Rei watermark sits behind everything at low opacity.
+//
+// The previous full marketing page (ConciergeLandingPage) is preserved
+// — reachable at /welcome (public, shareable with new clients) and at
+// /concierge-medicine (superuser-only, original lockdown carve-out).
+//
+// The form opens the user's email client with support@soulmd.us
+// pre-addressed and the entered email pre-filled in the body. This
+// keeps the public surface free of backend dependencies (no
+// reCAPTCHA, no honeypot, no 18+ gate, no rate-limit table) and
+// guarantees deliverability — Anderson's support inbox is the
+// authoritative lead-capture surface.
+const PublicSplash: React.FC<{API: string}> = ({ API: _API }) => {
+  const [email, setEmail] = React.useState('');
+  const [sent, setSent] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  const submit = () => {
+    setErr('');
+    const e = email.trim().toLowerCase();
+    if (!e || !e.includes('@')) { setErr('Please enter a valid email.'); return; }
+    try {
+      const subject = encodeURIComponent('Information request — SoulMD');
+      const body = encodeURIComponent(
+        `Hi,\n\nI'd like to learn more about SoulMD.\n\nPlease reach me at: ${e}\n\nThank you.\n`
+      );
+      window.location.href = `mailto:support@soulmd.us?subject=${subject}&body=${body}`;
+      setSent(true);
+    } catch {
+      setErr('Could not open your email client. Please email support@soulmd.us directly.');
+    }
+  };
+
+  // Palette: opal blue + blush pink as specified.
+  const OPAL  = '#C5E8F4';
+  const BLUSH = '#F6BFD3';
+  const NAVY  = '#1a2a4a';
+  const SOFT  = '#6B6889';
+  const SERIF = 'Georgia, "Times New Roman", serif';
+
+  return (
+    <div style={{
+      position:'relative',
+      minHeight:'100vh',
+      display:'flex', alignItems:'center', justifyContent:'center',
+      padding:'48px 24px',
+      // Soft diagonal blend opal → blush, with a creamy core to keep
+      // text legible at any width.
+      background: `linear-gradient(135deg, ${OPAL} 0%, #FDFBF8 50%, ${BLUSH} 100%)`,
+      fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif',
+      color: NAVY,
+      overflow:'hidden',
+    }}>
+      {/* Cho Ku Rei watermark — non-interactive, sits behind content. */}
+      <div aria-hidden style={{
+        position:'absolute', top:'50%', left:'50%',
+        transform:'translate(-50%, -50%)',
+        opacity: 1, pointerEvents:'none', zIndex:0,
       }}>
-        Concierge Medicine — By Invitation Only
-      </h1>
-      <p style={{
-        fontFamily:'Georgia, "Times New Roman", serif',
-        fontSize:'15px',
-        lineHeight:1.7,
-        color:'#6B6889',
-        margin:0,
+        <ChoKuRei size={520} color={NAVY} opacity={0.05}/>
+      </div>
+
+      <div style={{
+        position:'relative', zIndex:1,
+        maxWidth:'480px', width:'100%', textAlign:'center',
       }}>
-        To inquire, contact{' '}
-        <a
-          href="mailto:support@soulmd.us"
-          style={{color:'#534AB7', textDecoration:'none', fontWeight:600}}
-        >
-          support@soulmd.us
-        </a>.
-      </p>
+        <div style={{display:'flex', justifyContent:'center', marginBottom:'22px'}}>
+          <SoulMDLogo size={88} showText={false}/>
+        </div>
+        <h1 style={{
+          fontFamily: SERIF, fontWeight:400,
+          fontSize:'clamp(28px, 5.2vw, 44px)',
+          letterSpacing:'0.02em', lineHeight:1.2,
+          margin:'0 0 12px', color: NAVY,
+        }}>
+          SoulMD
+        </h1>
+        <div style={{
+          fontFamily: SERIF, fontStyle:'italic',
+          fontSize:'clamp(15px, 2.4vw, 19px)',
+          color: SOFT, letterSpacing:'0.04em',
+          margin:'0 0 32px', lineHeight:1.5,
+        }}>
+          Where Science Meets the Soul
+        </div>
+
+        {sent ? (
+          <div style={{
+            background:'rgba(255,255,255,0.7)',
+            border:'1px solid rgba(83,74,183,0.15)',
+            borderRadius:'14px', padding:'18px 22px',
+            backdropFilter:'blur(6px)',
+            fontSize:'14px', color: NAVY, lineHeight:1.6,
+          }}>
+            ✦ Your email client should be opening. We'll be in touch.
+          </div>
+        ) : (
+          <form
+            onSubmit={e => { e.preventDefault(); submit(); }}
+            style={{
+              display:'flex', gap:'8px', flexWrap:'wrap',
+              maxWidth:'420px', margin:'0 auto',
+            }}>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="Your email"
+              autoComplete="email"
+              required
+              style={{
+                flex:'1 1 200px', minWidth:0,
+                padding:'13px 16px', borderRadius:'12px',
+                border:'1px solid rgba(83,74,183,0.18)',
+                background:'rgba(255,255,255,0.85)',
+                fontSize:'14px', color: NAVY,
+                fontFamily:'inherit', outline:'none',
+                boxSizing:'border-box',
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                padding:'13px 22px', borderRadius:'12px',
+                border:'none', background: NAVY, color:'white',
+                fontSize:'13px', fontWeight:700, letterSpacing:'0.04em',
+                cursor:'pointer', fontFamily:'inherit',
+              }}>
+              Request information
+            </button>
+            {err && (
+              <div style={{
+                width:'100%', marginTop:'8px',
+                fontSize:'12px', color:'#7A1F1F',
+              }}>{err}</div>
+            )}
+          </form>
+        )}
+
+        <div style={{
+          marginTop:'22px', fontSize:'11px', color: SOFT,
+          letterSpacing:'0.06em',
+        }}>
+          <a href="mailto:support@soulmd.us" style={{
+            color: SOFT, textDecoration:'none',
+          }}>support@soulmd.us</a>
+        </div>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── NotFound (404) ────────────────────────────────────────────────────────
 // Rendered for any URL pathToScreen can't resolve. Keeps the visited URL
