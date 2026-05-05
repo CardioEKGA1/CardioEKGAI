@@ -107,30 +107,42 @@ const API = 'https://ekgscan.com';
 // stay as component-local React state.
 const pathToScreen = (path: string): Screen | null => {
   // ─── soulmd.us public lockdown ──────────────────────────────────
-  // soulmd.us is invitation-only. Every public-facing route renders
-  // the minimal "by invitation only" splash (public_splash). Carve-
-  // outs:
+  // soulmd.us is invitation-only for *unauthenticated visitors*. Every
+  // public-facing route renders the minimal "by invitation only"
+  // splash (public_splash). Carve-outs:
   //   /admin*              admin token console
   //   /dev-login           superuser fast-login
   //   /concierge           superuser dashboard (incl. ?view=patient,
   //                        and /concierge/* subpaths)
-  //   /concierge-medicine  superuser-gated rich landing (the launch-
-  //                        ready ConciergeLandingPage, kept reachable
-  //                        for the practice owner to demo pre-launch)
+  //   /concierge-medicine  superuser-gated rich landing
+  //   /shiftmd             scheduler (superuser-only)
   //   /api/*               backend (doesn't reach React anyway)
+  //
+  // Once a superuser is signed in, the lockdown is bypassed for that
+  // session — the localStorage('soulmd_su') flag is set on successful
+  // /auth/me and on dev-login. Without this bypass, browser back / UI
+  // back buttons would route every locked URL through pathToScreen and
+  // collapse the entire in-session history stack down to public_splash.
+  // Concierge patients (is_superuser=false) never get the flag, so the
+  // "no patient access" stance still holds — they continue to splash
+  // on every locked URL exactly like a public visitor.
   // EKGScan and other hosts are unaffected.
   if (typeof window !== 'undefined') {
     const h = window.location.host.toLowerCase();
     const isSoulMD = h === 'soulmd.us' || h === 'www.soulmd.us' || h.endsWith('.soulmd.us');
     if (isSoulMD) {
-      const allowed =
-        path.startsWith('/admin') ||
-        path === '/dev-login' ||
-        path === '/concierge' || path.startsWith('/concierge/') ||
-        path === '/concierge-medicine' ||
-        path === '/shiftmd' ||
-        path.startsWith('/api/');
-      if (!allowed) return 'public_splash';
+      let isSuperuserSession = false;
+      try { isSuperuserSession = !!localStorage.getItem('soulmd_su'); } catch {}
+      if (!isSuperuserSession) {
+        const allowed =
+          path.startsWith('/admin') ||
+          path === '/dev-login' ||
+          path === '/concierge' || path.startsWith('/concierge/') ||
+          path === '/concierge-medicine' ||
+          path === '/shiftmd' ||
+          path.startsWith('/api/');
+        if (!allowed) return 'public_splash';
+      }
     }
   }
   if (path === '/' || path === '')   return 'landing';
@@ -333,6 +345,14 @@ const App: React.FC = () => {
       is_superuser: !!data.is_superuser,
       is_concierge_patient: !!data.is_concierge_patient,
     });
+    // soulmd.us lockdown bypass: a superuser session marker so the
+    // pathToScreen lockdown skips this user's URLs (browser back / UI
+    // back / refresh of locked paths all need to resolve to the real
+    // screen, not the public splash). Cleared in handleLogout.
+    try {
+      if (data && data.is_superuser) localStorage.setItem('soulmd_su', '1');
+      else localStorage.removeItem('soulmd_su');
+    } catch {}
 
     // Concierge patients ALWAYS land on /patient and nowhere else.
     // window.history.replaceState scrubs the magic-link query string
@@ -385,6 +405,7 @@ const App: React.FC = () => {
           // so a brief outage doesn't log everyone out.
           if (r.status === 401 || r.status === 404) {
             localStorage.removeItem('token');
+            try { localStorage.removeItem('soulmd_su'); } catch {}
             setToken('');
             return null;
           }
@@ -394,10 +415,27 @@ const App: React.FC = () => {
         .then(data => {
           if (data && data.email) {
             setUser(data);
-            // soulmd.us / now leads with concierge medicine for everyone.
-            // Clinicians (signed-in or not) reach the dashboard via the
-            // "For Clinicians →" footer link. EKGScan keeps signed-in
-            // users on its landing so the Suite pitch stays visible.
+            // Sync the lockdown-bypass marker with /auth/me's view of
+            // the user. Existing superuser sessions that signed in
+            // before this flag existed pick it up here on next page
+            // load — no re-sign-in required.
+            try {
+              if (data.is_superuser) {
+                const hadFlag = !!localStorage.getItem('soulmd_su');
+                localStorage.setItem('soulmd_su', '1');
+                // Initial mount may have routed us to public_splash
+                // because the flag wasn't set yet. Now that we know
+                // this is a superuser session, re-resolve the URL —
+                // pathToScreen reads localStorage on each call, so
+                // it'll honor the flag we just stamped.
+                if (!hadFlag) {
+                  const fresh = pathToScreen(window.location.pathname);
+                  if (fresh && fresh !== 'public_splash') setScreen(fresh);
+                }
+              } else {
+                localStorage.removeItem('soulmd_su');
+              }
+            } catch {}
           }
         })
         .catch(() => { /* network error — keep token, user retries naturally */ });
@@ -406,6 +444,7 @@ const App: React.FC = () => {
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
+    try { localStorage.removeItem('soulmd_su'); } catch {}
     setToken('');
     setUser(null);
     navigate('landing');
