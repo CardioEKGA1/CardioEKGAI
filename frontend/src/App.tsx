@@ -71,6 +71,12 @@ const PATIENT_ALLOWED_SCREENS: Screen[] = [
   // 404 is intentionally allowed so a typo'd URL just shows the not-found
   // shell instead of looping the redirect.
   'not_found',
+  // soulmd.us "by invitation only" lockdown placeholder. Concierge
+  // patients can land here during the lockdown (every public path
+  // resolves to public_splash); allowed so the global hard-lock
+  // useEffect doesn't infinite-reload them to /patient (which is
+  // itself locked → public_splash → loop).
+  'public_splash',
 ];
 
 type Screen =
@@ -83,11 +89,12 @@ type Screen =
   | 'meditations_library' | 'concierge_access'
   | 'patient_login' | 'patient_terms' | 'patient_intake'
   | 'patient_pwa'           // authed patient PWA at /patient
-  | 'concierge_medicine'    // public landing at /concierge-medicine
+  | 'concierge_medicine'    // rich landing at /concierge-medicine (superuser-only during lockdown)
   | 'meditations_public'    // public landing at /meditations
   | 'marketing_admin'
   | 'meditate'
   | 'dev_login'
+  | 'public_splash'         // soulmd.us "by invitation only" lockdown placeholder
   | 'not_found';
 
 const API = 'https://ekgscan.com';
@@ -99,12 +106,17 @@ const API = 'https://ekgscan.com';
 const pathToScreen = (path: string): Screen | null => {
   // ─── soulmd.us public lockdown ──────────────────────────────────
   // soulmd.us is invitation-only. Every public-facing route renders
-  // the ConciergeLandingPage placeholder. Carve-outs: the admin
-  // token console, the /dev-login superuser fast-login, the
-  // /concierge superuser dashboard (incl. ?view=patient and any
-  // /concierge/* subpath), and /api/* (backend — doesn't reach
-  // React anyway, listed for completeness). EKGScan and other hosts
-  // are unaffected.
+  // the minimal "by invitation only" splash (public_splash). Carve-
+  // outs:
+  //   /admin*              admin token console
+  //   /dev-login           superuser fast-login
+  //   /concierge           superuser dashboard (incl. ?view=patient,
+  //                        and /concierge/* subpaths)
+  //   /concierge-medicine  superuser-gated rich landing (the launch-
+  //                        ready ConciergeLandingPage, kept reachable
+  //                        for the practice owner to demo pre-launch)
+  //   /api/*               backend (doesn't reach React anyway)
+  // EKGScan and other hosts are unaffected.
   if (typeof window !== 'undefined') {
     const h = window.location.host.toLowerCase();
     const isSoulMD = h === 'soulmd.us' || h === 'www.soulmd.us' || h.endsWith('.soulmd.us');
@@ -113,8 +125,9 @@ const pathToScreen = (path: string): Screen | null => {
         path.startsWith('/admin') ||
         path === '/dev-login' ||
         path === '/concierge' || path.startsWith('/concierge/') ||
+        path === '/concierge-medicine' ||
         path.startsWith('/api/');
-      if (!allowed) return 'concierge_medicine';
+      if (!allowed) return 'public_splash';
     }
   }
   if (path === '/' || path === '')   return 'landing';
@@ -195,6 +208,10 @@ const screenToPath = (s: Screen): string => {
   if (s === 'marketing_admin')     return '/admin/marketing';
   if (s === 'meditate')            return '/meditate';
   if (s === 'dev_login')           return '/dev-login';
+  // public_splash has no canonical path — it's the lockdown destination
+  // for any URL not in the allowlist. Preserve whatever the user typed
+  // so the address bar still reflects their intent.
+  if (s === 'public_splash')       return window.location.pathname || '/';
   if (s === 'not_found')           return window.location.pathname || '/';
   if (s.startsWith('tool_')) return `/tool/${s.slice(5)}`;
   return '/';
@@ -424,6 +441,7 @@ const App: React.FC = () => {
       marketing_admin:     `Marketing Agent · ${brand}`,
       meditate:            'SoulMD Meditate',
       dev_login:           `Dev Login · ${brand}`,
+      public_splash:       'SoulMD — Concierge Medicine, By Invitation Only',
       not_found:           `Page not found · ${brand}`,
     };
     document.title = PER_SCREEN[screen] || brand;
@@ -509,20 +527,25 @@ const App: React.FC = () => {
     return () => { cancelled = true; };
   }, [screen, user, token, navigate]);
 
-  // Backward compat: legacy /concierge?view=patient links land here. Bounce
-  // them to the new canonical /patient URL on mount so deep-links from
-  // emails, dev login, and any cached history survive the migration.
-  useEffect(() => {
-    try {
-      const p = window.location.pathname;
-      const view = new URLSearchParams(window.location.search).get('view');
-      if (p === '/concierge' && view === 'patient') {
-        window.history.replaceState({}, '', '/patient');
-        const fromUrl = pathToScreen('/patient');
-        if (fromUrl) setScreen(fromUrl);
-      }
-    } catch {}
-  }, []);
+  // Backward compat: legacy /concierge?view=patient links land here.
+  // Pre-lockdown this bouncer rewrote the URL to the canonical /patient.
+  // Disabled during the soulmd.us "by invitation only" lockdown — /patient
+  // is locked (resolves to public_splash), so bouncing the practice owner
+  // there from /concierge?view=patient stranded them on the splash. Letting
+  // the request stay on /concierge means the Concierge component handles
+  // ?view=patient internally (its existing pre-pivot behavior). Re-enable
+  // when the lockdown is lifted and /patient is reachable again.
+  // useEffect(() => {
+  //   try {
+  //     const p = window.location.pathname;
+  //     const view = new URLSearchParams(window.location.search).get('view');
+  //     if (p === '/concierge' && view === 'patient') {
+  //       window.history.replaceState({}, '', '/patient');
+  //       const fromUrl = pathToScreen('/patient');
+  //       if (fromUrl) setScreen(fromUrl);
+  //     }
+  //   } catch {}
+  // }, []);
 
   // Patient PWA route guard. /concierge with view=patient (or any
   // non-owner accessing /concierge) must verify the user is still
@@ -577,9 +600,26 @@ const App: React.FC = () => {
     }
   }, [screen, token, navigate]);
 
-  // /concierge-medicine — public landing (no auth gate). The previous
-  // superuser-only ConciergeMedicineLanding has been replaced by a
-  // ConciergeLandingPage that anyone can reach via direct URL.
+  // /concierge-medicine — superuser-gated during the soulmd.us "by
+  // invitation only" lockdown. Pre-pivot this was a public landing;
+  // post-pivot it briefly was the public placeholder; now (lockdown
+  // mode) it's the practice owner's pre-launch demo URL for the rich
+  // ConciergeLandingPage. Anyone unauthed or non-superuser is sent
+  // back to the public splash. setScreen + replaceState rather than
+  // navigate() so we don't leave /concierge-medicine in the back stack.
+  useEffect(() => {
+    if (screen !== 'concierge_medicine') return;
+    if (!token) {
+      try { window.history.replaceState({}, '', '/'); } catch {}
+      setScreen('public_splash');
+      return;
+    }
+    if (!user) return; // wait for /auth/me to resolve
+    if (!user.is_superuser) {
+      try { window.history.replaceState({}, '', '/'); } catch {}
+      setScreen('public_splash');
+    }
+  }, [screen, user, token]);
 
   // /admin/marketing — Marketing Agent (Claude-powered campaign generator).
   // Superuser-only; shares the gating shape with /concierge-medicine.
@@ -722,9 +762,15 @@ const App: React.FC = () => {
           onSignInRequired={() => navigate('patient_login')}
         />
       )}
-      {screen==='concierge_medicine' && (
+      {/* Rich ConciergeLandingPage at /concierge-medicine is gated on
+          superuser during the lockdown. The useEffect above bounces
+          everyone else to public_splash, so this guard is belt-and-
+          suspenders — but it also prevents a flash of marketing copy
+          to a non-superuser visitor between mount and useEffect. */}
+      {screen==='concierge_medicine' && user && user.is_superuser && (
         <ConciergeLandingPage API={API} onHome={() => navigate('landing')}/>
       )}
+      {screen==='public_splash' && <PublicSplash/>}
       {screen==='meditations_public' && (
         <MeditationsLandingPage API={API} onHome={() => navigate('landing')}/>
       )}
@@ -760,6 +806,54 @@ const App: React.FC = () => {
     </div>
   );
 };
+// ─── PublicSplash ──────────────────────────────────────────────────────────
+// soulmd.us "by invitation only" lockdown placeholder. Rendered for every
+// public-facing route on soulmd.us (everything outside the carve-outs in
+// pathToScreen). Intentionally minimal — single headline + mailto. When the
+// lockdown is lifted, the rich ConciergeLandingPage at /concierge-medicine
+// is the launch-ready replacement; swap the public_splash render branch
+// in App for ConciergeLandingPage and remove the lockdown block from
+// pathToScreen.
+const PublicSplash: React.FC = () => (
+  <div style={{
+    minHeight:'100vh',
+    display:'flex', alignItems:'center', justifyContent:'center',
+    padding:'40px 24px',
+    background:'radial-gradient(circle at center, #F6EEF8 0%, #FDFBF8 70%)',
+    fontFamily:'-apple-system,BlinkMacSystemFont,Inter,sans-serif',
+    color:'#1a2a4a',
+  }}>
+    <div style={{maxWidth:'520px', textAlign:'center'}}>
+      <h1 style={{
+        fontFamily:'Georgia, "Times New Roman", serif',
+        fontWeight:400,
+        fontSize:'clamp(26px, 4.6vw, 38px)',
+        letterSpacing:'0.01em',
+        lineHeight:1.3,
+        margin:'0 0 20px',
+        color:'#1a2a4a',
+      }}>
+        Concierge Medicine — By Invitation Only
+      </h1>
+      <p style={{
+        fontFamily:'Georgia, "Times New Roman", serif',
+        fontSize:'15px',
+        lineHeight:1.7,
+        color:'#6B6889',
+        margin:0,
+      }}>
+        To inquire, contact{' '}
+        <a
+          href="mailto:support@soulmd.us"
+          style={{color:'#534AB7', textDecoration:'none', fontWeight:600}}
+        >
+          support@soulmd.us
+        </a>.
+      </p>
+    </div>
+  </div>
+);
+
 // ─── NotFound (404) ────────────────────────────────────────────────────────
 // Rendered for any URL pathToScreen can't resolve. Keeps the visited URL
 // in the address bar so the user (and any error reporter) can see what
