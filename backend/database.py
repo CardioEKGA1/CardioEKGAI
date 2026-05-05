@@ -820,6 +820,37 @@ class ScheduleMDEquity(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+# ─── Auth: magic-link + TOTP (PingID-compatible) ──────────────────────
+# Issued by POST /api/auth/magic-link, verified by GET /api/auth/verify.
+# `destination` is the post-verify path the verify handler redirects to.
+# `used_at` is set the first time the token is consumed; reuse → 401.
+# `ip_address` is captured for the security audit trail.
+class MagicLinkToken(Base):
+    __tablename__ = "magic_link_tokens"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, nullable=False, index=True)
+    token = Column(String, nullable=False, unique=True, index=True)
+    destination = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    ip_address = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+# TOTP credentials are gated to the practice owner — see TOTP setup flow.
+# `totp_secret` is Fernet-encrypted at rest with TOTP_ENCRYPTION_KEY.
+# `backup_codes` is a JSON list of bcrypt-hashed codes (8 generated at
+# setup, each consumable once; the bcrypt hash flips to a sentinel
+# "USED:..." prefix on consumption so we never store cleartext).
+class TOTPCredential(Base):
+    __tablename__ = "totp_credentials"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, nullable=False, index=True)  # FK users.id (no ondelete here for cross-DB compat)
+    totp_secret = Column(String, nullable=False)        # Fernet ciphertext
+    backup_codes = Column(JSON, nullable=False, default=list)
+    enabled_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:

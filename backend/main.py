@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import (
     get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt,
+    MagicLinkToken, TOTPCredential,
     ConciergePatient, ConciergeMessage, ConciergeAppointment, ConciergeMembership, ConciergeInvoice,
     ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
     ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
@@ -836,10 +837,26 @@ def call_claude_json_document(system_prompt: str, file_bytes: bytes, media_type:
     )
     return _extract_json(response.content[0].text)
 
-def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
-    if not authorization or not authorization.startswith("Bearer "):
+def get_current_user(
+    request: Request,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Resolve the current user from either the soulmd_session httpOnly
+    cookie (preferred — set by the magic-link + TOTP flows) or the
+    legacy `Authorization: Bearer <jwt>` header. Returns None if both
+    are absent or invalid; downstream gates 401 on None."""
+    token: str | None = None
+    try:
+        cookie_token = request.cookies.get("soulmd_session")
+        if cookie_token:
+            token = cookie_token
+    except Exception:  # noqa: BLE001
+        pass
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "", 1)
+    if not token:
         return None
-    token = authorization.replace("Bearer ", "")
     payload = decode_token(token)
     if not payload:
         return None
@@ -1278,65 +1295,453 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
     }
 
 
-class DevLoginRequest(BaseModel):
+# NOTE: /auth/dev-login removed by the Magic-link + TOTP security overhaul.
+# The DevLoginRequest model, DEV_LOGIN_ENABLED env flag, and the
+# _is_localhost_request helper are gone too — there is no instant-login
+# bypass on this image. Superusers sign in via magic-link or via TOTP
+# (PingID-compatible) at /login.
+
+# ─── Auth: magic-link + TOTP (security overhaul) ──────────────────────
+# These endpoints replace dev-login as the only paths into the app.
+# Magic-link is universal; TOTP is reserved for the practice owner
+# (anderson@soulmd.us) and gives a fast-path that doesn't depend on
+# email delivery. All endpoints use /api/auth/* per the spec — the
+# legacy /auth/magic-link + /auth/verify-token endpoints above stay
+# available for any in-flight clients but the primary login surface
+# is the new namespace.
+
+import secrets as _auth_secrets
+import base64 as _auth_base64
+import io as _auth_io
+try:
+    import pyotp as _pyotp
+except Exception:  # noqa: BLE001
+    _pyotp = None
+try:
+    import qrcode as _qrcode
+except Exception:  # noqa: BLE001
+    _qrcode = None
+try:
+    from cryptography.fernet import Fernet as _Fernet, InvalidToken as _FernetInvalidToken
+except Exception:  # noqa: BLE001
+    _Fernet = None  # type: ignore
+    _FernetInvalidToken = Exception  # type: ignore
+
+try:
+    import bcrypt as _bcrypt
+except Exception:  # noqa: BLE001
+    _bcrypt = None
+
+_TOTP_ENC_KEY_RAW = os.getenv("TOTP_ENCRYPTION_KEY", "").strip().encode() or None
+_SOULMD_OWNER_EMAIL = "anderson@soulmd.us"
+_MAGIC_LINK_TTL_MINUTES = 15
+_MAGIC_LINK_RATE_LIMIT_PER_15MIN = 3
+_TOTP_FAILURE_LIMIT_PER_15MIN = 5
+_SESSION_COOKIE = "soulmd_session"
+_SESSION_COOKIE_TTL_DAYS = 7
+_FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@soulmd.us")
+_APP_URL = os.getenv("APP_URL", "https://soulmd.us")
+
+_failed_totp_attempts: dict[str, list[float]] = {}  # in-memory rate limit window
+
+
+def _fernet() -> "_Fernet | None":
+    """Returns a Fernet instance built from TOTP_ENCRYPTION_KEY, or None
+    when the dependency / env var are missing. Endpoints that hard-require
+    encryption raise 503 with a specific error so the front-end can
+    surface 'TOTP unavailable on this deploy' to the operator."""
+    if _Fernet is None or not _TOTP_ENC_KEY_RAW:
+        return None
+    try:
+        return _Fernet(_TOTP_ENC_KEY_RAW)
+    except Exception as e:  # noqa: BLE001
+        print(f"TOTP fernet init error: {e}")
+        return None
+
+
+def _hash_backup_code(code: str) -> str:
+    if not _bcrypt:
+        raise HTTPException(status_code=503, detail="bcrypt unavailable")
+    return _bcrypt.hashpw(code.encode(), _bcrypt.gensalt(rounds=10)).decode()
+
+
+def _verify_backup_code(code: str, hashed: str) -> bool:
+    if not _bcrypt or not hashed or hashed.startswith("USED:"):
+        return False
+    try:
+        return _bcrypt.checkpw(code.encode(), hashed.encode())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _now_utc() -> datetime:
+    return datetime.utcnow()
+
+
+def _client_ip(request: Request) -> str:
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return xff or (request.client.host if request.client else "")
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=_SESSION_COOKIE, value=token,
+        max_age=_SESSION_COOKIE_TTL_DAYS * 24 * 3600,
+        httponly=True, secure=True, samesite="lax", path="/",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(_SESSION_COOKIE, path="/")
+
+
+def _resolve_destination(email: str, destination: str | None) -> str:
+    """Maps the post-auth landing URL. Owner can target /admin or
+    /concierge explicitly; patient emails (concierge_patients table)
+    land on /concierge?view=patient; standard users → /dashboard."""
+    email = (email or "").strip().lower()
+    if destination:
+        d = destination.strip()
+        if email == _SOULMD_OWNER_EMAIL and d in ("/admin", "/concierge"):
+            return d
+    if email == _SOULMD_OWNER_EMAIL:
+        return "/concierge"
+    # Concierge patient lookup — same path the existing flow uses.
+    try:
+        sess = SessionLocal()
+        try:
+            cp = sess.query(ConciergePatient).filter(ConciergePatient.email.ilike(email)).first()
+            if cp:
+                return "/concierge?view=patient"
+        finally:
+            sess.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return "/dashboard"
+
+
+def _sentry_event(name: str, **fields) -> None:
+    """Non-fatal structured log. Uses sentry_sdk if available, falls
+    back to stdout. Keeps the event surface uniform across magic-link
+    and TOTP flows."""
+    try:
+        import sentry_sdk as _ssdk  # type: ignore
+        _ssdk.capture_message(name, level="info")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        kv = " ".join(f"{k}={v!r}" for k, v in fields.items())
+        print(f"AUTH_EVENT name={name} {kv}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ─── Pydantic request bodies ──────────────────────────────────────────
+class _SecMagicLinkIn(BaseModel):
     email: str
+    destination: str | None = None
+
+class _SecTOTPLoginIn(BaseModel):
+    email: str
+    totp_code: str
 
 
-DEV_LOGIN_ENABLED = os.getenv("DEV_LOGIN_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
-
-def _is_localhost_request(request: Request) -> bool:
-    """True when the HTTP request is coming from the same machine as the
-    backend (localhost development). Behind a reverse proxy, client.host
-    will be the proxy's IP, not 127.0.0.1 — so in production the env-var
-    gate is the authoritative switch; this check only helps in `uvicorn
-    main:app` local runs without a proxy."""
-    host = (request.client.host if request.client else "") or ""
-    return host in ("127.0.0.1", "localhost", "::1")
-
-
-@app.post("/auth/dev-login")
+@app.post("/api/auth/magic-link")
 @limiter.limit("10/minute")
-def dev_login(request: Request, data: DevLoginRequest, db: Session = Depends(get_db)):
-    """Instant-login endpoint for the two known test accounts. Bypasses the
-    magic-link email round-trip entirely — used to keep iterative testing
-    fast when Gmail is slow/filtering.
+def sec_magic_link_request(
+    request: Request,
+    body: _SecMagicLinkIn,
+    db: Session = Depends(get_db),
+):
+    """Always returns 200 (email-enumeration resistant). Internally we
+    rate-limit per email and send an email with a single-use,
+    15-minute token."""
+    email = (body.email or "").strip().lower()
+    ip = _client_ip(request)
+    # Rate limit: max 3 requests per email per 15 minutes.
+    fifteen_ago = _now_utc() - timedelta(minutes=15)
+    recent = db.query(MagicLinkToken).filter(
+        MagicLinkToken.email == email,
+        MagicLinkToken.created_at >= fifteen_ago,
+    ).count() if email else 0
+    if recent >= _MAGIC_LINK_RATE_LIMIT_PER_15MIN:
+        _sentry_event("magic_link_rate_limited", email=email, ip=ip)
+        # Spec: do not reveal reason. Silent 200.
+        return {"ok": True}
 
-    Security gates (defense in depth):
-     1. Requires either DEV_LOGIN_ENABLED=true env var OR a localhost
-        origin, so it's inert on a hardened production image unless
-        explicitly opted in.
-     2. Email must be in SUPERUSER_EMAILS — no way to log in as an
-        arbitrary user via this endpoint.
+    if email and "@" in email:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            destination = _resolve_destination(email, body.destination)
+            token = _auth_secrets.token_urlsafe(32)
+            row = MagicLinkToken(
+                email=email, token=token, destination=destination,
+                expires_at=_now_utc() + timedelta(minutes=_MAGIC_LINK_TTL_MINUTES),
+                ip_address=ip,
+            )
+            db.add(row)
+            db.commit()
+            try:
+                _send_magic_link_email(email, token)
+            except Exception as e:  # noqa: BLE001
+                print(f"magic-link email send error: {e}")
+            _sentry_event("magic_link_requested", email=email, ip=ip, destination=destination)
+    return {"ok": True}
+
+
+def _send_magic_link_email(email: str, token: str) -> None:
+    """SoulMD-styled login email — same SendGrid client used elsewhere."""
+    from sendgrid import SendGridAPIClient  # noqa: WPS433
+    from sendgrid.helpers.mail import Mail  # noqa: WPS433
+    api_key = os.getenv("SENDGRID_API_KEY", "")
+    if not api_key:
+        print("SENDGRID_API_KEY missing — skipping magic-link email.")
+        return
+    verify_url = f"{_APP_URL}/auth/verify?token={token}"
+    html = f"""
+    <div style="font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;max-width:540px;margin:0 auto;padding:40px 20px;color:#1a2a4a">
+      <div style="text-align:center;margin-bottom:28px">
+        <div style="font-family:Georgia,serif;font-size:28px;font-weight:400;color:#1a2a4a;letter-spacing:0.04em">SoulMD</div>
+        <div style="font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#6B6889;font-weight:700;margin-top:4px">Secure sign-in link</div>
+      </div>
+      <h2 style="font-size:18px;font-weight:700;color:#1a2a4a;margin:0 0 8px">Sign in to SoulMD</h2>
+      <p style="font-size:14px;color:#3A3852;line-height:1.7">
+        Click the button below to sign in. This link expires in 15 minutes and
+        works once.
+      </p>
+      <a href="{verify_url}" style="display:block;background:linear-gradient(135deg,#7ab0f0,#9b8fe8);color:white;text-decoration:none;border-radius:14px;padding:14px 24px;font-size:15px;font-weight:700;text-align:center;margin:24px 0">
+        Sign in to SoulMD
+      </a>
+      <p style="font-size:12px;color:#6B6889;line-height:1.6">
+        If the button doesn't work, paste this URL into your browser:<br/>
+        <span style="word-break:break-all">{verify_url}</span>
+      </p>
+      <p style="font-size:12px;color:#6B6889;line-height:1.6;margin-top:18px">
+        If you didn't request this, ignore this email.
+      </p>
+      <p style="font-size:11px;color:#a0b0c8;text-align:center;margin-top:32px">
+        noreply@soulmd.us · soulmd.us
+      </p>
+    </div>
     """
-    if not (DEV_LOGIN_ENABLED or _is_localhost_request(request)):
-        raise HTTPException(status_code=404, detail="Not found")
-    email = (data.email or "").strip().lower()
-    if not _is_superuser_email(email):
-        raise HTTPException(status_code=404, detail="Not found")
+    msg = Mail(from_email=_FROM_EMAIL, to_emails=email,
+               subject="Your SoulMD login link", html_content=html)
+    SendGridAPIClient(api_key=api_key).send(msg)
 
+
+@app.get("/api/auth/verify")
+def sec_magic_link_verify(token: str, request: Request, db: Session = Depends(get_db)):
+    """Single-use token consumer. On success: issues a JWT, stores it
+    in the soulmd_session httpOnly cookie, and 302-redirects to the
+    destination stored on the token row. Errors redirect to /login
+    with an ?error= query param so the UI can surface a clean message."""
+    from fastapi.responses import RedirectResponse  # noqa: WPS433
+    ip = _client_ip(request)
+    row = db.query(MagicLinkToken).filter(MagicLinkToken.token == token).first()
+    if not row:
+        _sentry_event("magic_link_invalid", ip=ip)
+        return RedirectResponse(url="/login?error=invalid", status_code=302)
+    if row.used_at is not None:
+        _sentry_event("magic_link_reuse", ip=ip, email=row.email)
+        return RedirectResponse(url="/login?error=used", status_code=302)
+    if row.expires_at < _now_utc():
+        _sentry_event("magic_link_expired", ip=ip, email=row.email)
+        return RedirectResponse(url="/login?error=expired", status_code=302)
+    user = db.query(User).filter(User.email == row.email).first()
+    if not user:
+        _sentry_event("magic_link_user_missing", ip=ip, email=row.email)
+        return RedirectResponse(url="/login?error=invalid", status_code=302)
+    row.used_at = _now_utc()
+    db.commit()
+    access_token = create_token({"sub": user.email})
+    resp = RedirectResponse(url=row.destination or "/dashboard", status_code=302)
+    _set_session_cookie(resp, access_token)
+    _sentry_event("magic_link_verified", email=user.email, ip=ip, destination=row.destination)
+    return resp
+
+
+# ─── TOTP (PingID / Google Authenticator / Authy compatible) ─────────
+@app.get("/api/auth/totp/status")
+def sec_totp_status(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
+        raise HTTPException(status_code=404, detail="Not found")
+    cred = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
+    if not cred:
+        return {"enabled": False, "last_used_at": None}
+    return {
+        "enabled": True,
+        "last_used_at": cred.last_used_at.isoformat() if cred.last_used_at else None,
+    }
+
+
+@app.post("/api/auth/totp/setup")
+def sec_totp_setup(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
+        raise HTTPException(status_code=404, detail="Not found")
+    if _pyotp is None or _qrcode is None:
+        raise HTTPException(status_code=503, detail="TOTP libraries unavailable on this build")
+    fernet = _fernet()
+    if fernet is None:
+        raise HTTPException(status_code=503, detail="TOTP_ENCRYPTION_KEY not configured on this deploy")
+
+    existing = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="TOTP already enrolled. Disable it first to re-enroll.")
+
+    secret = _pyotp.random_base32()
+    totp = _pyotp.TOTP(secret)
+    uri = totp.provisioning_uri(name=current_user.email, issuer_name="SoulMD")
+    img = _qrcode.make(uri)
+    buf = _auth_io.BytesIO()
+    img.save(buf, format="PNG")
+    qr_b64 = _auth_base64.b64encode(buf.getvalue()).decode()
+
+    plaintext_codes = [_auth_secrets.token_hex(4).upper() for _ in range(8)]
+    hashed_codes = [_hash_backup_code(c) for c in plaintext_codes]
+
+    cred = TOTPCredential(
+        user_id=current_user.id,
+        totp_secret=fernet.encrypt(secret.encode()).decode(),
+        backup_codes=hashed_codes,
+    )
+    db.add(cred)
+    db.commit()
+
+    _sentry_event("totp_setup_completed", email=current_user.email)
+    return {
+        "qr_code_base64": qr_b64,
+        "backup_codes": plaintext_codes,
+        "secret": secret,
+    }
+
+
+@app.delete("/api/auth/totp/disable")
+def sec_totp_disable(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
+        raise HTTPException(status_code=404, detail="Not found")
+    cred = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
+    if cred:
+        db.delete(cred)
+        db.commit()
+        _sentry_event("totp_disabled", email=current_user.email)
+    return {"ok": True}
+
+
+@app.post("/api/auth/totp/login")
+def sec_totp_login(
+    body: _SecTOTPLoginIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Owner-only TOTP fast-path. Accepts either a 6-digit code from the
+    authenticator app or one of the 8 backup codes. Sets the session
+    cookie on success."""
+    from fastapi.responses import JSONResponse  # noqa: WPS433
+    email = (body.email or "").strip().lower()
+    ip = _client_ip(request)
+    if email != _SOULMD_OWNER_EMAIL:
+        _sentry_event("totp_login_failed", reason="bad_email", ip=ip)
+        raise HTTPException(status_code=401, detail="Invalid code")
+
+    # Sliding-window lockout: 5 fails per 15 min per IP.
+    now_ts = datetime.utcnow().timestamp()
+    window = 15 * 60
+    bucket = _failed_totp_attempts.setdefault(ip, [])
+    bucket[:] = [t for t in bucket if now_ts - t < window]
+    if len(bucket) >= _TOTP_FAILURE_LIMIT_PER_15MIN:
+        _sentry_event("totp_login_locked", ip=ip)
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait 15 minutes.")
+
+    cred = db.query(TOTPCredential).join(User, User.id == TOTPCredential.user_id).filter(User.email == email).first()
+    if not cred:
+        bucket.append(now_ts)
+        raise HTTPException(status_code=401, detail="Invalid code")
+    fernet = _fernet()
+    if fernet is None:
+        raise HTTPException(status_code=503, detail="TOTP_ENCRYPTION_KEY not configured on this deploy")
+
+    code = (body.totp_code or "").strip()
+    if not code:
+        bucket.append(now_ts)
+        raise HTTPException(status_code=401, detail="Invalid code")
+
+    ok = False
+    used_backup_index = -1
+    # Try TOTP first.
+    digit_only = code.replace(" ", "")
+    if digit_only.isdigit() and len(digit_only) == 6 and _pyotp is not None:
+        try:
+            secret = fernet.decrypt(cred.totp_secret.encode()).decode()
+            ok = _pyotp.TOTP(secret).verify(digit_only, valid_window=1)
+        except _FernetInvalidToken:
+            ok = False
+    # Fall back to backup codes (8-hex-char alpha-numeric).
+    if not ok:
+        codes_list = list(cred.backup_codes or [])
+        for i, h in enumerate(codes_list):
+            if _verify_backup_code(code.upper(), h):
+                ok = True
+                used_backup_index = i
+                break
+        if used_backup_index >= 0:
+            codes_list[used_backup_index] = "USED:" + codes_list[used_backup_index]
+            cred.backup_codes = codes_list
+            db.commit()
+
+    if not ok:
+        bucket.append(now_ts)
+        _sentry_event("totp_login_failed", email=email, ip=ip, reason="bad_code")
+        raise HTTPException(status_code=401, detail="Invalid code")
+
+    cred.last_used_at = _now_utc()
+    db.commit()
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        # First-time dev login bootstraps the User row so later prod magic-link
-        # sign-ins pick up the same row with is_superuser preserved.
-        user = User(
-            email=email, hashed_password="", is_verified=True,
-            subscription_tier="free", is_superuser=True, is_clinician=False,
-            scan_count=0,
-        )
-        db.add(user); db.commit(); db.refresh(user)
-    elif not user.is_superuser:
-        user.is_superuser = True
-        db.commit()
-
+        # Defensive — shouldn't happen given the join above succeeded.
+        raise HTTPException(status_code=401, detail="Invalid code")
     access_token = create_token({"sub": user.email})
-    print(f"DEV_LOGIN_OK email={email} host={request.client.host if request.client else '?'}")
-    return {
-        "access_token": access_token,
+    body_out = {
+        "redirect": "/concierge",
+        "access_token": access_token,        # legacy frontends pick this up too
         "email": user.email,
-        "scan_count": user.scan_count,
-        "is_subscribed": user.is_subscribed,
         "is_superuser": True,
     }
+    resp = JSONResponse(body_out)
+    _set_session_cookie(resp, access_token)
+    _sentry_event("totp_login_success", email=email, ip=ip, used_backup=(used_backup_index >= 0))
+    return resp
+
+
+@app.get("/api/auth/session")
+def sec_session(current_user: User | None = Depends(get_current_user)):
+    """Returns the current session profile or {valid:false}. Called by
+    the frontend on every app load to validate the session before any
+    UI render that depends on auth."""
+    if not current_user:
+        return {"valid": False, "user": None}
+    return {
+        "valid": True,
+        "user": {
+            "email": current_user.email,
+            "is_superuser": bool(getattr(current_user, "is_superuser", False)),
+            "is_concierge_patient": False,  # populated by /auth/me; this endpoint is intentionally minimal
+        },
+    }
+
+
+@app.delete("/api/auth/logout")
+def sec_logout(request: Request):
+    from fastapi.responses import JSONResponse  # noqa: WPS433
+    resp = JSONResponse({"ok": True})
+    _clear_session_cookie(resp)
+    _sentry_event("user_logged_out", ip=_client_ip(request))
+    return resp
 
 
 @app.post("/auth/delete-account")

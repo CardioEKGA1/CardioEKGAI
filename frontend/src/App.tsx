@@ -31,6 +31,7 @@ import PatientIntake from './screens/PatientIntake';
 import MarketingAgent from './screens/MarketingAgent';
 import ScheduleMD from './screens/ScheduleMD';
 import ScheduleMDPortal from './screens/ScheduleMDPortal';
+import TOTPSetup from './screens/TOTPSetup';
 import MeditateApp from './screens/meditate/MeditateApp';
 import MeditationsLandingPage from './screens/public/MeditationsLandingPage';
 import ConciergeLandingPage from './screens/public/ConciergeLandingPage';
@@ -96,7 +97,7 @@ type Screen =
   | 'meditations_public'    // public landing at /meditations
   | 'marketing_admin'
   | 'meditate'
-  | 'dev_login'
+  | 'totp_setup'            // /settings/authenticator — superuser-only TOTP wizard
   | 'schedulemd'            // hospital scheduling admin at /schedulemd (superuser-only)
   | 'schedulemd_portal'     // physician portal at /schedulemd/portal?token=XXX (token-gated)
   | 'public_splash'         // soulmd.us "by invitation only" lockdown placeholder
@@ -114,7 +115,9 @@ const pathToScreen = (path: string): Screen | null => {
   // public-facing route renders the minimal "by invitation only"
   // splash (public_splash). Carve-outs:
   //   /admin*              admin token console
-  //   /dev-login           superuser fast-login
+  //   /login               magic-link + TOTP sign-in surface
+  //   /auth/verify         GET token-consumer that 302s on success
+  //   /settings/authenticator  TOTP setup wizard (post-auth)
   //   /concierge           superuser dashboard (incl. ?view=patient,
   //                        and /concierge/* subpaths)
   //   /concierge-medicine  superuser-gated rich landing
@@ -140,7 +143,9 @@ const pathToScreen = (path: string): Screen | null => {
       if (!isSuperuserSession) {
         const allowed =
           path.startsWith('/admin') ||
-          path === '/dev-login' ||
+          path === '/login' ||
+          path === '/auth/verify' ||
+          path === '/settings/authenticator' ||
           path === '/concierge' || path.startsWith('/concierge/') ||
           path === '/concierge-medicine' ||
           path === '/schedulemd' ||
@@ -191,7 +196,8 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/meditate')          return 'meditate';
   if (path === '/schedulemd')        return 'schedulemd';
   if (path === '/schedulemd/portal') return 'schedulemd_portal';
-  if (path === '/dev-login')         return 'dev_login';
+  if (path === '/login')             return 'auth';
+  if (path === '/settings/authenticator') return 'totp_setup';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
     const candidate = `tool_${slug}` as Screen;
@@ -210,7 +216,7 @@ const pathToScreen = (path: string): Screen | null => {
 };
 const screenToPath = (s: Screen): string => {
   if (s === 'landing')   return '/';
-  if (s === 'auth')      return '/auth';
+  if (s === 'auth')      return '/login';
   if (s === 'dashboard') return '/dashboard';
   if (s === 'upload')    return '/scan';
   if (s === 'results')   return '/results';
@@ -231,7 +237,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'meditate')            return '/meditate';
   if (s === 'schedulemd')          return '/schedulemd';
   if (s === 'schedulemd_portal')   return '/schedulemd/portal';
-  if (s === 'dev_login')           return '/dev-login';
+  if (s === 'totp_setup')          return '/settings/authenticator';
   // public_splash has no canonical path — it's the lockdown destination
   // for any URL not in the allowlist. Preserve whatever the user typed
   // so the address bar still reflects their intent.
@@ -494,7 +500,7 @@ const App: React.FC = () => {
       meditate:            'SoulMD Meditate',
       schedulemd:          `ScheduleMD · ${brand}`,
       schedulemd_portal:   'ScheduleMD Portal · SoulMD',
-      dev_login:           `Dev Login · ${brand}`,
+      totp_setup:          'Authenticator setup · SoulMD',
       public_splash:       'SoulMD — Concierge Medicine, By Invitation Only',
       not_found:           `Page not found · ${brand}`,
     };
@@ -509,33 +515,32 @@ const App: React.FC = () => {
   // visitors landing here would otherwise get a permanent blank page.
   // Pre-pivot, this case was masked because soulmd.us / auto-redirected
   // signed-in users to /dashboard; post-pivot the / → concierge change
-  // means more users may arrive at /dashboard without a session. Stash
-  // the intent so handleAuth lands them back on the dashboard after the
-  // magic-link round-trip. Guarded on `!token` too so a still-loading
-  // auth bootstrap (token in localStorage but /auth/me pending) doesn't
-  // bounce a returning clinician away.
+  // ─── Auth guard: protected routes ────────────────────────────────
+  // Per the security overhaul, every screen below requires a signed-in
+  // session. Hitting any of them without auth bounces to /login with
+  // ?next=CURRENT_PATH so the post-verify redirect lands the user back
+  // where they started.
   useEffect(() => {
-    if (screen === 'dashboard' && !user && !token) {
-      try { sessionStorage.setItem('soulmd_post_auth_redirect', '/dashboard'); } catch {}
-      navigate('auth');
-    }
-  }, [screen, user, token, navigate]);
-
-  // If someone lands directly on /concierge without being signed in, redirect
-  // to the sign-in screen. Without this, the concierge render guard leaves
-  // the page blank forever (waiting for a user that will never exist).
-  // Also stash the intended URL (including ?view=patient) so handleAuth
-  // can restore it after the magic-link round-trip — keeps superusers from
-  // bouncing to the tool dashboard when they meant to reach the patient PWA.
-  useEffect(() => {
-    if (screen === 'concierge' && !user && !token) {
-      try {
-        const target = window.location.pathname + window.location.search;
-        sessionStorage.setItem('soulmd_post_auth_redirect', target);
-      } catch {}
-      navigate('auth');
-    }
-  }, [screen, user, token, navigate]);
+    const PROTECTED: Screen[] = [
+      'dashboard', 'concierge', 'patient_pwa', 'patient_terms', 'patient_intake',
+      'meditations_library', 'concierge_access', 'marketing_admin', 'meditate',
+      'schedulemd', 'totp_setup',
+      'tool_nephroai', 'tool_rxcheck', 'tool_antibioticai', 'tool_clinicalnote',
+      'tool_xrayread', 'tool_cerebralai', 'tool_palliativemd', 'tool_anticoag',
+      'tool_labread', 'tool_cliniscore',
+      'upload', 'results', 'chat', 'paywall',
+    ];
+    if (!PROTECTED.includes(screen)) return;
+    if (user || token) return;  // valid (or in-flight) session — let the screen render
+    try {
+      const next = window.location.pathname + window.location.search;
+      const url = next && next !== '/login'
+        ? `/login?next=${encodeURIComponent(next)}`
+        : '/login';
+      window.history.replaceState({}, '', url);
+    } catch {}
+    setScreen('auth');
+  }, [screen, user, token]);
 
   // /patient — post-login routing gate. Concierge is invitation-only, so
   // only users who already have a concierge_patients row (or are
@@ -700,7 +705,7 @@ const App: React.FC = () => {
   // session at all.
   useEffect(() => {
     if (screen !== 'schedulemd') return;
-    if (!token) { navigate('dev_login'); return; }
+    if (!token) { navigate('auth'); return; }
     if (!user) return;
     if (!user.is_superuser) {
       try { window.history.replaceState({}, '', '/'); } catch {}
@@ -881,7 +886,9 @@ const App: React.FC = () => {
           })()}
         />
       )}
-      {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
+      {screen==='totp_setup' && user && user.is_superuser && (
+        <TOTPSetup API={API} token={token} onDone={() => navigate('concierge')}/>
+      )}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
@@ -968,84 +975,6 @@ const NotFound: React.FC<{onHome: () => void; onBack: () => void; brand: string}
   </div>
 );
 
-// ─── Dev Login ─────────────────────────────────────────────────────────────
-// Hidden superuser fast-login page at /dev-login. Not linked anywhere;
-// reach it by typing the URL. Two buttons, no email input. Calls a
-// backend endpoint that's gated by DEV_LOGIN_ENABLED env + SUPERUSER_EMAILS
-// allowlist, so this page is cosmetically available on any deploy but
-// the endpoint returns 404 unless the env flag is set (or the caller is
-// localhost). Test Patient button additionally stashes the post-auth
-// redirect so handleAuth lands at /concierge?view=patient.
-const DevLogin: React.FC<{API: string; onAuth: (d: any) => void}> = ({ API, onAuth }) => {
-  const [loading, setLoading] = useState<string>('');
-  const [err, setErr] = useState<string>('');
-  const signIn = async (email: string, redirect?: string) => {
-    setErr(''); setLoading(email);
-    try {
-      if (redirect) {
-        try { sessionStorage.setItem('soulmd_post_auth_redirect', redirect); } catch {}
-      }
-      const res = await fetch(`${API}/auth/dev-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `dev-login unavailable (${res.status})`);
-      }
-      const data = await res.json();
-      onAuth(data);
-    } catch (e: any) {
-      setErr(e.message || 'Sign-in failed');
-    } finally {
-      setLoading('');
-    }
-  };
-  return (
-    <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)', fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif', padding:'24px'}}>
-      <div style={{background:'rgba(255,255,255,0.85)', backdropFilter:'blur(10px)', borderRadius:'22px', padding:'36px 28px', maxWidth:'420px', width:'100%', boxShadow:'0 20px 40px rgba(20,18,40,0.1)', border:'0.5px solid rgba(83,74,183,0.15)'}}>
-        <div style={{fontSize:'11px', letterSpacing:'2px', textTransform:'uppercase', color:'#534AB7', fontWeight:800, marginBottom:'10px'}}>Dev Login · Superuser Only</div>
-        <div style={{fontSize:'22px', fontWeight:800, color:'#1F1B3A', marginBottom:'6px', letterSpacing:'-0.3px'}}>Instant test sign-in</div>
-        <div style={{fontSize:'13px', color:'#6B6889', marginBottom:'24px', lineHeight:1.6}}>
-          Skips the magic-link email round-trip. Only works when the backend has
-          <code style={{background:'rgba(83,74,183,0.08)', padding:'2px 6px', borderRadius:'4px', margin:'0 4px'}}>DEV_LOGIN_ENABLED=true</code>
-          set in Railway, or when running against <code style={{background:'rgba(83,74,183,0.08)', padding:'2px 6px', borderRadius:'4px'}}>localhost</code>.
-        </div>
-        <button
-          disabled={!!loading}
-          onClick={() => signIn('anderson@soulmd.us')}
-          style={{
-            width:'100%', padding:'14px 18px', marginBottom:'10px',
-            background:'linear-gradient(135deg,#7ab0f0,#9b8fe8,#534AB7)',
-            color:'white', border:'none', borderRadius:'14px',
-            fontSize:'14px', fontWeight:800, cursor: loading ? 'default' : 'pointer',
-            opacity: loading === 'anderson@soulmd.us' ? 0.7 : 1,
-            fontFamily:'inherit', boxShadow:'0 8px 20px rgba(83,74,183,0.25)',
-          }}>
-          {loading === 'anderson@soulmd.us' ? 'Signing in…' : 'Sign in as Dr. Anderson'}
-        </button>
-        <button
-          disabled={!!loading}
-          onClick={() => signIn('spicymolecule@gmail.com', '/patient')}
-          style={{
-            width:'100%', padding:'14px 18px',
-            background:'rgba(255,255,255,0.9)',
-            color:'#534AB7', border:'0.5px solid rgba(83,74,183,0.3)', borderRadius:'14px',
-            fontSize:'14px', fontWeight:800, cursor: loading ? 'default' : 'pointer',
-            opacity: loading === 'spicymolecule@gmail.com' ? 0.7 : 1,
-            fontFamily:'inherit',
-          }}>
-          {loading === 'spicymolecule@gmail.com' ? 'Signing in…' : 'Sign in as Test Patient'}
-        </button>
-        {err && <div style={{marginTop:'14px', fontSize:'12px', color:'#a02020', textAlign:'center'}}>{err}</div>}
-        <div style={{marginTop:'22px', fontSize:'11px', color:'#8aa0c0', textAlign:'center', fontStyle:'italic', lineHeight:1.6}}>
-          If you see "Not found", the dev endpoint is gated on prod.<br/>
-          Set <code style={{background:'rgba(83,74,183,0.08)', padding:'1px 5px', borderRadius:'3px'}}>DEV_LOGIN_ENABLED=true</code> in Railway or run locally.
-        </div>
-      </div>
-    </div>
-  );
-};
+// (Dev-Login surface removed by the magic-link + TOTP security overhaul.)
 
 export default App;
