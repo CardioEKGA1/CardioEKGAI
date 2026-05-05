@@ -217,6 +217,7 @@ const MarketingAgent: React.FC<Props> = ({ API, token, onBack, onNavigateDashboa
         onMeditations={onNavigateMeditations}
         onConcierge={onNavigateConciergeAccess}
         onMarketing={() => {}}
+        onShiftMD={() => { window.location.href = '/shiftmd'; }}
       />
 
       <main style={{padding:'clamp(14px,3vw,24px)', maxWidth:'1280px', margin:'0 auto', display:'grid', gridTemplateColumns:'minmax(260px, 320px) 1fr', gap:'18px'}}>

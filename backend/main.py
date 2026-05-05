@@ -29,6 +29,7 @@ from database import (
     ToolTrialUse,
     MembershipStatus,
     ConciergeInquiryLog, MagicLinkConsumed,
+    ShiftMDHospital, ShiftMDShift, ShiftMDAssignment, ShiftMDProvider,
 )
 import hashlib
 from auth import create_token, create_magic_token, decode_token
@@ -10824,6 +10825,397 @@ def public_config():
             "enabled": bool(_clean_env(os.getenv("RECAPTCHA_SITE_KEY", ""))),
         },
     }
+
+# ─── ShiftMD: hospital shift scheduler ─────────────────────────────────────
+# All endpoints owner-gated via verify_concierge_owner (Anderson +
+# is_superuser). Path prefix /api/shiftmd/* — sits under the React
+# SPA catch-all at the bottom of this file, but FastAPI evaluates
+# decorated routes first so direct /api/* fetches resolve here, not
+# index.html. Schedule date format on the wire: "YYYY-MM-DD" string.
+
+class ShiftMDAssignmentIn(BaseModel):
+    shift_id: int
+    schedule_date: str          # "YYYY-MM-DD"
+    provider_name: str | None = None
+    is_unavailable: bool = False
+
+class ShiftMDSwapIn(BaseModel):
+    new_provider_name: str
+    swap_note: str | None = None
+
+class ShiftMDProviderIn(BaseModel):
+    name: str
+    role: str
+    hospitals: list[str] = []
+
+class ShiftMDInsightIn(BaseModel):
+    date: str                   # "YYYY-MM-DD"
+
+_SHIFTMD_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SHIFTMD_VALID_TYPES = {"day", "swing", "night", "app", "backup", "admin"}
+_SHIFTMD_VALID_ROLES = {"MD", "DO", "APP", "NP", "PA"}
+
+def _shiftmd_assert_date(d: str) -> None:
+    if not d or not _SHIFTMD_DATE_RE.match(d):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+
+def _shiftmd_serialize_shift(s: ShiftMDShift) -> dict:
+    return {
+        "id": s.id,
+        "hospital_id": s.hospital_id,
+        "name": s.name,
+        "shift_type": s.shift_type,
+        "start_time": s.start_time,
+        "end_time": s.end_time,
+        "sort_order": s.sort_order,
+    }
+
+def _shiftmd_serialize_assignment(a: ShiftMDAssignment) -> dict:
+    return {
+        "id": a.id,
+        "shift_id": a.shift_id,
+        "schedule_date": a.schedule_date,
+        "provider_name": a.provider_name,
+        "is_swapped": bool(a.is_swapped),
+        "swap_note": a.swap_note,
+        "is_unavailable": bool(a.is_unavailable),
+        "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+    }
+
+@app.get("/api/shiftmd/hospitals")
+def shiftmd_hospitals(
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    """List all hospitals with their shift catalog. Sort by hospital
+    creation order, shifts by sort_order within each hospital."""
+    hospitals = db.query(ShiftMDHospital).order_by(ShiftMDHospital.id.asc()).all()
+    shifts_by_hospital: dict[int, list[dict]] = {}
+    for s in db.query(ShiftMDShift).order_by(ShiftMDShift.sort_order.asc()).all():
+        shifts_by_hospital.setdefault(s.hospital_id, []).append(_shiftmd_serialize_shift(s))
+    return {
+        "hospitals": [
+            {
+                "id": h.id,
+                "name": h.name,
+                "color": h.color,
+                "shifts": shifts_by_hospital.get(h.id, []),
+            }
+            for h in hospitals
+        ],
+    }
+
+@app.get("/api/shiftmd/schedule")
+def shiftmd_schedule(
+    date: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    """Assignments for a given date, grouped by hospital. Both the
+    swap-original (is_swapped=True) and the replacement (is_swapped=False)
+    rows are returned — the UI renders the original strikethrough above
+    the new provider."""
+    _shiftmd_assert_date(date)
+    hospitals = db.query(ShiftMDHospital).order_by(ShiftMDHospital.id.asc()).all()
+    shifts = db.query(ShiftMDShift).order_by(ShiftMDShift.sort_order.asc()).all()
+    assignments = db.query(ShiftMDAssignment).filter(
+        ShiftMDAssignment.schedule_date == date
+    ).all()
+
+    assignments_by_shift: dict[int, list[dict]] = {}
+    for a in assignments:
+        assignments_by_shift.setdefault(a.shift_id, []).append(_shiftmd_serialize_assignment(a))
+    # Order each shift's assignments: swap-originals first (rendered
+    # strikethrough), then the active row.
+    for k in assignments_by_shift:
+        assignments_by_shift[k].sort(key=lambda a: (0 if a["is_swapped"] else 1, a["id"]))
+
+    return {
+        "date": date,
+        "hospitals": [
+            {
+                "id": h.id,
+                "name": h.name,
+                "color": h.color,
+                "shifts": [
+                    {
+                        **_shiftmd_serialize_shift(s),
+                        "assignments": assignments_by_shift.get(s.id, []),
+                    }
+                    for s in shifts if s.hospital_id == h.id
+                ],
+            }
+            for h in hospitals
+        ],
+    }
+
+@app.post("/api/shiftmd/assignment")
+def shiftmd_assignment_upsert(
+    body: ShiftMDAssignmentIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    """Create-or-update the active assignment for shift+date. Targets
+    the row with is_swapped=False — swap-originals are immutable from
+    this endpoint and only mutated by /swap."""
+    _shiftmd_assert_date(body.schedule_date)
+    shift = db.query(ShiftMDShift).filter(ShiftMDShift.id == body.shift_id).first()
+    if not shift:
+        raise HTTPException(status_code=404, detail="shift not found")
+    if not body.is_unavailable and not (body.provider_name and body.provider_name.strip()):
+        raise HTTPException(status_code=400, detail="provider_name required unless is_unavailable=true")
+    existing = db.query(ShiftMDAssignment).filter(
+        ShiftMDAssignment.shift_id == body.shift_id,
+        ShiftMDAssignment.schedule_date == body.schedule_date,
+        ShiftMDAssignment.is_swapped == False,  # noqa: E712
+    ).first()
+    if existing:
+        existing.provider_name = (body.provider_name or "").strip() or None
+        existing.is_unavailable = bool(body.is_unavailable)
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return _shiftmd_serialize_assignment(existing)
+    a = ShiftMDAssignment(
+        shift_id=body.shift_id,
+        schedule_date=body.schedule_date,
+        provider_name=(body.provider_name or "").strip() or None,
+        is_unavailable=bool(body.is_unavailable),
+        is_swapped=False,
+    )
+    db.add(a)
+    db.commit()
+    db.refresh(a)
+    return _shiftmd_serialize_assignment(a)
+
+@app.patch("/api/shiftmd/assignment/{assignment_id}/swap")
+def shiftmd_assignment_swap(
+    assignment_id: int,
+    body: ShiftMDSwapIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    """Mark the existing assignment as swapped (renders strikethrough)
+    and create a fresh active assignment with the replacement provider.
+    Idempotent against double-clicks: re-swapping a row already flagged
+    is_swapped=True returns the prior new-row instead of stacking."""
+    original = db.query(ShiftMDAssignment).filter(ShiftMDAssignment.id == assignment_id).first()
+    if not original:
+        raise HTTPException(status_code=404, detail="assignment not found")
+    new_name = (body.new_provider_name or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="new_provider_name required")
+    note = (body.swap_note or "").strip() or None
+    if not original.is_swapped:
+        original.is_swapped = True
+        original.swap_note = note
+        original.updated_at = datetime.utcnow()
+        # If a non-swapped active row already exists for this shift+date
+        # (the very assignment we just flagged), we still need to create
+        # a *new* active row for the replacement. There's a brief moment
+        # below where two rows share the (shift_id, date, is_swapped)
+        # tuple; commit the flag first so the unique-active invariant
+        # holds again as soon as the new row lands.
+        db.commit()
+    else:
+        # Already swapped — find the existing replacement so we don't
+        # create stacked duplicates on a double-click.
+        replacement = db.query(ShiftMDAssignment).filter(
+            ShiftMDAssignment.shift_id == original.shift_id,
+            ShiftMDAssignment.schedule_date == original.schedule_date,
+            ShiftMDAssignment.is_swapped == False,  # noqa: E712
+        ).first()
+        if replacement:
+            replacement.provider_name = new_name
+            replacement.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(replacement)
+            return {
+                "original": _shiftmd_serialize_assignment(original),
+                "replacement": _shiftmd_serialize_assignment(replacement),
+            }
+    replacement = ShiftMDAssignment(
+        shift_id=original.shift_id,
+        schedule_date=original.schedule_date,
+        provider_name=new_name,
+        is_swapped=False,
+        is_unavailable=False,
+    )
+    db.add(replacement)
+    db.commit()
+    db.refresh(original)
+    db.refresh(replacement)
+    return {
+        "original": _shiftmd_serialize_assignment(original),
+        "replacement": _shiftmd_serialize_assignment(replacement),
+    }
+
+@app.delete("/api/shiftmd/assignment/{assignment_id}")
+def shiftmd_assignment_delete(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    a = db.query(ShiftMDAssignment).filter(ShiftMDAssignment.id == assignment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="assignment not found")
+    db.delete(a)
+    db.commit()
+    return {"ok": True}
+
+@app.get("/api/shiftmd/providers")
+def shiftmd_providers(
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    rows = db.query(ShiftMDProvider).order_by(ShiftMDProvider.name.asc()).all()
+    return {
+        "providers": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "role": p.role,
+                "hospitals": list(p.hospitals or []),
+            }
+            for p in rows
+        ],
+    }
+
+@app.post("/api/shiftmd/providers")
+def shiftmd_provider_create(
+    body: ShiftMDProviderIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    name = (body.name or "").strip()
+    role = (body.role or "").strip().upper()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    if role not in _SHIFTMD_VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {sorted(_SHIFTMD_VALID_ROLES)}")
+    hospitals_clean = [h.strip() for h in (body.hospitals or []) if h and h.strip()]
+    existing = db.query(ShiftMDProvider).filter(ShiftMDProvider.name == name).first()
+    if existing:
+        existing.role = role
+        existing.hospitals = hospitals_clean
+        db.commit()
+        db.refresh(existing)
+        return {"id": existing.id, "name": existing.name, "role": existing.role, "hospitals": list(existing.hospitals or [])}
+    p = ShiftMDProvider(name=name, role=role, hospitals=hospitals_clean)
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return {"id": p.id, "name": p.name, "role": p.role, "hospitals": list(p.hospitals or [])}
+
+@app.get("/api/shiftmd/coverage-gaps")
+def shiftmd_coverage_gaps(
+    date: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    """Shifts on `date` with no active provider assignment, grouped by
+    hospital. "No active" = no row with is_swapped=False AND
+    provider_name IS NOT NULL AND is_unavailable=False. Both the missing-
+    row case and the explicitly-marked-unavailable case count as gaps."""
+    _shiftmd_assert_date(date)
+    hospitals = db.query(ShiftMDHospital).order_by(ShiftMDHospital.id.asc()).all()
+    shifts = db.query(ShiftMDShift).order_by(ShiftMDShift.sort_order.asc()).all()
+    active = db.query(ShiftMDAssignment).filter(
+        ShiftMDAssignment.schedule_date == date,
+        ShiftMDAssignment.is_swapped == False,  # noqa: E712
+    ).all()
+    filled_shift_ids = {
+        a.shift_id for a in active
+        if a.provider_name and not a.is_unavailable
+    }
+    out = []
+    for h in hospitals:
+        gaps = [
+            _shiftmd_serialize_shift(s)
+            for s in shifts
+            if s.hospital_id == h.id and s.id not in filled_shift_ids
+        ]
+        out.append({
+            "id": h.id, "name": h.name, "color": h.color,
+            "total_shifts": sum(1 for s in shifts if s.hospital_id == h.id),
+            "filled": sum(1 for s in shifts if s.hospital_id == h.id and s.id in filled_shift_ids),
+            "gaps": gaps,
+        })
+    return {"date": date, "hospitals": out, "total_gaps": sum(len(h["gaps"]) for h in out)}
+
+@app.post("/api/shiftmd/ai-insight")
+def shiftmd_ai_insight(
+    body: ShiftMDInsightIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    """Plain-text Claude analysis of the schedule. Pulls the requested
+    date plus the prior 4 days (so consecutive-day patterns are visible)
+    and asks for coverage gaps, back-to-back nights, and >3-consecutive-
+    days flags. Plain text — not JSON — so we bypass _extract_json and
+    call client.messages.create directly."""
+    _shiftmd_assert_date(body.date)
+    from datetime import date as _date, timedelta as _td
+    target = _date.fromisoformat(body.date)
+    window_start = target - _td(days=4)
+    window_dates = [(window_start + _td(days=i)).isoformat() for i in range(5)]
+
+    hospitals = {h.id: h for h in db.query(ShiftMDHospital).all()}
+    shifts = {s.id: s for s in db.query(ShiftMDShift).all()}
+    rows = db.query(ShiftMDAssignment).filter(
+        ShiftMDAssignment.schedule_date.in_(window_dates),
+        ShiftMDAssignment.is_swapped == False,  # noqa: E712
+    ).all()
+
+    # Group: date → list of {hospital, shift_name, shift_type, time, provider}
+    by_date: dict[str, list[dict]] = {d: [] for d in window_dates}
+    for a in rows:
+        s = shifts.get(a.shift_id)
+        if not s:
+            continue
+        h = hospitals.get(s.hospital_id)
+        by_date[a.schedule_date].append({
+            "hospital": h.name if h else "?",
+            "shift": s.name,
+            "type": s.shift_type,
+            "time": f"{s.start_time}-{s.end_time}",
+            "provider": "🚫 unavailable" if a.is_unavailable else (a.provider_name or "?"),
+        })
+
+    lines = [f"Schedule window: {window_dates[0]} → {window_dates[-1]} (focus: {body.date})", ""]
+    for d in window_dates:
+        marker = "  ← TODAY" if d == body.date else ""
+        lines.append(f"=== {d}{marker} ===")
+        if not by_date[d]:
+            lines.append("(no assignments recorded)")
+        for entry in by_date[d]:
+            lines.append(f"  [{entry['hospital']}] {entry['shift']} ({entry['type']}, {entry['time']}) → {entry['provider']}")
+        lines.append("")
+    schedule_text = "\n".join(lines)
+
+    system_prompt = (
+        "You analyze hospitalist shift schedules. Given a 5-day window of "
+        "assignments, identify operational risks and surface them as a brief, "
+        "scannable plain-text summary. Look for: (1) coverage gaps — shifts "
+        "with no provider, especially nights, (2) back-to-back night shifts "
+        "for the same provider, (3) any provider working more than 3 "
+        "consecutive days. Format: short paragraphs or bullets, no JSON, no "
+        "markdown headers, no preamble. Lead with the most urgent issue. If "
+        "the schedule is healthy, say so in one sentence."
+    )
+    try:
+        resp = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=1200,
+            system=system_prompt,
+            messages=[{"role": "user", "content": f"Analyze this schedule for {body.date}:\n\n{schedule_text}"}],
+        )
+        text = resp.content[0].text if resp.content else ""
+    except Exception as e:
+        print(f"shiftmd ai-insight error: {e}")
+        raise HTTPException(status_code=502, detail="AI analysis failed. Please retry.")
+    return {"date": body.date, "insight": text}
+
 
 _build = os.path.join(os.path.dirname(__file__), "build")
 if os.path.exists(_build):

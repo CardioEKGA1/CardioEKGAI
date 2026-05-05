@@ -8,11 +8,12 @@
 import React from 'react';
 
 interface Props {
-  active: 'dashboard' | 'meditations' | 'concierge' | 'marketing';
+  active: 'dashboard' | 'meditations' | 'concierge' | 'marketing' | 'shiftmd';
   onDashboard: () => void;
   onMeditations: () => void;
   onConcierge: () => void;
   onMarketing?: () => void;  // optional so existing callers don't break
+  onShiftMD?: () => void;    // optional — ShiftMD tab shown only when wired
   show?: boolean;
 }
 
@@ -23,7 +24,7 @@ const BORDER     = 'rgba(83,74,183,0.14)';
 const GOLD       = '#C9A84C';
 const GOLD_BG    = 'rgba(201,168,76,0.14)';
 
-const SuperuserTabNav: React.FC<Props> = ({ active, onDashboard, onMeditations, onConcierge, onMarketing, show = true }) => {
+const SuperuserTabNav: React.FC<Props> = ({ active, onDashboard, onMeditations, onConcierge, onMarketing, onShiftMD, show = true }) => {
   if (!show) return null;
   return (
     <nav style={{
@@ -34,6 +35,9 @@ const SuperuserTabNav: React.FC<Props> = ({ active, onDashboard, onMeditations, 
       <Tab label="Tools"       isActive={active === 'dashboard'}   onClick={onDashboard}/>
       <Tab label="Meditations" isActive={active === 'meditations'} onClick={onMeditations}/>
       <Tab label="Concierge"   isActive={active === 'concierge'}   onClick={onConcierge}/>
+      {onShiftMD && (
+        <Tab label="ShiftMD" isActive={active === 'shiftmd'} onClick={onShiftMD}/>
+      )}
       {onMarketing && (
         <Tab label="Marketing" isActive={active === 'marketing'} onClick={onMarketing} accent="gold"/>
       )}

@@ -696,6 +696,57 @@ class HipaaAuditLog(Base):
     user_agent = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+
+# ─── ShiftMD: hospital shift scheduler ────────────────────────────────
+# Three-hospital roster (IMED, AV, LDS) with day/swing/night/app/backup/
+# admin shift types. Assignments are date-keyed; swaps are non-destructive
+# (the original is kept and flagged is_swapped=True so the UI can render
+# it strikethrough above the new provider). schedule_date is stored as a
+# "YYYY-MM-DD" string for cross-DB simplicity (SQLite/Postgres) — the API
+# accepts and returns the same shape, so no parsing layer is needed.
+# Owner-gated: every endpoint sits behind verify_concierge_owner.
+class ShiftMDHospital(Base):
+    __tablename__ = "shiftmd_hospitals"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)   # IMED, AV, LDS
+    color = Column(String, nullable=False)                           # hex (#RRGGBB)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ShiftMDShift(Base):
+    __tablename__ = "shiftmd_shifts"
+    id = Column(Integer, primary_key=True, index=True)
+    hospital_id = Column(Integer, index=True, nullable=False)        # FK shiftmd_hospitals.id
+    name = Column(String, nullable=False)                            # "IMED Team 1", "AV NI", ...
+    shift_type = Column(String, nullable=False, index=True)          # day|swing|night|app|backup|admin
+    start_time = Column(String, nullable=False)                      # "HH:MM" 24-hour
+    end_time = Column(String, nullable=False)                        # "HH:MM" — midnight = "00:00"
+    sort_order = Column(Integer, default=0, index=True)              # render order within a hospital column
+
+class ShiftMDAssignment(Base):
+    __tablename__ = "shiftmd_assignments"
+    id = Column(Integer, primary_key=True, index=True)
+    shift_id = Column(Integer, index=True, nullable=False)           # FK shiftmd_shifts.id
+    schedule_date = Column(String, index=True, nullable=False)       # "YYYY-MM-DD"
+    provider_name = Column(String, nullable=True)                    # null when only marking unavailable
+    is_swapped = Column(Boolean, default=False)                      # True on the original after a swap
+    swap_note = Column(String, nullable=True)                        # free-text reason on the swap row
+    is_unavailable = Column(Boolean, default=False)                  # 🚫 marker, no provider
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class ShiftMDProvider(Base):
+    __tablename__ = "shiftmd_providers"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)   # LastnameInitials, e.g. "MillerJE"
+    role = Column(String, nullable=False)                            # MD|DO|APP|NP|PA
+    # JSON-of-strings instead of Postgres TEXT[] so the same model
+    # works against the SQLite fallback the test suite uses. Reads
+    # back as a Python list — empty list when not assigned to any
+    # hospital yet.
+    hospitals = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:
@@ -923,6 +974,79 @@ try:
         _s.close()
 except Exception as e:  # never let seed failure block boot
     print(f"Yogananda seed skipped: {e}")
+
+# Seed ShiftMD's hospital + shift catalog if empty. Idempotent — gated on
+# the hospitals table being empty so existing deploys don't double-seed.
+# Shifts are inserted with a global sort_order; the API filters by
+# hospital_id and orders by sort_order for stable column rendering.
+try:
+    _seed_db = SessionLocal()
+    if _seed_db.query(ShiftMDHospital).count() == 0:
+        imed = ShiftMDHospital(name="IMED", color="#4A9B9B")
+        av   = ShiftMDHospital(name="AV",   color="#4CAF72")
+        lds  = ShiftMDHospital(name="LDS",  color="#7B68C8")
+        _seed_db.add_all([imed, av, lds])
+        _seed_db.flush()  # populate ids before referencing them below
+
+        # Final shift times (after the two corrections in the spec):
+        #   day:    06:00–18:00  (default)
+        #   late:   09:00–21:00  (L1/L2/L)
+        #   LDS M:  08:00–20:00  (mid)
+        #   swing:  14–22 / 16–00  (IMED SW1/SW2/SW3)
+        #   night:  22:00–06:00  (all NI, Moonlight, Backup Night, APP NI)
+        #   admin:  07:00–17:00  (Admin of the Day)
+        SHIFTS = [
+            # IMED (sort_order ascending)
+            (imed.id, "IMED E1",                "day",    "06:00", "18:00"),
+            (imed.id, "IMED E2",                "day",    "06:00", "18:00"),
+            (imed.id, "IMED L1",                "day",    "09:00", "21:00"),
+            (imed.id, "IMED L2",                "day",    "09:00", "21:00"),
+            *[(imed.id, f"IMED Team {i}",       "day",    "06:00", "18:00") for i in range(1, 11)],
+            (imed.id, "IMED Team 11",           "day",    "06:00", "18:00"),  # spec calls this the day-side backup
+            (imed.id, "IMED SW1",               "swing",  "14:00", "22:00"),
+            (imed.id, "IMED SW2",               "swing",  "14:00", "22:00"),
+            (imed.id, "IMED SW3",               "swing",  "16:00", "00:00"),
+            (imed.id, "IMED NI 1",              "night",  "22:00", "06:00"),
+            (imed.id, "IMED NI 2",              "night",  "22:00", "06:00"),
+            (imed.id, "IMED APP A",             "app",    "06:00", "18:00"),
+            (imed.id, "IMED APP B",             "app",    "06:00", "18:00"),
+            (imed.id, "IMED APP NI",            "app",    "22:00", "06:00"),
+            (imed.id, "IMED APP Orienting",     "app",    "06:00", "18:00"),
+            (imed.id, "IMED APP NI Orienting",  "app",    "22:00", "06:00"),
+
+            # AV
+            (av.id,   "AV E",                   "day",    "06:00", "18:00"),
+            (av.id,   "AV L",                   "day",    "09:00", "21:00"),
+            (av.id,   "AV Team 1",              "day",    "06:00", "18:00"),
+            (av.id,   "AV Team 2",              "day",    "06:00", "18:00"),
+            (av.id,   "AV NI",                  "night",  "22:00", "06:00"),
+            (av.id,   "AV Moonlight",           "night",  "22:00", "06:00"),
+            (av.id,   "AV Orient 2",            "day",    "06:00", "18:00"),
+            (av.id,   "Backup Day 1",           "backup", "06:00", "18:00"),
+            (av.id,   "Backup Day 2",           "backup", "06:00", "18:00"),
+            (av.id,   "Backup Night",           "backup", "22:00", "06:00"),
+            (av.id,   "Admin of the Day",       "admin",  "07:00", "17:00"),
+
+            # LDS
+            (lds.id,  "LDS E",                  "day",    "06:00", "18:00"),
+            (lds.id,  "LDS L",                  "day",    "09:00", "21:00"),
+            (lds.id,  "LDS M",                  "day",    "08:00", "20:00"),
+            (lds.id,  "LDS Team 1",             "day",    "06:00", "18:00"),
+            (lds.id,  "LDS Team 2",             "day",    "06:00", "18:00"),
+            (lds.id,  "LDS Team 3",             "day",    "06:00", "18:00"),
+            (lds.id,  "LDS NI",                 "night",  "22:00", "06:00"),
+            (lds.id,  "LDS Moonlight",          "night",  "22:00", "06:00"),
+        ]
+        for idx, (h_id, name, stype, start, end) in enumerate(SHIFTS):
+            _seed_db.add(ShiftMDShift(
+                hospital_id=h_id, name=name, shift_type=stype,
+                start_time=start, end_time=end, sort_order=idx,
+            ))
+        _seed_db.commit()
+        print(f"Seeded ShiftMD: 3 hospitals + {len(SHIFTS)} shifts.")
+    _seed_db.close()
+except Exception as e:  # never let seed failure block boot
+    print(f"ShiftMD seed skipped: {e}")
 
 def get_db():
     db = SessionLocal()

@@ -28,6 +28,7 @@ import PatientLogin from './screens/PatientLogin';
 import PatientTerms from './screens/PatientTerms';
 import PatientIntake from './screens/PatientIntake';
 import MarketingAgent from './screens/MarketingAgent';
+import ShiftMD from './screens/ShiftMD';
 import MeditateApp from './screens/meditate/MeditateApp';
 import MeditationsLandingPage from './screens/public/MeditationsLandingPage';
 import ConciergeLandingPage from './screens/public/ConciergeLandingPage';
@@ -94,6 +95,7 @@ type Screen =
   | 'marketing_admin'
   | 'meditate'
   | 'dev_login'
+  | 'shiftmd'               // hospital shift scheduler at /shiftmd (superuser-only)
   | 'public_splash'         // soulmd.us "by invitation only" lockdown placeholder
   | 'not_found';
 
@@ -126,6 +128,7 @@ const pathToScreen = (path: string): Screen | null => {
         path === '/dev-login' ||
         path === '/concierge' || path.startsWith('/concierge/') ||
         path === '/concierge-medicine' ||
+        path === '/shiftmd' ||
         path.startsWith('/api/');
       if (!allowed) return 'public_splash';
     }
@@ -169,6 +172,7 @@ const pathToScreen = (path: string): Screen | null => {
   // shell renders MarketingAgent instead of the admin console.
   if (path === '/admin/marketing')   return 'marketing_admin';
   if (path === '/meditate')          return 'meditate';
+  if (path === '/shiftmd')           return 'shiftmd';
   if (path === '/dev-login')         return 'dev_login';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -207,6 +211,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'concierge_medicine')  return '/concierge-medicine';
   if (s === 'marketing_admin')     return '/admin/marketing';
   if (s === 'meditate')            return '/meditate';
+  if (s === 'shiftmd')             return '/shiftmd';
   if (s === 'dev_login')           return '/dev-login';
   // public_splash has no canonical path — it's the lockdown destination
   // for any URL not in the allowlist. Preserve whatever the user typed
@@ -440,6 +445,7 @@ const App: React.FC = () => {
       meditations_public:  'Guided Meditations · SoulMD',
       marketing_admin:     `Marketing Agent · ${brand}`,
       meditate:            'SoulMD Meditate',
+      shiftmd:             `ShiftMD · ${brand}`,
       dev_login:           `Dev Login · ${brand}`,
       public_splash:       'SoulMD — Concierge Medicine, By Invitation Only',
       not_found:           `Page not found · ${brand}`,
@@ -639,6 +645,20 @@ const App: React.FC = () => {
     if (!user.is_superuser) navigate('dashboard');
   }, [screen, user, token, navigate]);
 
+  // /shiftmd — hospital shift scheduler. Superuser-only. Same shape as
+  // /meditate above. Unauthed visitors are bounced to /dev-login (the
+  // only signed-in surface that's reachable during the public lockdown);
+  // signed-in non-superusers fall through to the public splash.
+  useEffect(() => {
+    if (screen !== 'shiftmd') return;
+    if (!token) { navigate('dev_login'); return; }
+    if (!user) return;
+    if (!user.is_superuser) {
+      try { window.history.replaceState({}, '', '/'); } catch {}
+      setScreen('public_splash');
+    }
+  }, [screen, user, token, navigate]);
+
   if (isAdminRoute) {
     return (
       <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
@@ -789,6 +809,17 @@ const App: React.FC = () => {
           API={API}
           token={token}
           onBack={() => navigate(isSoulMD ? 'dashboard' : 'landing')}
+        />
+      )}
+      {screen==='shiftmd' && user && user.is_superuser && (
+        <ShiftMD
+          API={API}
+          token={token}
+          onBack={() => navigate('concierge')}
+          onNavigateDashboard={() => navigate('dashboard')}
+          onNavigateMeditations={() => navigate('meditations_library')}
+          onNavigateConciergeAccess={() => navigate('concierge_access')}
+          onNavigateMarketing={() => navigate('marketing_admin')}
         />
       )}
       {screen==='dev_login' && <DevLogin API={API} onAuth={handleAuth}/>}
