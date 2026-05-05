@@ -501,11 +501,11 @@ class CheckoutRequest(BaseModel):
 class AccountDeletion(BaseModel):
     confirm: bool = False
 
-TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "labread", "cliniscore", "suite"}
+TOOL_SLUGS = {"ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "anticoag", "labread", "cliniscore", "suite"}
 
 # Pricing tiers: $9.99/mo standard, $24.99/mo premium.
 BASIC_TOOLS   = ("ekgscan", "nephroai", "rxcheck", "antibioticai")
-PREMIUM_TOOLS = ("clinicalnote", "cerebralai", "xrayread", "palliativemd")
+PREMIUM_TOOLS = ("clinicalnote", "cerebralai", "xrayread", "palliativemd", "anticoag")
 
 # Tools with a free-tier daily allowance (usage-metered, not gated by subscription).
 # Resets at UTC midnight. Paid subscribers + suite + superusers are unlimited.
@@ -586,6 +586,7 @@ PRICE_PER_MONTH = {
     ("cerebralai",   "monthly"): 24.99, ("cerebralai",   "yearly"): 179.99 / 12,
     ("xrayread",     "monthly"): 24.99, ("xrayread",     "yearly"): 179.99 / 12,
     ("palliativemd", "monthly"): 24.99, ("palliativemd", "yearly"): 179.99 / 12,
+    ("anticoag",     "monthly"): 24.99, ("anticoag",     "yearly"): 179.99 / 12,
     # Suite — $111.11/mo · $999.99/yr
     ("suite",           "monthly"): 111.11, ("suite",           "yearly"): 999.99 / 12,
 }
@@ -624,6 +625,7 @@ def gate_tool(user, tool_slug: str, db: Session, cost: float):
 TRIAL_ELIGIBLE_TOOLS = {
     "ekgscan", "nephroai", "xrayread", "rxcheck",
     "antibioticai", "clinicalnote", "cerebralai", "palliativemd",
+    "anticoag",
 }
 
 def _client_fingerprint(request: Request) -> str:
@@ -2347,6 +2349,389 @@ def palliativemd_analyze(request: Request, data: PalliativeRequest, current_user
         save_case(current_user.id, "palliativemd", f"{ct.replace('_',' ')} · {(data.text or '')[:50]}", data.dict(exclude_none=True), result, db)
     return {**result, "_trial_mode": mode == "trial"}
 
+# ─── AnticoagAI ───────────────────────────────────────────────────────────────
+# Evidence-based anticoagulation decision support. Pure-Python scoring +
+# rules engine produce the structured recommendation; Claude Sonnet then
+# writes a 3-4 sentence physician-facing narrative around it.
+# Cases save to ClinicalCase via save_case (tool_slug='anticoag') so they
+# show up in the unified Recent Cases / 90-day TTL pipeline alongside
+# every other tool.
+
+class AnticoagInput(BaseModel):
+    age: int
+    sex: str                                  # "M" | "F"
+    weight_kg: float | None = None
+    creatinine: float | None = None
+    platelets: int | None = None
+    inr: float | None = None
+    indications: list[str] = []
+    chads_factors: list[str] = []
+    bleed_factors: list[str] = []
+    medications: list[str] = []
+    conditions: list[str] = []
+
+# CHA2DS2-VASc → annual ischemic stroke %, untreated. Olesen et al, BMJ 2011 / 2012 update.
+_ANTICOAG_STROKE_PCT = {
+    0: 0.2, 1: 0.6, 2: 2.2, 3: 3.2, 4: 4.8, 5: 7.2, 6: 9.7, 7: 11.2, 8: 10.8, 9: 12.2,
+}
+# HAS-BLED → annual major bleed %. Pisters et al, Chest 2010.
+_ANTICOAG_BLEED_PCT = {
+    0: 1.13, 1: 1.02, 2: 1.88, 3: 3.74, 4: 8.70, 5: 12.50, 6: 12.50, 7: 12.50, 8: 12.50, 9: 12.50,
+}
+
+def _anticoag_chads_vasc(age: int, sex: str, factors: list[str]) -> int:
+    """factors: subset of {chf, htn, dm, vasc, stroke_tia, female}.
+    Stroke/TIA counts as 2; age 65-74 counts as 1; age ≥75 counts as 2."""
+    s = 0
+    f = set(factors or [])
+    if "chf" in f: s += 1
+    if "htn" in f: s += 1
+    if (age or 0) >= 75: s += 2
+    elif (age or 0) >= 65: s += 1
+    if "dm" in f: s += 1
+    if "stroke_tia" in f: s += 2
+    if "vasc" in f: s += 1
+    if (sex or "").upper() == "F": s += 1
+    return s
+
+def _anticoag_has_bled(age: int, factors: list[str], inr: float | None) -> int:
+    """factors: subset of {htn, renal, hepatic, stroke, bleed_history,
+    elderly, drugs, alcohol, labile_inr}. Age >65 counts as 1; if INR is
+    erratic the labile_inr factor adds 1."""
+    s = 0
+    f = set(factors or [])
+    if "htn" in f: s += 1
+    if "renal" in f: s += 1
+    if "hepatic" in f: s += 1
+    if "stroke" in f: s += 1
+    if "bleed_history" in f: s += 1
+    if "labile_inr" in f or (inr is not None and (inr < 1.5 or inr > 4.0)): s += 1
+    if (age or 0) > 65 or "elderly" in f: s += 1
+    if "drugs" in f: s += 1
+    if "alcohol" in f: s += 1
+    return s
+
+def _anticoag_orbit(age: int, factors: list[str], hb_low: bool = False) -> int:
+    """ORBIT: age ≥75 (1), reduced Hgb/Hct (2), bleed history (2), GFR<60 (1),
+    on antiplatelet (1). We surface this from the bleed_factors selection +
+    age; the UI lets users tag 'low_hgb', 'bleed_history', 'low_gfr',
+    'antiplatelet'."""
+    s = 0
+    f = set(factors or [])
+    if (age or 0) >= 75: s += 1
+    if "low_hgb" in f or hb_low: s += 2
+    if "bleed_history" in f: s += 2
+    if "low_gfr" in f: s += 1
+    if "antiplatelet" in f: s += 1
+    return s
+
+def _anticoag_stroke_label(score: int) -> str:
+    if score <= 1: return "Low"
+    if score == 2: return "Moderate"
+    return "High"
+
+def _anticoag_bleed_label(score: int) -> str:
+    if score <= 1: return "Low"
+    if score == 2: return "Moderate"
+    return "High"
+
+def _anticoag_creatinine_clearance(age: int, sex: str, weight_kg: float | None, creatinine: float | None) -> float | None:
+    """Cockcroft-Gault. Returns mL/min, or None if inputs missing."""
+    if not creatinine or creatinine <= 0 or not weight_kg or weight_kg <= 0 or not age:
+        return None
+    crcl = ((140 - age) * weight_kg) / (72 * creatinine)
+    if (sex or "").upper() == "F":
+        crcl *= 0.85
+    return round(crcl, 1)
+
+def _anticoag_rules(data: AnticoagInput, scores: dict) -> dict:
+    """Returns {primary_action, primary_text, warnings[], suggested_agents[],
+    contraindications[], monitoring_parameters[], references[]}.
+    Soft warnings throughout; the only hard "avoid" outcomes are listed
+    contraindications. Order of evaluation matters — earlier overrides win."""
+    indications = set(data.indications or [])
+    conditions = set(data.conditions or [])
+    meds = set(data.medications or [])
+    chads = scores["chads_vasc"]
+    has_bled = scores["has_bled"]
+    crcl = scores.get("crcl")
+    plt = data.platelets
+    cr = data.creatinine
+
+    warnings: list[dict] = []
+    contraindications: list[str] = []
+    monitoring: list[str] = []
+    refs: list[str] = []
+    agents: list[dict] = []
+
+    primary_action = "neutral"
+    primary_text = ""
+
+    # ─── Hard contraindications ─────────────────────────────────────
+    if "cns_bleed" in conditions:
+        primary_action = "avoid"
+        primary_text = "Hold all anticoagulation. Active CNS bleed is an absolute contraindication. Reverse if recently dosed (idarucizumab for dabigatran, andexanet alfa for factor Xa inhibitors, 4F-PCC for warfarin) and obtain neurosurgical input."
+        contraindications.append("Active CNS hemorrhage — absolute contraindication.")
+        refs += ["AHA/ASA 2022 ICH guideline", "ACC ECDP 2020 — anticoagulant reversal"]
+        return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+    if "dic" in conditions:
+        primary_action = "avoid"
+        primary_text = "Disseminated intravascular coagulation: treat the underlying trigger first. Per ISTH 2018, therapeutic anticoagulation is reserved for thrombotic phenotype DIC; avoid empiric anticoagulation in bleeding-phenotype DIC."
+        contraindications.append("DIC without thrombotic phenotype — treat cause; ISTH guidance.")
+        refs += ["ISTH 2018 DIC Guidance"]
+        return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+    if plt is not None and plt < 50:
+        primary_action = "avoid"
+        primary_text = f"Severe thrombocytopenia (platelets {plt}). Anticoagulation contraindicated until platelet count > 50 ×10⁹/L; reassess after hematology input."
+        contraindications.append(f"Platelets {plt} ×10⁹/L — below 50 cutoff.")
+        refs += ["ASH 2018 thrombocytopenia VTE guidance"]
+        return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+    # ─── Special protocols ─────────────────────────────────────────
+    if "hit" in conditions:
+        primary_action = "caution"
+        primary_text = "Heparin-induced thrombocytopenia: switch to a non-heparin anticoagulant immediately. Avoid all heparin (UFH/LMWH/flushes); confirm with serotonin release assay if 4Ts ≥ 4."
+        agents += [
+            {"name": "Argatroban", "dosing": "2 mcg/kg/min IV (0.5 if hepatic dysfunction); titrate aPTT 1.5-3×", "notes": "Preferred in hepatic dysfunction with caution; bridge to warfarin once platelets > 150.", "trial_support": "ASH 2018 HIT guideline"},
+            {"name": "Bivalirudin", "dosing": "0.15 mg/kg/h IV; titrate aPTT", "notes": "Preferred in renal dysfunction; shorter half-life than argatroban.", "trial_support": "ASH 2018 HIT guideline"},
+            {"name": "Fondaparinux", "dosing": "7.5 mg SC daily (5 mg if <50 kg, 10 mg if >100 kg)", "notes": "Off-label but supported in subacute HIT once platelets recovering.", "trial_support": "Lobo NEJM 2008"},
+        ]
+        contraindications.append("All heparin products (UFH, LMWH, heparin flushes).")
+        monitoring += ["Daily platelet count until > 150 ×10⁹/L for 2 days", "aPTT q6h until therapeutic"]
+        refs += ["ASH 2018 — HIT", "Linkins et al, Chest 2012"]
+        return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+    if "pregnancy" in conditions:
+        primary_action = "caution"
+        primary_text = "Pregnancy: LMWH is the agent of choice. DOACs and warfarin (especially in T1) are contraindicated due to teratogenicity and placental crossing."
+        agents += [
+            {"name": "Enoxaparin", "dosing": "1 mg/kg SC q12h (treatment) or 40 mg SC daily (prophylaxis); adjust for weight gain trimesterally", "notes": "Agent of choice. Hold 24h before delivery.", "trial_support": "ACOG Practice Bulletin 196"},
+            {"name": "Dalteparin", "dosing": "200 IU/kg SC daily (treatment) or 5000 IU SC daily (prophylaxis)", "notes": "Equivalent efficacy to enoxaparin in pregnancy.", "trial_support": "ACOG Practice Bulletin 196"},
+        ]
+        contraindications += ["Warfarin (especially weeks 6-12)", "All DOACs — insufficient pregnancy safety data"]
+        monitoring += ["Anti-Xa level if extremes of weight or renal dysfunction", "Hold 24h pre-delivery; resume 12-24h post-delivery"]
+        refs += ["ACOG Practice Bulletin 196", "ACCP CHEST 2012"]
+        return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+    if "mech_valve" in indications:
+        primary_action = "anticoagulate"
+        primary_text = "Mechanical heart valve: warfarin is the only validated agent. RE-ALIGN demonstrated harm with dabigatran versus warfarin (more thrombosis AND bleeding). DOACs are contraindicated for mechanical valves."
+        agents += [
+            {"name": "Warfarin", "dosing": "Target INR 2.5–3.5 for mechanical mitral or older-generation aortic; 2.0–3.0 for current bileaflet aortic. Bridge with UFH/LMWH at initiation.", "notes": "Tighter INR control reduces both thromboembolic and bleeding events.", "trial_support": "RE-ALIGN (Eikelboom NEJM 2013)"},
+        ]
+        contraindications += ["Dabigatran (RE-ALIGN: harm vs warfarin)", "Apixaban / rivaroxaban / edoxaban (no validated trial data)"]
+        monitoring += ["Weekly INR until stable, then monthly", "Aspirin 75-100 mg daily concomitantly per ACC/AHA 2020 valve guideline"]
+        refs += ["RE-ALIGN — Eikelboom NEJM 2013", "ACC/AHA 2020 valve guideline"]
+        return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+    if "aps" in indications:
+        primary_action = "anticoagulate"
+        primary_text = "Antiphospholipid syndrome: warfarin remains preferred. TRAPS demonstrated rivaroxaban inferiority (more thromboembolic events) in triple-positive APS, and ESC/EULAR 2019 broadens that recommendation across high-risk APS."
+        agents += [
+            {"name": "Warfarin", "dosing": "INR target 2.0–3.0 for venous thrombosis; 3.0–4.0 considered for arterial or recurrent events", "notes": "Standard of care. DOACs only if warfarin truly intolerable AND single-positive low-risk APS.", "trial_support": "TRAPS (Pengo Blood 2018)"},
+        ]
+        contraindications += ["Rivaroxaban in triple-positive APS (TRAPS)"]
+        monitoring += ["INR weekly until stable, then monthly", "Repeat aPL panel at 12 weeks if persistently positive"]
+        refs += ["TRAPS — Pengo Blood 2018", "EULAR 2019 APS recommendations"]
+        return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+    # ─── Cancer-associated VTE ─────────────────────────────────────
+    if "active_cancer" in conditions and "dvt_pe" in indications:
+        primary_action = "anticoagulate"
+        primary_text = "Cancer-associated VTE: rivaroxaban or edoxaban are first-line per Caravaggio and Hokusai-VTE Cancer. LMWH is preferred for GI/GU malignancies given DOAC bleeding signal in those primaries."
+        gi_gu = "gi_gu_cancer" in conditions
+        if gi_gu:
+            agents += [
+                {"name": "Enoxaparin (LMWH)", "dosing": "1 mg/kg SC q12h × 6 months minimum", "notes": "Preferred over DOAC for GI/GU primaries (Hokusai-VTE Cancer subgroup signal).", "trial_support": "CLOT — Lee NEJM 2003"},
+            ]
+        else:
+            agents += [
+                {"name": "Rivaroxaban", "dosing": "15 mg PO BID × 21 days, then 20 mg PO daily × 6 months minimum", "notes": "First-line for non-GI/GU cancer VTE; oral convenience.", "trial_support": "Caravaggio (Agnelli NEJM 2020)"},
+                {"name": "Edoxaban", "dosing": "60 mg PO daily after ≥5 days parenteral lead-in", "notes": "Equivalent efficacy; signal for major bleeding in GI cancer.", "trial_support": "Hokusai-VTE Cancer (Raskob NEJM 2018)"},
+                {"name": "Apixaban", "dosing": "10 mg PO BID × 7 days, then 5 mg PO BID × 6 months minimum", "notes": "Caravaggio: non-inferior to LMWH, lower major bleeding.", "trial_support": "Caravaggio (Agnelli NEJM 2020)"},
+            ]
+        monitoring += ["Reassess at 3-6 months for indefinite anticoagulation", "Recurrence risk remains elevated while cancer active"]
+        refs += ["Caravaggio — Agnelli NEJM 2020", "Hokusai-VTE Cancer — Raskob NEJM 2018", "ASCO 2020 VTE guideline"]
+
+    # ─── AFib ──────────────────────────────────────────────────────
+    if "afib" in indications:
+        male = (data.sex or "").upper() == "M"
+        threshold = 2 if male else 3
+        low_threshold = 1 if male else 2
+        if chads <= low_threshold:
+            primary_action = "neutral"
+            primary_text = f"Low stroke risk (CHA₂DS₂-VASc {chads} in {'male' if male else 'female'}). Discuss benefits vs bleeding risk with patient; routine anticoagulation not indicated. Reassess if risk factors change."
+        else:
+            primary_action = "anticoagulate"
+            primary_text = f"Anticoagulate. CHA₂DS₂-VASc {chads} in {'male' if male else 'female'} (≥{threshold}) gives an estimated annual stroke risk of {scores['annual_stroke_pct']}%, which exceeds bleeding risk for almost all patients."
+            ckd_severe = ("ckd4" in conditions) or ("ckd5" in conditions) or (cr is not None and cr > 2.5)
+            if ckd_severe:
+                agents.append({
+                    "name": "Apixaban",
+                    "dosing": "5 mg PO BID; reduce to 2.5 mg BID if any 2 of: age ≥80, weight ≤60 kg, creatinine ≥1.5",
+                    "notes": "Preferred in CKD4/5 and ESRD per RENAL-AF and FDA labeling. Lowest renal clearance among DOACs (~25%).",
+                    "trial_support": "RENAL-AF (Pokorney Circulation 2022)",
+                })
+                monitoring += ["Recheck CrCl every 3-6 months", "Avoid dabigatran/edoxaban entirely in CKD4-5"]
+            else:
+                agents += [
+                    {"name": "Apixaban", "dosing": "5 mg PO BID; 2.5 mg BID if any 2 of (age ≥80, weight ≤60 kg, creatinine ≥1.5)", "notes": "First-line. Lowest GI bleeding among DOACs.", "trial_support": "ARISTOTLE (Granger NEJM 2011)"},
+                    {"name": "Rivaroxaban", "dosing": "20 mg PO daily with food; 15 mg if CrCl 15-50", "notes": "Once-daily convenience. Higher GI bleed than apixaban.", "trial_support": "ROCKET-AF (Patel NEJM 2011)"},
+                    {"name": "Dabigatran", "dosing": "150 mg PO BID; 75 mg BID if CrCl 15-30 or age ≥80 with bleeding risk", "notes": "Reversible with idarucizumab. Avoid CrCl <15.", "trial_support": "RE-LY (Connolly NEJM 2009)"},
+                    {"name": "Edoxaban", "dosing": "60 mg PO daily; 30 mg if CrCl 15-50 or weight ≤60 kg", "notes": "Inferior in CrCl > 95 — check labeling.", "trial_support": "ENGAGE AF-TIMI 48 (Giugliano NEJM 2013)"},
+                ]
+            monitoring += ["Annual creatinine + LFTs at minimum", "Adherence — DOAC half-lives are 9-14h; missed doses lose protection rapidly"]
+            refs += ["ARISTOTLE NEJM 2011", "ROCKET-AF NEJM 2011", "RE-LY NEJM 2009", "ENGAGE AF-TIMI 48 NEJM 2013", "AHA/ACC/HRS 2023 AF guideline"]
+
+    # ─── DVT / PE (non-cancer) ─────────────────────────────────────
+    if "dvt_pe" in indications and "active_cancer" not in conditions:
+        primary_action = "anticoagulate" if primary_action == "neutral" else primary_action
+        if not primary_text:
+            primary_text = "Acute VTE: single-drug DOAC therapy is first-line. Rivaroxaban and apixaban have validated single-drug protocols (no parenteral lead-in needed)."
+        agents += [
+            {"name": "Apixaban", "dosing": "10 mg PO BID × 7 days, then 5 mg PO BID × 3-6 months", "notes": "AMPLIFY: lower major bleeding vs LMWH→warfarin.", "trial_support": "AMPLIFY (Agnelli NEJM 2013)"},
+            {"name": "Rivaroxaban", "dosing": "15 mg PO BID × 21 days, then 20 mg PO daily × 3-6 months", "notes": "EINSTEIN-DVT/PE: single-drug, oral start.", "trial_support": "EINSTEIN-DVT (Bauer NEJM 2010)"},
+        ]
+        refs += ["AMPLIFY NEJM 2013", "EINSTEIN-DVT/PE NEJM 2010/2012", "CHEST 2021 antithrombotic VTE guideline"]
+
+    # ─── Drug interactions ─────────────────────────────────────────
+    on_doac = any(m in meds for m in ("apixaban","rivaroxaban","dabigatran","edoxaban","doac"))
+    if "amiodarone" in meds and ("warfarin" in meds or on_doac):
+        warnings.append({"type": "DRUG_INTERACTION", "severity": "moderate", "text": "Amiodarone: CYP2C9 + P-gp inhibition. Reduces warfarin clearance (~40% INR rise) and elevates DOAC exposure. Halve warfarin starting dose; monitor INR weekly × 4 weeks. For DOAC, consider apixaban dose reduction."})
+        monitoring.append("Weekly INR × 4 if amiodarone added or stopped while on warfarin")
+    if "rifampin" in meds or "phenytoin" in meds or "carbamazepine" in meds:
+        warnings.append({"type": "DRUG_INTERACTION", "severity": "high", "text": "Strong P-gp / CYP3A4 inducer (rifampin/phenytoin/carbamazepine): DOAC plasma levels drop 50-70%. Avoid DOACs; warfarin dose must be increased substantially."})
+        contraindications.append("DOACs while on rifampin/phenytoin/carbamazepine")
+    if any(m in meds for m in ("ketoconazole","itraconazole","voriconazole","posaconazole","antifungal")):
+        warnings.append({"type": "DRUG_INTERACTION", "severity": "high", "text": "Strong CYP3A4 / P-gp inhibitor (azole antifungal): DOAC exposure can double. Avoid rivaroxaban/dabigatran; switch to apixaban with dose reduction or warfarin."})
+    triple_components = sum([
+        any(m in meds for m in ("aspirin","asa")),
+        any(m in meds for m in ("clopidogrel","ticagrelor","prasugrel","p2y12")),
+        ("warfarin" in meds or on_doac),
+    ])
+    if triple_components >= 3:
+        warnings.append({"type": "TRIPLE_THERAPY", "severity": "high", "text": "Triple antithrombotic therapy (anticoagulant + ASA + P2Y12) carries a 3-4× major bleeding risk. Per AUGUSTUS / ENTRUST AF-PCI, drop ASA at 1-4 weeks post-PCI and continue dual therapy (DOAC + P2Y12) for 12 months."})
+        refs += ["AUGUSTUS NEJM 2019", "ENTRUST AF-PCI Lancet 2019"]
+    if "ssri" in meds or any(m in meds for m in ("sertraline","fluoxetine","paroxetine","citalopram","escitalopram","ssri")):
+        warnings.append({"type": "BLEED_ADDITIVE", "severity": "low", "text": "SSRI: ~2× GI bleeding risk when combined with anticoagulant. Add a PPI for prophylaxis if no contraindication."})
+        monitoring.append("Add PPI for GI prophylaxis when SSRI + anticoagulant")
+
+    # ─── Renal dosing flags ────────────────────────────────────────
+    severe_renal = ("ckd4" in conditions) or ("ckd5" in conditions) or (cr is not None and cr > 2.5) or (crcl is not None and crcl < 30)
+    if severe_renal:
+        warnings.append({"type": "RENAL_DOSING", "severity": "high", "text": "Severe renal impairment (CrCl < 30 / CKD4-5). Avoid dabigatran (80% renal) and edoxaban. Apixaban is the only DOAC supported in ESRD."})
+    elif cr is not None and cr > 1.5:
+        warnings.append({"type": "RENAL_DOSING", "severity": "moderate", "text": "Renal impairment (creatinine > 1.5). Reduce rivaroxaban to 15 mg daily and edoxaban to 30 mg daily; recheck renal function q3-6 months."})
+
+    # ─── Cirrhosis ────────────────────────────────────────────────
+    if "cirrhosis" in conditions:
+        warnings.append({"type": "HEPATIC", "severity": "moderate", "text": "Cirrhosis: warfarin INR is unreliable. Avoid rivaroxaban in Child-Pugh C (high exposure). Apixaban preferred in Child-Pugh A-B. Hepatology / hematology consult recommended."})
+        monitoring.append("Hepatology consult if Child-Pugh B or C")
+        refs += ["ISTH 2020 — anticoagulation in cirrhosis"]
+
+    if not primary_text:
+        primary_action = "neutral"
+        primary_text = "No specific anticoagulation indication selected. Review the patient's stroke and bleeding profile alongside guidelines for the underlying clinical context."
+
+    monitoring = list(dict.fromkeys(monitoring))
+    refs = list(dict.fromkeys(refs))
+    return _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs)
+
+def _anticoag_pack(primary_action, primary_text, warnings, agents, contraindications, monitoring, refs) -> dict:
+    return {
+        "primary_action": primary_action,
+        "primary_text": primary_text,
+        "warnings": warnings,
+        "suggested_agents": agents,
+        "contraindications": contraindications,
+        "monitoring_parameters": monitoring,
+        "references": refs,
+    }
+
+@app.post("/tools/anticoag/analyze")
+@limiter.limit("10/minute")
+def anticoag_analyze(
+    request: Request,
+    data: AnticoagInput,
+    current_user: User | None = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    mode = gate_tool_with_trial(current_user, "anticoag", request, db)
+
+    chads = _anticoag_chads_vasc(data.age, data.sex, data.chads_factors)
+    has_bled = _anticoag_has_bled(data.age, data.bleed_factors, data.inr)
+    orbit = _anticoag_orbit(data.age, data.bleed_factors)
+    crcl = _anticoag_creatinine_clearance(data.age, data.sex, data.weight_kg, data.creatinine)
+    scores = {
+        "chads_vasc": chads,
+        "has_bled": has_bled,
+        "orbit": orbit,
+        "annual_stroke_pct": _ANTICOAG_STROKE_PCT.get(min(chads, 9), 12.2),
+        "annual_bleed_pct": _ANTICOAG_BLEED_PCT.get(min(has_bled, 9), 12.5),
+        "stroke_risk_label": _anticoag_stroke_label(chads),
+        "bleed_risk_label": _anticoag_bleed_label(has_bled),
+        "crcl": crcl,
+    }
+
+    recommendation = _anticoag_rules(data, scores)
+
+    # Claude Sonnet narrative — 3-4 sentence physician-facing summary.
+    # Falls back to a templated string on API failure so we never break
+    # the response for the user.
+    try:
+        warnings_summary = "; ".join(w.get("text","")[:120] for w in recommendation["warnings"][:3]) or "no major warnings"
+        sys_prompt = (
+            "You are AnticoagAI, a clinical decision support tool embedded in SoulMD. "
+            "You are assisting a board-certified physician. Respond in 3-4 sentences of "
+            "clinical narrative summarizing the anticoagulation recommendation for this "
+            "patient. Be specific, cite the key trial or guideline, and mention the most "
+            "important monitoring parameter. Do not use bullet points. Speak to the "
+            "physician directly."
+        )
+        user_prompt = (
+            f"Patient: {data.age}y {data.sex}, CrCl ~{crcl}, platelets {data.platelets}.\n"
+            f"Indication: {', '.join(data.indications) or 'none specified'}. "
+            f"CHA2DS2-VASc: {chads}. HAS-BLED: {has_bled}. ORBIT: {orbit}.\n"
+            f"Active conditions: {', '.join(data.conditions) or 'none'}. "
+            f"Current medications: {', '.join(data.medications) or 'none'}.\n"
+            f"Rules engine recommendation: {recommendation['primary_action']} — "
+            f"{recommendation['primary_text']}\n"
+            f"Key warnings: {warnings_summary}."
+        )
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=600,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        narrative = resp.content[0].text if resp.content else ""
+    except Exception as e:
+        print(f"anticoag narrative error: {e}")
+        narrative = (
+            f"{recommendation['primary_text']} "
+            f"This summary was generated from the structured rules above; "
+            f"the AI narrative service was unavailable for this request."
+        )
+
+    log_usage(current_user, "anticoag", COST_PER_SCAN, db)
+    case_id = None
+    if current_user and mode != "trial":
+        title_ind = next(iter(data.indications), "anticoag case")
+        title = f"{data.age}{(data.sex or '?').lower()} · {title_ind} · {recommendation['primary_action']}"
+        save_case(current_user.id, "anticoag", title[:80],
+                  data.dict(exclude_none=True),
+                  {"scores": scores, "recommendation": recommendation, "ai_narrative": narrative}, db)
+
+    return {
+        "scores": scores,
+        "recommendation": recommendation,
+        "ai_narrative": narrative,
+        "case_id": case_id,
+        "_trial_mode": mode == "trial",
+    }
+
 # ─── LabRead ──────────────────────────────────────────────────────────────────
 
 @app.post("/tools/labread/extract")
@@ -2546,7 +2931,7 @@ def tools_access(current_user: User = Depends(get_current_user), db: Session = D
     """Returns the user's tool entitlements + monthly budget + overage."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Sign in required")
-    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "labread", "cliniscore"]
+    tools = ["ekgscan", "nephroai", "xrayread", "rxcheck", "antibioticai", "clinicalnote", "cerebralai", "palliativemd", "anticoag", "labread", "cliniscore"]
     access = {t: has_tool_access(current_user, t, db) for t in tools}
     # Per-tool free-tier daily remaining counts (null if tool has no free-tier or user is unlimited)
     free_tier = {t: free_tier_remaining(current_user, t, db) for t in tools}
@@ -2775,6 +3160,8 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         ("STRIPE_PRICE_XRAYREAD_YEARLY",      17999,  "XrayRead · yearly"),
         ("STRIPE_PRICE_PALLIATIVEMD_MONTHLY", 2499,   "PalliativeMD · monthly"),
         ("STRIPE_PRICE_PALLIATIVEMD_YEARLY",  17999,  "PalliativeMD · yearly"),
+        ("STRIPE_PRICE_ANTICOAG_MONTHLY",     2499,   "AnticoagAI · monthly"),
+        ("STRIPE_PRICE_ANTICOAG_YEARLY",      17999,  "AnticoagAI · yearly"),
         # Suite
         ("STRIPE_PRICE_SUITE_MONTHLY",        11111,  "Suite · monthly"),
         ("STRIPE_PRICE_SUITE_YEARLY",         99999,  "Suite · yearly"),
@@ -3240,6 +3627,7 @@ def admin_billing_validate(_: bool = Depends(verify_admin)):
         ("cerebralai",   "monthly",  2499), ("cerebralai",   "yearly", 17999),
         ("xrayread",     "monthly",  2499), ("xrayread",     "yearly", 17999),
         ("palliativemd", "monthly",  2499), ("palliativemd", "yearly", 17999),
+        ("anticoag",     "monthly",  2499), ("anticoag",     "yearly", 17999),
         # Suite
         ("suite",        "monthly",  8888), ("suite",        "yearly", 88800),
         # LabRead / CliniScore intentionally absent: free (5/day) + Suite-included.

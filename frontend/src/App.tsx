@@ -21,6 +21,7 @@ import ClinicalNoteTool from './screens/tools/ClinicalNoteTool';
 import XrayReadTool from './screens/tools/XrayReadTool';
 import CerebralAITool from './screens/tools/CerebralAITool';
 import PalliativeMDTool from './screens/tools/PalliativeMDTool';
+import AnticoagAI from './screens/tools/AnticoagAI';
 import LabReadTool from './screens/tools/LabReadTool';
 import CliniScoreTool from './screens/tools/CliniScoreTool';
 import Concierge from './screens/concierge/Concierge';
@@ -85,7 +86,7 @@ type Screen =
   | 'landing' | 'auth' | 'upload' | 'results' | 'chat' | 'paywall'
   | 'terms' | 'privacy' | 'dashboard'
   | 'tool_nephroai' | 'tool_rxcheck' | 'tool_antibioticai' | 'tool_clinicalnote'
-  | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd'
+  | 'tool_xrayread' | 'tool_cerebralai' | 'tool_palliativemd' | 'tool_anticoag'
   | 'tool_labread' | 'tool_cliniscore'
   | 'concierge'
   | 'meditations_library' | 'concierge_access'
@@ -196,7 +197,7 @@ const pathToScreen = (path: string): Screen | null => {
     const candidate = `tool_${slug}` as Screen;
     const valid: Screen[] = [
       'tool_nephroai','tool_rxcheck','tool_antibioticai','tool_clinicalnote',
-      'tool_xrayread','tool_cerebralai','tool_palliativemd',
+      'tool_xrayread','tool_cerebralai','tool_palliativemd','tool_anticoag',
       'tool_labread','tool_cliniscore',
     ];
     if (valid.includes(candidate)) return candidate;
@@ -477,6 +478,7 @@ const App: React.FC = () => {
       tool_xrayread:     `XrayRead · ${brand}`,
       tool_cerebralai:   `CerebralAI · ${brand}`,
       tool_palliativemd: `PalliativeMD · ${brand}`,
+      tool_anticoag:     `AnticoagAI · ${brand}`,
       tool_labread:      `LabRead · ${brand}`,
       tool_cliniscore:   `CliniScore · ${brand}`,
       concierge:         'Concierge Medicine',
@@ -731,7 +733,7 @@ const App: React.FC = () => {
         // Non-clinical "discovery" tiles route to their own screens.
         if (slug === 'concierge')   { navigate('concierge'); return; }
         if (slug === 'meditations') { navigate('meditations_library'); return; }
-        const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', antibioticai:'tool_antibioticai', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd', labread:'tool_labread', cliniscore:'tool_cliniscore'};
+        const map: Record<string, Screen> = {nephroai:'tool_nephroai', rxcheck:'tool_rxcheck', antibioticai:'tool_antibioticai', clinicalnote:'tool_clinicalnote', xrayread:'tool_xrayread', cerebralai:'tool_cerebralai', palliativemd:'tool_palliativemd', anticoag:'tool_anticoag', labread:'tool_labread', cliniscore:'tool_cliniscore'};
         if (map[slug]) navigate(map[slug]);
       }} onPrivacy={goPrivacy} onTerms={goTerms} checkoutResult={initialCheckoutResult}
         onNavigateMeditations={()=>navigate('meditations_library')}
@@ -749,6 +751,7 @@ const App: React.FC = () => {
       {screen==='tool_xrayread'     && <XrayReadTool     API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='tool_cerebralai'   && <CerebralAITool   API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='tool_palliativemd' && <PalliativeMDTool API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
+      {screen==='tool_anticoag'     && <AnticoagAI       API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='tool_labread'      && <LabReadTool      API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='tool_cliniscore'   && <CliniScoreTool   API={API} token={token} onBack={()=>navigate(user ? 'dashboard' : 'landing')}/>}
       {screen==='concierge' && user && <Concierge API={API} token={token} onBack={()=>navigate('dashboard')}/>}

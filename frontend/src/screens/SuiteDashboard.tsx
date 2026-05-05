@@ -38,6 +38,7 @@ const TOOLS: Tool[] = [
   { slug:'labread',      name:'LabRead',         icon:'🧪', desc:'AI lab-panel interpretation — paste, dictate, or upload',                                                                         monthly:0,     yearly:0,      free:true,  keywords:'labs chemistry cbc bmp cmp electrolytes liver renal thyroid iron ferritin ldh tsh ptt inr ca+k+na' },
   { slug:'nephroai',     name:'NephroAI',        icon:'🫘', desc:'Comprehensive nephrology decision support',                                                                                      monthly:9.99,  yearly:89.99,  keywords:'aki ckd kdigo electrolytes sodium potassium calcium magnesium phosphorus acid-base abg dialysis transplant glomerulonephritis nephrotic hypertension htn kidney stones creatinine egfr nephrology nephroai' },
   { slug:'palliativemd', name:'PalliativeMD',    icon:'🫶', desc:'AI-guided palliative care — goals of care, prognosis, family meetings',                                                          monthly:24.99, yearly:179.99, keywords:'palliative goals of care prognosis hospice family meeting dnr dni code status end of life comfort' },
+  { slug:'anticoag',     name:'AnticoagAI',      icon:'💉', desc:'Evidence-based anticoagulation decision support — bleeding risk, stroke risk, drug interactions, agent selection',                 monthly:24.99, yearly:179.99, keywords:'anticoagulation afib stroke bleed has-bled chads orbit doac warfarin apixaban rivaroxaban dabigatran edoxaban heparin lmwh hit cardiology hematology cancer vte dvt pe' },
   { slug:'rxcheck',      name:'RxCheck',         icon:'💊', desc:'Full medication interaction safety check',                                                                                       monthly:9.99,  yearly:89.99,  keywords:'medications drug interactions pharmacy pharmacology polypharmacy drug-drug rxnorm' },
   { slug:'xrayread',     name:'XrayRead',        icon:'🩻', desc:'Structured radiology report from any X-ray image',                                                                               monthly:24.99, yearly:179.99, keywords:'x-ray xray chest cxr radiology radiograph axr pneumonia pneumothorax fracture abdominal bone' },
   // ── Discovery / admin tiles — pinned last ────────────────────────────
@@ -47,7 +48,7 @@ const TOOLS: Tool[] = [
 
 // Tools that open directly (no subscribe step) when clicked — concierge +
 // meditations are listed here so their tile shows "Open →" instead of price.
-const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','xrayread','cerebralai','palliativemd','labread','cliniscore','concierge','meditations']);
+const OPEN_TOOLS = new Set(['nephroai','rxcheck','antibioticai','clinicalnote','xrayread','cerebralai','palliativemd','anticoag','labread','cliniscore','concierge','meditations']);
 
 // Tools the superuser sees but regular users don't (admin-scoped content).
 // Concierge Medicine is visible to everyone now — non-superusers see an
@@ -60,7 +61,7 @@ const SUPERUSER_ONLY_TOOLS = new Set(['meditations']);
 // Trial state helpers (readTrialsLocal/writeTrialsLocal/notifyTrialUsed)
 // live in ../trialHelpers so the tool components and this dashboard
 // share a single localStorage key + event bus.
-const TRIAL_TOOLS = new Set(['ekgscan','nephroai','xrayread','rxcheck','antibioticai','clinicalnote','cerebralai','palliativemd']);
+const TRIAL_TOOLS = new Set(['ekgscan','nephroai','xrayread','rxcheck','antibioticai','clinicalnote','cerebralai','palliativemd','anticoag']);
 
 const WORDMARK = 'linear-gradient(135deg,#7ab0f0,#9b8fe8)';
 const CARD: React.CSSProperties = {background:'rgba(255,255,255,0.85)', borderRadius:'20px', padding:'20px', boxShadow:'0 4px 20px rgba(100,130,200,0.1)', border:'1px solid rgba(255,255,255,0.9)'};
