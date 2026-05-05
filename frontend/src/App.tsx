@@ -32,6 +32,7 @@ import MarketingAgent from './screens/MarketingAgent';
 import ScheduleMD from './screens/ScheduleMD';
 import ScheduleMDPortal from './screens/ScheduleMDPortal';
 import TOTPSetup from './screens/TOTPSetup';
+import AuthVerify from './screens/AuthVerify';
 import SoulMDLogo from './SoulMDLogo';
 import ChoKuRei from './screens/concierge/ChoKuRei';
 import MeditateApp from './screens/meditate/MeditateApp';
@@ -100,6 +101,7 @@ type Screen =
   | 'marketing_admin'
   | 'meditate'
   | 'totp_setup'            // /settings/authenticator — superuser-only TOTP wizard
+  | 'auth_verify'           // /auth/verify — magic-link landing → backend hand-off
   | 'schedulemd'            // hospital scheduling admin at /schedulemd (superuser-only)
   | 'schedulemd_portal'     // physician portal at /schedulemd/portal?token=XXX (token-gated)
   | 'welcome'               // /welcome — public shareable rich landing (ConciergeLandingPage)
@@ -202,6 +204,7 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/schedulemd/portal') return 'schedulemd_portal';
   if (path === '/welcome')           return 'welcome';
   if (path === '/login')             return 'auth';
+  if (path === '/auth/verify')       return 'auth_verify';
   if (path === '/settings/authenticator') return 'totp_setup';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
@@ -244,6 +247,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'schedulemd_portal')   return '/schedulemd/portal';
   if (s === 'welcome')             return '/welcome';
   if (s === 'totp_setup')          return '/settings/authenticator';
+  if (s === 'auth_verify')         return '/auth/verify';
   // public_splash has no canonical path — it's the lockdown destination
   // for any URL not in the allowlist. Preserve whatever the user typed
   // so the address bar still reflects their intent.
@@ -507,6 +511,7 @@ const App: React.FC = () => {
       schedulemd:          `ScheduleMD · ${brand}`,
       schedulemd_portal:   'ScheduleMD Portal · SoulMD',
       totp_setup:          'Authenticator setup · SoulMD',
+      auth_verify:         'Verifying… · SoulMD',
       welcome:             'SoulMD — Concierge Medicine by Dr. Neysi Anderson',
       public_splash:       'SoulMD — Where Science Meets the Soul',
       not_found:           `Page not found · ${brand}`,
@@ -899,6 +904,7 @@ const App: React.FC = () => {
       {screen==='totp_setup' && user && user.is_superuser && (
         <TOTPSetup API={API} token={token} onDone={() => navigate('concierge')}/>
       )}
+      {screen==='auth_verify' && <AuthVerify API={API}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}
