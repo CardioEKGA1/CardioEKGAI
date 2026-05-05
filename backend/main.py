@@ -1,9 +1,9 @@
 # Copyright 2026 SoulMD, LLC. All Rights Reserved.
 # Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header, Request
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse as _RedirectResponse
+from fastapi.responses import RedirectResponse as _RedirectResponse, JSONResponse as _JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -1332,7 +1332,11 @@ try:
 except Exception:  # noqa: BLE001
     _bcrypt = None
 
-_TOTP_ENC_KEY_RAW = os.getenv("TOTP_ENCRYPTION_KEY", "").strip().encode() or None
+try:
+    _TOTP_ENC_KEY_RAW = (os.getenv("TOTP_ENCRYPTION_KEY") or "").strip().encode() or None
+except Exception as _e:  # noqa: BLE001
+    print(f"TOTP key load skipped: {_e}")
+    _TOTP_ENC_KEY_RAW = None
 _SOULMD_OWNER_EMAIL = "anderson@soulmd.us"
 _MAGIC_LINK_TTL_MINUTES = 15
 _MAGIC_LINK_RATE_LIMIT_PER_15MIN = 3
