@@ -66,19 +66,57 @@ const TOTPSetup: React.FC<Props> = ({ API, token, onDone }) => {
 
   // Preflight: surface any 503/409 conditions on mount so the user
   // sees exactly what's wrong before clicking Next, instead of getting
-  // an opaque error from inside the wizard.
+  // an opaque error from inside the wizard. Failure modes are
+  // separated so "Load failed" (CORS / network) gets a meaningful
+  // diagnosis rather than the bare TypeError text the browser emits.
   useEffect(() => {
     let alive = true;
     (async () => {
+      const url = `${API}/api/auth/totp/diagnostics`;
+      // eslint-disable-next-line no-console
+      console.log('[TOTPSetup] preflight →', url);
+      let response: Response | null = null;
       try {
-        const r = await fetch(`${API}/api/auth/totp/diagnostics`, {
+        response = await fetch(url, {
           credentials: 'include', headers: authHeaders(),
         });
-        if (!r.ok) throw new Error(`diagnostics ${r.status}`);
-        const d = await r.json();
+      } catch (netErr: any) {
+        // eslint-disable-next-line no-console
+        console.error('[TOTPSetup] network error', netErr);
+        if (alive) setErr(
+          `Network error reaching ${url}. ` +
+          `This is usually a CORS / origin mismatch — the API at ` +
+          `${new URL(url).origin} must allow credentialed requests ` +
+          `from ${window.location.origin}. ` +
+          `Browser said: ${netErr?.message || String(netErr)}`
+        );
+        if (alive) setDiagLoading(false);
+        return;
+      }
+      // Got an HTTP response — treat status codes explicitly.
+      const statusText = `${response.status} ${response.statusText}`;
+      let bodyText = '';
+      try { bodyText = await response.clone().text(); } catch {}
+      // eslint-disable-next-line no-console
+      console.log('[TOTPSetup] preflight ←', statusText, bodyText);
+      if (!response.ok) {
+        let detail = '';
+        try { detail = (JSON.parse(bodyText) as any)?.detail || ''; } catch {}
+        if (alive) setErr(
+          response.status === 401 ? 'Your session expired. Sign in again.' :
+          response.status === 404 ? 'This deploy does not expose the TOTP setup endpoint. Confirm the latest backend has shipped on Railway.' :
+          `Diagnostics call failed (${statusText}). ${detail || bodyText.slice(0, 200)}`
+        );
+        if (alive) setDiagLoading(false);
+        return;
+      }
+      try {
+        const d = JSON.parse(bodyText);
         if (alive) setDiag(d);
-      } catch (e: any) {
-        if (alive) setErr(e.message || 'Could not load diagnostics.');
+      } catch (parseErr: any) {
+        // eslint-disable-next-line no-console
+        console.error('[TOTPSetup] parse error', parseErr, bodyText);
+        if (alive) setErr(`Diagnostics returned non-JSON: ${bodyText.slice(0, 200)}`);
       } finally {
         if (alive) setDiagLoading(false);
       }
@@ -86,25 +124,52 @@ const TOTPSetup: React.FC<Props> = ({ API, token, onDone }) => {
     return () => { alive = false; };
   }, []); // eslint-disable-line
 
+  // Shared call wrapper — handles the network-vs-HTTP distinction
+  // identically to the preflight, so any /api/auth/totp/* call that
+  // breaks at the CORS / origin layer surfaces a useful message
+  // instead of a raw "Load failed" TypeError.
+  const callApi = async (path: string, init: RequestInit): Promise<{ data?: any; error?: string }> => {
+    const url = `${API}${path}`;
+    // eslint-disable-next-line no-console
+    console.log('[TOTPSetup]', init.method || 'GET', '→', url);
+    let response: Response;
+    try {
+      response = await fetch(url, { credentials: 'include', headers: authHeaders(), ...init });
+    } catch (netErr: any) {
+      // eslint-disable-next-line no-console
+      console.error('[TOTPSetup] network error', netErr);
+      return {
+        error:
+          `Network error reaching ${url}. ` +
+          `Likely CORS / origin mismatch (frontend ${window.location.origin} → API ${new URL(url).origin}). ` +
+          `Browser said: ${netErr?.message || String(netErr)}`,
+      };
+    }
+    let bodyText = '';
+    try { bodyText = await response.clone().text(); } catch {}
+    // eslint-disable-next-line no-console
+    console.log('[TOTPSetup] ←', response.status, bodyText);
+    if (!response.ok) {
+      let detail = '';
+      try { detail = (JSON.parse(bodyText) as any)?.detail || ''; } catch {}
+      return { error: detail || `${response.status} ${response.statusText} ${bodyText.slice(0, 200)}` };
+    }
+    try { return { data: JSON.parse(bodyText) }; }
+    catch { return { data: null }; }
+  };
+
   // Reset existing TOTP credential — used when the diagnostics surface
   // shows an existing credential blocking the setup endpoint with 409.
   // Calls DELETE /api/auth/totp/disable then refreshes diagnostics.
   const resetExisting = async () => {
     if (!window.confirm('Disable the current TOTP credential and start a fresh enrollment? Existing backup codes will stop working.')) return;
     setBusy(true); setErr('');
-    try {
-      const r = await fetch(`${API}/api/auth/totp/disable`, {
-        method: 'DELETE', credentials: 'include', headers: authHeaders(),
-      });
-      if (!r.ok) throw new Error(`disable failed (${r.status})`);
-      // Re-fetch diagnostics so the UI updates immediately.
-      const d = await fetch(`${API}/api/auth/totp/diagnostics`, {
-        credentials: 'include', headers: authHeaders(),
-      }).then(r2 => r2.json()).catch(() => null);
-      if (d) setDiag(d);
-    } catch (e: any) {
-      setErr(e.message || 'Could not reset existing credential.');
-    } finally { setBusy(false); }
+    const del = await callApi('/api/auth/totp/disable', { method: 'DELETE' });
+    if (del.error) { setErr(`Reset failed: ${del.error}`); setBusy(false); return; }
+    const d = await callApi('/api/auth/totp/diagnostics', { method: 'GET' });
+    if (d.error) { setErr(`Diagnostics refresh failed: ${d.error}`); setBusy(false); return; }
+    setDiag(d.data);
+    setBusy(false);
   };
 
   // Kick off the setup call. Only fires when diagnostics show the
@@ -112,20 +177,15 @@ const TOTPSetup: React.FC<Props> = ({ API, token, onDone }) => {
   // credential row).
   const beginSetup = async () => {
     setErr(''); setBusy(true);
-    try {
-      const r = await fetch(`${API}/api/auth/totp/setup`, {
-        method: 'POST', credentials:'include', headers: authHeaders(),
-      });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j.detail || `setup failed (${r.status})`);
-      }
-      const d = await r.json();
-      setSetup(d);
-      setStep(2);
-    } catch (e: any) {
-      setErr(e.message || 'Could not start setup. Try again.');
-    } finally { setBusy(false); }
+    const result = await callApi('/api/auth/totp/setup', { method: 'POST' });
+    if (result.error) {
+      setErr(result.error);
+      setBusy(false);
+      return;
+    }
+    setSetup(result.data);
+    setStep(2);
+    setBusy(false);
   };
 
   const verifyCode = async () => {

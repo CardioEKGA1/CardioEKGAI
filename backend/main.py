@@ -237,11 +237,32 @@ def hash_ip(ip: str) -> str:
         return ""
     return _hash_with(EMAIL_HASH_PEPPER, "ip", ip)
 
+# CORS — must be explicit-origin (not "*") for credentialed requests,
+# per the CORS spec. The /api/auth/* flows send `credentials: 'include'`
+# so the browser drops any response that comes back with `*`. Allowed
+# origins enumerated below; an env-var override (CORS_EXTRA_ORIGINS,
+# comma-separated) lets us add staging / preview deploys without a
+# code push. The OPTIONS preflight cache is bumped to 24h so the
+# round-trip overhead doesn't show up on every authed call.
+_DEFAULT_CORS_ORIGINS = [
+    "https://soulmd.us",
+    "https://www.soulmd.us",
+    "https://ekgscan.com",
+    "https://www.ekgscan.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+_extra_cors = [o.strip() for o in (os.getenv("CORS_EXTRA_ORIGINS", "") or "").split(",") if o.strip()]
+_CORS_ORIGINS = list(dict.fromkeys(_DEFAULT_CORS_ORIGINS + _extra_cors))
+print(f"CORS_ALLOWED_ORIGINS={_CORS_ORIGINS}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=86400,
 )
 
 # ekgscan.com is a legacy domain — soulmd.us is the primary brand. Browser
@@ -1332,8 +1353,24 @@ try:
 except Exception:  # noqa: BLE001
     _bcrypt = None
 
+# Startup log — explicit boolean check so the Railway log shows
+# whether the env var made it into the process at all. Length-only
+# fingerprint (never the value) makes "wrong key set" diagnosable
+# from the deploy log without leaking the secret. We also exercise
+# the Fernet constructor here so a malformed key surfaces at boot
+# instead of on the first /api/auth/totp/setup call.
+print(f"TOTP_ENCRYPTION_KEY loaded: {bool(os.getenv('TOTP_ENCRYPTION_KEY'))} "
+      f"length={len((os.getenv('TOTP_ENCRYPTION_KEY') or '').strip())}")
+print(f"TOTP libs available: pyotp={_pyotp is not None} "
+      f"qrcode={_qrcode is not None} cryptography={_Fernet is not None}")
 try:
     _TOTP_ENC_KEY_RAW = (os.getenv("TOTP_ENCRYPTION_KEY") or "").strip().encode() or None
+    if _TOTP_ENC_KEY_RAW and _Fernet is not None:
+        try:
+            _Fernet(_TOTP_ENC_KEY_RAW)
+            print("TOTP_ENCRYPTION_KEY validated against Fernet ✓")
+        except Exception as _fe:  # noqa: BLE001
+            print(f"TOTP_ENCRYPTION_KEY present but invalid Fernet format: {type(_fe).__name__}: {_fe}")
 except Exception as _e:  # noqa: BLE001
     print(f"TOTP key load skipped: {_e}")
     _TOTP_ENC_KEY_RAW = None
@@ -1633,10 +1670,19 @@ def sec_totp_setup(current_user: User | None = Depends(get_current_user), db: Se
     if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
         raise HTTPException(status_code=404, detail="Not found")
     if _pyotp is None or _qrcode is None:
-        raise HTTPException(status_code=503, detail="TOTP libraries unavailable on this build")
-    fernet = _fernet()
-    if fernet is None:
-        raise HTTPException(status_code=503, detail="TOTP_ENCRYPTION_KEY not configured on this deploy")
+        raise HTTPException(status_code=503, detail="TOTP libraries unavailable on this build (pyotp / qrcode missing — check requirements.txt deploy)")
+    raw_key = (os.getenv("TOTP_ENCRYPTION_KEY") or "").strip()
+    if not raw_key:
+        raise HTTPException(status_code=503, detail="TOTP_ENCRYPTION_KEY not configured")
+    if _Fernet is None:
+        raise HTTPException(status_code=503, detail="cryptography package missing — check requirements.txt deploy")
+    try:
+        fernet = _Fernet(raw_key.encode())
+    except _FernetInvalidToken as e:
+        raise HTTPException(status_code=500, detail=f"TOTP_ENCRYPTION_KEY is set but not a valid Fernet key: {e}")
+    except Exception as e:  # noqa: BLE001
+        # Fernet's own ValueError on wrong-length keys lands here.
+        raise HTTPException(status_code=500, detail=f"TOTP_ENCRYPTION_KEY format error ({type(e).__name__}): {e}")
 
     existing = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
     if existing:
