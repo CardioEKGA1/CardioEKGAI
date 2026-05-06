@@ -296,6 +296,13 @@ const App: React.FC = () => {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string>(localStorage.getItem('token') || '');
+  // Tracks whether the initial /auth/me bootstrap has finished. The
+  // route guard waits on this so a cookie-only session (set by the
+  // magic-link verify) isn't bounced to /login before the bootstrap
+  // can populate `user`. Without this gate the guard fires on every
+  // mount and the magic-link landing flashes the login form before
+  // the session resolves — looks like an auth loop to the user.
+  const [bootstrapped, setBootstrapped] = useState<boolean>(false);
   const [initialMagicToken] = useState<string | null>(() => new URLSearchParams(window.location.search).get('token'));
   const [initialCheckoutResult] = useState<string | null>(() => new URLSearchParams(window.location.search).get('checkout'));
 
@@ -404,10 +411,7 @@ const App: React.FC = () => {
 
   // Initial auth bootstrap — runs once, at mount.
   useEffect(() => {
-    if (isAdminRoute) return;
-    // If we initialized onto a sticky deep-link (/privacy, /terms), DO NOT
-    // auto-navigate away when the auth check resolves — the user asked for
-    // that URL. Every other page gets the usual post-auth redirect.
+    if (isAdminRoute) { setBootstrapped(true); return; }
     const landedOnDeepLink = isStickyDeepLink(screen);
     if (initialMagicToken) {
       fetch(`${API}/auth/verify-token`, {
@@ -417,52 +421,52 @@ const App: React.FC = () => {
       })
         .then(r => r.json())
         .then(data => { if (data.access_token && !landedOnDeepLink) handleAuth(data); })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setBootstrapped(true));
       return;
     }
-    if (token) {
-      fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(async r => {
-          // Only invalid/expired tokens (401) or deleted accounts (404) should
-          // clear the session. Transient failures (5xx, network) leave it alone
-          // so a brief outage doesn't log everyone out.
-          if (r.status === 401 || r.status === 404) {
-            localStorage.removeItem('token');
-            try { localStorage.removeItem('soulmd_su'); } catch {}
-            setToken('');
-            return null;
-          }
-          if (!r.ok) return null;
-          return r.json();
-        })
-        .then(data => {
-          if (data && data.email) {
-            setUser(data);
-            // Sync the lockdown-bypass marker with /auth/me's view of
-            // the user. Existing superuser sessions that signed in
-            // before this flag existed pick it up here on next page
-            // load — no re-sign-in required.
-            try {
-              if (data.is_superuser) {
-                const hadFlag = !!localStorage.getItem('soulmd_su');
-                localStorage.setItem('soulmd_su', '1');
-                // Initial mount may have routed us to public_splash
-                // because the flag wasn't set yet. Now that we know
-                // this is a superuser session, re-resolve the URL —
-                // pathToScreen reads localStorage on each call, so
-                // it'll honor the flag we just stamped.
-                if (!hadFlag) {
-                  const fresh = pathToScreen(window.location.pathname);
-                  if (fresh && fresh !== 'public_splash') setScreen(fresh);
-                }
-              } else {
-                localStorage.removeItem('soulmd_su');
+    // Always run /auth/me — credentials:'include' so the magic-link
+    // session cookie rides along, Bearer header for legacy
+    // localStorage-token sessions. Backend get_current_user resolves
+    // either source. Skipping this when localStorage was empty (the
+    // previous behavior) was the bug that made the magic-link
+    // landing flash /login before the cookie session resolved.
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    fetch(`${API}/auth/me`, { headers, credentials: 'include' })
+      .then(async r => {
+        if (r.status === 401 || r.status === 404) {
+          // Hard auth failure: clear the legacy localStorage token.
+          // Cookies are httpOnly; we can't clear them from JS, but
+          // the next request will fail identically and the route
+          // guard then bounces correctly.
+          localStorage.removeItem('token');
+          try { localStorage.removeItem('soulmd_su'); } catch {}
+          setToken('');
+          return null;
+        }
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then(data => {
+        if (data && data.email) {
+          setUser(data);
+          try {
+            if (data.is_superuser) {
+              const hadFlag = !!localStorage.getItem('soulmd_su');
+              localStorage.setItem('soulmd_su', '1');
+              if (!hadFlag) {
+                const fresh = pathToScreen(window.location.pathname);
+                if (fresh && fresh !== 'public_splash') setScreen(fresh);
               }
-            } catch {}
-          }
-        })
-        .catch(() => { /* network error — keep token, user retries naturally */ });
-    }
+            } else {
+              localStorage.removeItem('soulmd_su');
+            }
+          } catch {}
+        }
+      })
+      .catch(() => { /* network error — keep token, user retries naturally */ })
+      .finally(() => setBootstrapped(true));
   }, []); // eslint-disable-line
 
   const handleLogout = useCallback(() => {
@@ -543,6 +547,12 @@ const App: React.FC = () => {
       'upload', 'results', 'chat', 'paywall',
     ];
     if (!PROTECTED.includes(screen)) return;
+    // Wait for /auth/me to resolve before deciding "no session" —
+    // a magic-link cookie session is invisible to JS until the
+    // bootstrap fetch echoes it back as a user object. Without this
+    // gate the guard fires on mount and bounces every cookie-only
+    // session to /login before the bootstrap can complete.
+    if (!bootstrapped) return;
     if (user || token) return;  // valid (or in-flight) session — let the screen render
     try {
       const next = window.location.pathname + window.location.search;
@@ -552,7 +562,7 @@ const App: React.FC = () => {
       window.history.replaceState({}, '', url);
     } catch {}
     setScreen('auth');
-  }, [screen, user, token]);
+  }, [screen, user, token, bootstrapped]);
 
   // /patient — post-login routing gate. Concierge is invitation-only, so
   // only users who already have a concierge_patients row (or are

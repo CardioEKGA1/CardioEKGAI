@@ -1494,11 +1494,18 @@ def sec_magic_link_request(
     body: _SecMagicLinkIn,
     db: Session = Depends(get_db),
 ):
-    """Always returns 200 (email-enumeration resistant). Internally we
-    rate-limit per email and send an email with a single-use,
-    15-minute token."""
+    """Always returns 200 (email-enumeration resistant). Internally:
+       - rate-limit per email (3/15min)
+       - auto-bootstrap a User row for known superuser emails so the
+         practice owner can sign in even if no row was created during
+         the prior dev-login era. Non-superuser emails still require
+         a pre-existing row (no spam-create surface).
+       - log every branch to Railway so the email-not-arriving failure
+         mode is diagnosable from the deploy log."""
     email = (body.email or "").strip().lower()
     ip = _client_ip(request)
+    print(f"MAGIC_LINK_REQUEST email={email!r} ip={ip}")
+
     # Rate limit: max 3 requests per email per 15 minutes.
     fifteen_ago = _now_utc() - timedelta(minutes=15)
     recent = db.query(MagicLinkToken).filter(
@@ -1507,37 +1514,65 @@ def sec_magic_link_request(
     ).count() if email else 0
     if recent >= _MAGIC_LINK_RATE_LIMIT_PER_15MIN:
         _sentry_event("magic_link_rate_limited", email=email, ip=ip)
-        # Spec: do not reveal reason. Silent 200.
+        print(f"MAGIC_LINK_RATE_LIMITED email={email!r} recent={recent} (silent 200)")
         return {"ok": True}
 
-    if email and "@" in email:
-        user = db.query(User).filter(User.email == email).first()
-        if user:
-            destination = _resolve_destination(email, body.destination)
-            token = _auth_secrets.token_urlsafe(32)
-            row = MagicLinkToken(
-                email=email, token=token, destination=destination,
-                expires_at=_now_utc() + timedelta(minutes=_MAGIC_LINK_TTL_MINUTES),
-                ip_address=ip,
+    if not email or "@" not in email:
+        print(f"MAGIC_LINK_INVALID_EMAIL email={email!r} (silent 200)")
+        return {"ok": True}
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        # Bootstrap path: known superusers (anderson, plus anything in
+        # the SUPERUSER_EMAILS env list) get a User row created on
+        # first sign-in attempt. This mirrors the legacy /auth/magic-link
+        # behavior for the owner without re-introducing the open
+        # spam-create surface for arbitrary addresses.
+        if _is_superuser_email(email):
+            user = User(
+                email=email, hashed_password="", is_verified=True,
+                subscription_tier="free", is_superuser=True, is_clinician=False,
+                scan_count=0,
             )
-            db.add(row)
-            db.commit()
-            try:
-                _send_magic_link_email(email, token)
-            except Exception as e:  # noqa: BLE001
-                print(f"magic-link email send error: {e}")
-            _sentry_event("magic_link_requested", email=email, ip=ip, destination=destination)
+            db.add(user); db.commit(); db.refresh(user)
+            print(f"MAGIC_LINK_BOOTSTRAPPED_SUPERUSER email={email!r} user_id={user.id}")
+        else:
+            print(f"MAGIC_LINK_NO_USER email={email!r} (silent 200)")
+            return {"ok": True}
+    elif _is_superuser_email(email) and not user.is_superuser:
+        # Defensive: make sure the owner row stays flagged as superuser
+        # even if a stray UPDATE wiped the bit.
+        user.is_superuser = True
+        db.commit()
+        print(f"MAGIC_LINK_RESTAMPED_SUPERUSER email={email!r}")
+
+    destination = _resolve_destination(email, body.destination)
+    token = _auth_secrets.token_urlsafe(32)
+    row = MagicLinkToken(
+        email=email, token=token, destination=destination,
+        expires_at=_now_utc() + timedelta(minutes=_MAGIC_LINK_TTL_MINUTES),
+        ip_address=ip,
+    )
+    db.add(row); db.commit()
+    sent_ok = False
+    try:
+        sent_ok = _send_magic_link_email(email, token)
+    except Exception as e:  # noqa: BLE001
+        print(f"MAGIC_LINK_SEND_EXCEPTION email={email!r} err={type(e).__name__}: {e}")
+    print(f"MAGIC_LINK_ISSUED email={email!r} token_len={len(token)} destination={destination!r} sent_ok={sent_ok}")
+    _sentry_event("magic_link_requested", email=email, ip=ip, destination=destination)
     return {"ok": True}
 
 
-def _send_magic_link_email(email: str, token: str) -> None:
-    """SoulMD-styled login email — same SendGrid client used elsewhere."""
-    from sendgrid import SendGridAPIClient  # noqa: WPS433
-    from sendgrid.helpers.mail import Mail  # noqa: WPS433
-    api_key = os.getenv("SENDGRID_API_KEY", "")
-    if not api_key:
-        print("SENDGRID_API_KEY missing — skipping magic-link email.")
-        return
+def _send_magic_link_email(email: str, token: str) -> bool:
+    """SoulMD-styled login email. Routes through the same send_email()
+    helper the rest of the codebase uses so we inherit FROM_EMAIL +
+    the SendGrid error-tracking globals (status code / last error /
+    last send timestamp visible at /admin/health). Returns True on
+    success, False (never raises) on any failure path."""
+    if not SENDGRID_API_KEY:
+        print(f"MAGIC_LINK_NO_SENDGRID_KEY email={email!r} — set SENDGRID_API_KEY in Railway")
+        return False
     verify_url = f"{_APP_URL}/auth/verify?token={token}"
     html = f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;max-width:540px;margin:0 auto;padding:40px 20px;color:#1a2a4a">
@@ -1561,13 +1596,23 @@ def _send_magic_link_email(email: str, token: str) -> None:
         If you didn't request this, ignore this email.
       </p>
       <p style="font-size:11px;color:#a0b0c8;text-align:center;margin-top:32px">
-        noreply@soulmd.us · soulmd.us
+        {FROM_EMAIL} · soulmd.us
       </p>
     </div>
     """
-    msg = Mail(from_email=_FROM_EMAIL, to_emails=email,
-               subject="Your SoulMD login link", html_content=html)
-    SendGridAPIClient(api_key=api_key).send(msg)
+    try:
+        send_email(email, "Your SoulMD login link", html)
+        # send_email() doesn't return a status — we infer success from the
+        # globals it updates. Anything other than the post-call last_status
+        # being a 2xx (or absent) means SendGrid rejected.
+        last_status = _sendgrid_last_status_code
+        last_error = _sendgrid_last_error
+        ok = (last_status is None) or (200 <= int(last_status) < 300)
+        print(f"MAGIC_LINK_SENDGRID email={email!r} from={FROM_EMAIL!r} status={last_status} ok={ok} last_error={last_error!r}")
+        return ok
+    except Exception as e:  # noqa: BLE001
+        print(f"MAGIC_LINK_SENDGRID_RAISED email={email!r} err={type(e).__name__}: {e}")
+        return False
 
 
 @app.get("/api/auth/verify")
