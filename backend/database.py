@@ -1152,6 +1152,48 @@ try:
 except Exception as e:  # never let seed failure block boot
     print(f"ScheduleMD seed skipped: {e}")
 
+# ─── One-shot owner TOTP reset ────────────────────────────────────────
+# When the practice owner's TOTP secret falls out of sync with their
+# authenticator app (e.g. the row was generated against a stale
+# TOTP_ENCRYPTION_KEY before the env var was rotated), the only way
+# back is to wipe the existing TOTPCredential row and re-enroll.
+# Gated on RESET_OWNER_TOTP=true so this never runs by accident:
+# set the env var on Railway, deploy, watch for the boot log,
+# then unset the env var. Idempotent — running the block with the
+# row already deleted just no-ops with `deleted=0`.
+import os as _os_smd
+try:
+    _reset_flag = (_os_smd.getenv("RESET_OWNER_TOTP") or "").strip().lower() in ("1", "true", "yes", "on")
+    if _reset_flag:
+        # Always log the configured key length so this same migration
+        # surface doubles as the "is the env var the right shape"
+        # diagnostic the spec asked for. Never logs the key value.
+        print(f"TOTP key length: {len(_os_smd.getenv('TOTP_ENCRYPTION_KEY', ''))}")
+        _owner_email = "anderson@soulmd.us"
+        _reset_db = SessionLocal()
+        try:
+            _user_row = _reset_db.query(User).filter(User.email == _owner_email).first()
+            if not _user_row:
+                print(f"RESET_OWNER_TOTP: no user row for {_owner_email} — nothing to delete.")
+            else:
+                _deleted = _reset_db.query(TOTPCredential).filter(
+                    TOTPCredential.user_id == _user_row.id,
+                ).delete(synchronize_session=False)
+                _reset_db.commit()
+                _remaining = _reset_db.query(TOTPCredential).filter(
+                    TOTPCredential.user_id == _user_row.id,
+                ).count()
+                print(
+                    f"RESET_OWNER_TOTP: deleted {_deleted} TOTPCredential row(s) "
+                    f"for {_owner_email} (user_id={_user_row.id}); remaining={_remaining}"
+                )
+                if _remaining != 0:
+                    print(f"RESET_OWNER_TOTP WARNING: expected remaining=0, got {_remaining}")
+        finally:
+            _reset_db.close()
+except Exception as e:  # never let migration failure block boot
+    print(f"RESET_OWNER_TOTP migration skipped: {e}")
+
 def get_db():
     db = SessionLocal()
     try:
