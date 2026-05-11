@@ -197,13 +197,19 @@ const TotpForm: React.FC<{API: string; onSwitchToMagic: () => void}> = ({ API, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [attempts, setAttempts] = useState(0);
+  // When the backend says "TOTP_NOT_SET_UP", we swap the entire form
+  // for a friendly panel that explains the state and redirects the
+  // user back to magic-link sign-in — no point asking them for codes
+  // for a credential that doesn't exist.
+  const [notSetUp, setNotSetUp] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
   const backupRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (notSetUp) return;
     if (entry === 'code') codeRef.current?.focus();
     else backupRef.current?.focus();
-  }, [entry]);
+  }, [entry, notSetUp]);
 
   const submit = async (value: string) => {
     setError('');
@@ -217,6 +223,13 @@ const TotpForm: React.FC<{API: string; onSwitchToMagic: () => void}> = ({ API, o
       if (r.status === 429) { setError(ERROR_MESSAGES.totp_locked); return; }
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
+        // Distinct path: no credential exists for this account. Show
+        // the "not set up" panel instead of a generic invalid-code
+        // error so the owner knows to enroll first.
+        if ((j.detail || '') === 'TOTP_NOT_SET_UP') {
+          setNotSetUp(true);
+          return;
+        }
         const next = attempts + 1;
         setAttempts(next);
         if (next >= 3) {
@@ -239,6 +252,29 @@ const TotpForm: React.FC<{API: string; onSwitchToMagic: () => void}> = ({ API, o
       setError('Network error. Try again.');
     } finally { setBusy(false); }
   };
+
+  if (notSetUp) {
+    return (
+      <div>
+        <button onClick={onSwitchToMagic} style={{...textBtn, marginBottom:'10px'}}>
+          ← Back to magic link
+        </button>
+        <h2 style={{fontFamily: SERIF, fontSize:'22px', color: INK, fontWeight:400, margin:'0 0 8px', textAlign:'center'}}>
+          Authenticator not set up yet
+        </h2>
+        <p style={{fontSize:'13px', color: SOFT, lineHeight:1.7, margin:'0 0 18px', textAlign:'center'}}>
+          This account doesn't have an authenticator enrolled yet. Sign in
+          with a magic link instead — you'll be guided through authenticator
+          setup right after.
+        </p>
+        <button
+          onClick={onSwitchToMagic}
+          style={{...primaryBtn, width:'100%'}}>
+          Use magic link to sign in
+        </button>
+      </div>
+    );
+  }
 
   const onCodeChange = (v: string) => {
     const cleaned = v.replace(/\D/g, '').slice(0, 6);

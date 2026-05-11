@@ -1385,6 +1385,13 @@ _APP_URL = os.getenv("APP_URL", "https://soulmd.us")
 
 _failed_totp_attempts: dict[str, list[float]] = {}  # in-memory rate limit window
 
+# Boot log so the deploy log shows exactly which domain the magic-link
+# emails are pointing at. If APP_URL accidentally falls back to a
+# localhost default in prod, the emails would contain unreachable
+# links — this line surfaces that immediately.
+print(f"AUTH_APP_URL={_APP_URL!r} (magic-link emails and verify-redirect target)")
+print(f"AUTH_FROM_EMAIL={_FROM_EMAIL!r}")
+
 
 # ─── TOTP boot-time self-test ───────────────────────────────────────
 # Exercises the full POST /api/auth/totp/setup pipeline (provisioning
@@ -1459,10 +1466,18 @@ def _client_ip(request: Request) -> str:
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    """Set the session cookie. SameSite=None is required because the
+    frontend (soulmd.us) and the backend (ekgscan.com) live on
+    different registrable domains — Lax cookies are NEVER sent on
+    cross-origin XHR, so `credentials: 'include'` from soulmd.us
+    fetching /auth/me on ekgscan.com would arrive cookieless and
+    the React app would conclude there's no session, even though
+    the backend just set one. Secure=True is required by the
+    browser for SameSite=None and HttpOnly keeps it out of JS."""
     response.set_cookie(
         key=_SESSION_COOKIE, value=token,
         max_age=_SESSION_COOKIE_TTL_DAYS * 24 * 3600,
-        httponly=True, secure=True, samesite="lax", path="/",
+        httponly=True, secure=True, samesite="none", path="/",
     )
 
 
@@ -1649,34 +1664,73 @@ def _send_magic_link_email(email: str, token: str) -> bool:
         return False
 
 
+def _absolute_redirect_target(dest: str) -> str:
+    """Resolve a redirect path against APP_URL. The frontend lives on a
+    different registrable domain (soulmd.us) than the backend
+    (ekgscan.com), so relative redirects from the verify endpoint land
+    the browser on ekgscan.com, where there's a separate 301 chain back
+    to soulmd.us. Returning the absolute soulmd.us URL skips the
+    intermediate hop and lets the session cookie attach cleanly to
+    the first request after the redirect."""
+    if dest.startswith("http://") or dest.startswith("https://"):
+        return dest
+    if not dest.startswith("/"):
+        dest = "/" + dest
+    base = (_APP_URL or "").rstrip("/")
+    return base + dest if base else dest
+
+
 @app.get("/api/auth/verify")
 def sec_magic_link_verify(token: str, request: Request, db: Session = Depends(get_db)):
     """Single-use token consumer. On success: issues a JWT, stores it
     in the soulmd_session httpOnly cookie, and 302-redirects to the
-    destination stored on the token row. Errors redirect to /login
-    with an ?error= query param so the UI can surface a clean message."""
+    destination. Errors redirect to /login with an ?error= query param.
+
+    First-time-superuser routing: when anderson@soulmd.us verifies a
+    magic link AND has no TOTPCredential row yet, override the stored
+    destination and send them to /settings/authenticator. The UI
+    there can require them to enroll a TOTP authenticator on first
+    sign-in. If a credential exists, the stored destination wins."""
     from fastapi.responses import RedirectResponse  # noqa: WPS433
     ip = _client_ip(request)
     row = db.query(MagicLinkToken).filter(MagicLinkToken.token == token).first()
     if not row:
         _sentry_event("magic_link_invalid", ip=ip)
-        return RedirectResponse(url="/login?error=invalid", status_code=302)
+        return RedirectResponse(url=_absolute_redirect_target("/login?error=invalid"), status_code=302)
     if row.used_at is not None:
         _sentry_event("magic_link_reuse", ip=ip, email=row.email)
-        return RedirectResponse(url="/login?error=used", status_code=302)
+        return RedirectResponse(url=_absolute_redirect_target("/login?error=used"), status_code=302)
     if row.expires_at < _now_utc():
         _sentry_event("magic_link_expired", ip=ip, email=row.email)
-        return RedirectResponse(url="/login?error=expired", status_code=302)
+        return RedirectResponse(url=_absolute_redirect_target("/login?error=expired"), status_code=302)
     user = db.query(User).filter(User.email == row.email).first()
     if not user:
         _sentry_event("magic_link_user_missing", ip=ip, email=row.email)
-        return RedirectResponse(url="/login?error=invalid", status_code=302)
+        return RedirectResponse(url=_absolute_redirect_target("/login?error=invalid"), status_code=302)
     row.used_at = _now_utc()
     db.commit()
+
+    # Owner-specific routing: route to /settings/authenticator on first
+    # sign-in (no TOTP credential yet) so enrollment can complete before
+    # the next sign-in. After enrollment, the stored destination wins.
+    final_destination = row.destination or "/dashboard"
+    if (user.email or "").strip().lower() == _SOULMD_OWNER_EMAIL:
+        has_totp = db.query(TOTPCredential).filter(TOTPCredential.user_id == user.id).first() is not None
+        if not has_totp:
+            final_destination = "/settings/authenticator"
+            print(f"MAGIC_LINK_VERIFY: owner {user.email!r} has no TOTP — routing to /settings/authenticator")
+        else:
+            # Owner with TOTP enrolled: stored destination, defaulting
+            # to /concierge if nothing more specific was requested.
+            if final_destination in ("/", "/dashboard"):
+                final_destination = "/concierge"
+
     access_token = create_token({"sub": user.email})
-    resp = RedirectResponse(url=row.destination or "/dashboard", status_code=302)
+    absolute = _absolute_redirect_target(final_destination)
+    resp = RedirectResponse(url=absolute, status_code=302)
     _set_session_cookie(resp, access_token)
-    _sentry_event("magic_link_verified", email=user.email, ip=ip, destination=row.destination)
+    print(f"MAGIC_LINK_VERIFIED email={user.email!r} destination={absolute!r}")
+    _sentry_event("magic_link_verified", email=user.email, ip=ip, destination=absolute)
     return resp
 
 
@@ -1835,8 +1889,13 @@ def sec_totp_login(
 
     cred = db.query(TOTPCredential).join(User, User.id == TOTPCredential.user_id).filter(User.email == email).first()
     if not cred:
-        bucket.append(now_ts)
-        raise HTTPException(status_code=401, detail="Invalid code")
+        # Distinct 400 so the Login UI can render the "Authenticator
+        # not set up yet" message + magic-link CTA instead of treating
+        # this as a bad-code attempt. Acceptable info leak since TOTP
+        # login is owner-scoped (the email check above already
+        # 401s anyone else with "Invalid code"), so this only tells
+        # the owner — who already knows their own enrollment state.
+        raise HTTPException(status_code=400, detail="TOTP_NOT_SET_UP")
     fernet = _fernet()
     if fernet is None:
         raise HTTPException(status_code=503, detail="TOTP_ENCRYPTION_KEY not configured on this deploy")
