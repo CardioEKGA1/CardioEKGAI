@@ -1,7 +1,31 @@
 # Copyright 2026 SoulMD, LLC. All Rights Reserved.
 # Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
 
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, JSON, Enum as SAEnum, text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, JSON, Enum as SAEnum, text, inspect as _sa_inspect
+
+
+def add_column_if_not_exists(conn, table: str, column: str, col_type: str) -> None:
+    """Idempotent ALTER TABLE ADD COLUMN that works on PostgreSQL (Railway
+    prod) and SQLite (local dev / tests). The previous in-file pattern
+    used `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which crashes on
+    older Postgres builds and on SQLite — both surfaces the user hit.
+    SQLAlchemy's inspect() abstracts the cross-dialect introspection
+    so a single call site works everywhere. Idempotent: re-running the
+    block on a deploy where the column already exists is a no-op."""
+    try:
+        existing = {c["name"] for c in _sa_inspect(conn).get_columns(table)}
+    except Exception as e:
+        # Table doesn't exist yet (or some other introspection failure).
+        # Caller invariant assumes the table is already present, so log
+        # and skip rather than crash the boot for an optional migration.
+        print(f"add_column_if_not_exists: introspect failed for {table}.{column}: {e}")
+        return
+    if column in existing:
+        return
+    try:
+        conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {col_type}'))
+    except Exception as e:
+        print(f"add_column_if_not_exists: ALTER failed for {table}.{column}: {e}")
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -854,62 +878,62 @@ class TOTPCredential(Base):
 Base.metadata.create_all(bind=engine)
 
 with engine.begin() as conn:
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR DEFAULT 'free'"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_spend FLOAT DEFAULT 0.0"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS spend_reset_month INTEGER DEFAULT 0"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_clinician BOOLEAN DEFAULT FALSE"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS clinician_attested_at TIMESTAMP"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS note_style_preference VARCHAR DEFAULT 'standard'"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
+    add_column_if_not_exists(conn, "users", "subscription_tier", "VARCHAR DEFAULT 'free'")
+    add_column_if_not_exists(conn, "users", "monthly_spend", "FLOAT DEFAULT 0.0")
+    add_column_if_not_exists(conn, "users", "spend_reset_month", "INTEGER DEFAULT 0")
+    add_column_if_not_exists(conn, "users", "is_clinician", "BOOLEAN DEFAULT FALSE")
+    add_column_if_not_exists(conn, "users", "clinician_attested_at", "TIMESTAMP")
+    add_column_if_not_exists(conn, "users", "note_style_preference", "VARCHAR DEFAULT 'standard'")
+    add_column_if_not_exists(conn, "users", "created_at", "TIMESTAMP DEFAULT NOW()")
+    add_column_if_not_exists(conn, "users", "stripe_customer_id", "VARCHAR")
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users(stripe_customer_id)"))
-    conn.execute(text("ALTER TABLE tool_feedback ADD COLUMN IF NOT EXISTS comment VARCHAR"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS overage_amount_this_month FLOAT DEFAULT 0.0"))
+    add_column_if_not_exists(conn, "tool_feedback", "comment", "VARCHAR")
+    add_column_if_not_exists(conn, "users", "is_superuser", "BOOLEAN DEFAULT FALSE")
+    add_column_if_not_exists(conn, "users", "overage_amount_this_month", "FLOAT DEFAULT 0.0")
     # Concierge patient billing columns — added for Billing section. Safe no-op
     # if the concierge_patients table doesn't exist yet (table-less ALTER
     # errors are caught by the outer try below).
     try:
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS subscription_status VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS total_paid_cents INTEGER DEFAULT 0"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS user_id INTEGER"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS visits_used INTEGER DEFAULT 0"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS meditations_used INTEGER DEFAULT 0"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS period_counter_reset_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS test_account BOOLEAN DEFAULT FALSE"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS intake_completed_at TIMESTAMP"))
+        add_column_if_not_exists(conn, "concierge_patients", "stripe_customer_id", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_patients", "stripe_subscription_id", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_patients", "subscription_status", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_patients", "current_period_end", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "total_paid_cents", "INTEGER DEFAULT 0")
+        add_column_if_not_exists(conn, "concierge_patients", "user_id", "INTEGER")
+        add_column_if_not_exists(conn, "concierge_patients", "visits_used", "INTEGER DEFAULT 0")
+        add_column_if_not_exists(conn, "concierge_patients", "meditations_used", "INTEGER DEFAULT 0")
+        add_column_if_not_exists(conn, "concierge_patients", "period_counter_reset_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "test_account", "BOOLEAN DEFAULT FALSE")
+        add_column_if_not_exists(conn, "concierge_patients", "terms_accepted_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "intake_completed_at", "TIMESTAMP")
         # Physician-approval gate. Existing rows default to FALSE; the
         # owner approves new patients from the dashboard Members tab.
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT FALSE"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP"))
+        add_column_if_not_exists(conn, "concierge_patients", "is_approved", "BOOLEAN DEFAULT FALSE")
+        add_column_if_not_exists(conn, "concierge_patients", "approved_at", "TIMESTAMP")
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_is_approved ON concierge_patients(is_approved)"))
         # 6-step onboarding completion + appointment Zoom + cancellation
         # accounting columns. Safe ADD COLUMN IF NOT EXISTS — Postgres-only.
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS zoom_meeting_id VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS zoom_join_url VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS zoom_start_url VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS session_request_id INTEGER"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS canceled_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS canceled_within_window BOOLEAN DEFAULT FALSE"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS no_showed_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS physician_session_notes VARCHAR DEFAULT ''"))
+        add_column_if_not_exists(conn, "concierge_patients", "onboarding_completed_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_appointments", "zoom_meeting_id", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_appointments", "zoom_join_url", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_appointments", "zoom_start_url", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_appointments", "session_request_id", "INTEGER")
+        add_column_if_not_exists(conn, "concierge_appointments", "canceled_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_appointments", "canceled_within_window", "BOOLEAN DEFAULT FALSE")
+        add_column_if_not_exists(conn, "concierge_appointments", "completed_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_appointments", "no_showed_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_appointments", "physician_session_notes", "VARCHAR DEFAULT ''")
         # Per-window idempotency stamps for the appointment-reminders cron.
         # The /internal/jobs/appointment-reminders endpoint walks scheduled
         # appointments at 15-min cadence and sets the matching column when
         # it sends each reminder; subsequent runs in the same window
         # short-circuit on the non-NULL column.
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_24h_sent_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_1h_sent_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_appointments ADD COLUMN IF NOT EXISTS reminder_followup_sent_at TIMESTAMP"))
+        add_column_if_not_exists(conn, "concierge_appointments", "reminder_24h_sent_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_appointments", "reminder_1h_sent_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_appointments", "reminder_followup_sent_at", "TIMESTAMP")
         # Distinguish stripe-paid vs comp/manual enrollments. Default
         # 'stripe' so existing rows are unchanged.
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS payment_method VARCHAR DEFAULT 'stripe'"))
+        add_column_if_not_exists(conn, "concierge_patients", "payment_method", "VARCHAR DEFAULT 'stripe'")
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_payment_method ON concierge_patients(payment_method)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_zoom_meeting_id ON concierge_appointments(zoom_meeting_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_appointments_session_request_id ON concierge_appointments(session_request_id)"))
@@ -924,30 +948,30 @@ with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_customer_id ON concierge_patients(stripe_customer_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_stripe_subscription_id ON concierge_patients(stripe_subscription_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_user_id ON concierge_patients(user_id)"))
-        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS category VARCHAR DEFAULT 'general'"))
-        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS intention VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflection VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_oracle_pulls ADD COLUMN IF NOT EXISTS reflected_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS selected_tools JSON"))
-        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS related_id INTEGER"))
-        conn.execute(text("ALTER TABLE concierge_messages ADD COLUMN IF NOT EXISTS related_kind VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS difficulty VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS affirmations JSON"))
-        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS tags JSON"))
-        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS physician_notes VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_meditations ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual'"))
+        add_column_if_not_exists(conn, "concierge_messages", "category", "VARCHAR DEFAULT 'general'")
+        add_column_if_not_exists(conn, "concierge_messages", "read_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_oracle_pulls", "intention", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_oracle_pulls", "reflection", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_oracle_pulls", "reflected_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "subscriptions", "selected_tools", "JSON")
+        add_column_if_not_exists(conn, "concierge_messages", "related_id", "INTEGER")
+        add_column_if_not_exists(conn, "concierge_messages", "related_kind", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_meditations", "difficulty", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_meditations", "affirmations", "JSON")
+        add_column_if_not_exists(conn, "concierge_meditations", "tags", "JSON")
+        add_column_if_not_exists(conn, "concierge_meditations", "physician_notes", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_meditations", "source", "VARCHAR DEFAULT 'manual'")
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditations_source   ON concierge_meditations(source)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditations_category ON concierge_meditations(category)"))
         # Gratitude lines added on the meditate diary entry. Pre-existing
         # rows back-fill as NULL (the form treats blank as "skipped").
-        conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_1 VARCHAR"))
-        conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_2 VARCHAR"))
-        conn.execute(text("ALTER TABLE meditate_diary_entries ADD COLUMN IF NOT EXISTS gratitude_3 VARCHAR"))
+        add_column_if_not_exists(conn, "meditate_diary_entries", "gratitude_1", "VARCHAR")
+        add_column_if_not_exists(conn, "meditate_diary_entries", "gratitude_2", "VARCHAR")
+        add_column_if_not_exists(conn, "meditate_diary_entries", "gratitude_3", "VARCHAR")
         # Richer concierge inquiry intake (flippable tier-card form).
-        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS dob VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS health_history VARCHAR DEFAULT ''"))
-        conn.execute(text("ALTER TABLE concierge_inquiries ADD COLUMN IF NOT EXISTS insurance_acknowledged BOOLEAN DEFAULT FALSE"))
+        add_column_if_not_exists(conn, "concierge_inquiries", "dob", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_inquiries", "health_history", "VARCHAR DEFAULT ''")
+        add_column_if_not_exists(conn, "concierge_inquiries", "insurance_acknowledged", "BOOLEAN DEFAULT FALSE")
         # heard_from was added with the original tier-card form and removed
         # when the dropdown was retired. Drop the column at boot so the
         # schema matches the model — IF EXISTS keeps fresh installs happy.
@@ -976,21 +1000,24 @@ with engine.begin() as conn:
                 END IF;
             END$$;
         """))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS monthly_payment_count INTEGER DEFAULT 0"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS trial_end_date TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS remaining_balance_invoice_sent_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS remaining_balance_due_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS annual_start_date TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS annual_renewal_due_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS renewal_invoice_sent_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS grace_period_end TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS downgraded_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS is_first_year BOOLEAN DEFAULT TRUE"))
-        conn.execute(text(
-            "ALTER TABLE concierge_patients "
-            "ADD COLUMN IF NOT EXISTS membership_status membership_status_enum "
-            "DEFAULT 'active_monthly' NOT NULL"
-        ))
+        add_column_if_not_exists(conn, "concierge_patients", "monthly_payment_count", "INTEGER DEFAULT 0")
+        add_column_if_not_exists(conn, "concierge_patients", "trial_end_date", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "remaining_balance_invoice_sent_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "remaining_balance_due_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "annual_start_date", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "annual_renewal_due_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "renewal_invoice_sent_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "grace_period_end", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "downgraded_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_patients", "is_first_year", "BOOLEAN DEFAULT TRUE")
+        # Multi-line membership_status enum column. NOT NULL with a default
+        # is safe across both Postgres and the inspect()-based helper —
+        # add_column_if_not_exists no-ops when the column already exists,
+        # otherwise issues the ALTER with the full type expression.
+        add_column_if_not_exists(
+            conn, "concierge_patients", "membership_status",
+            "membership_status_enum DEFAULT 'active_monthly' NOT NULL",
+        )
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_monthly_payment_count ON concierge_patients(monthly_payment_count)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_is_first_year ON concierge_patients(is_first_year)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_membership_status ON concierge_patients(membership_status)"))
@@ -998,21 +1025,21 @@ with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_annual_renewal_due_at ON concierge_patients(annual_renewal_due_at)"))
 
         # ─── Age verification (18+ gate) ────────────────────────────
-        conn.execute(text("ALTER TABLE concierge_patients ADD COLUMN IF NOT EXISTS age_verified BOOLEAN DEFAULT FALSE"))
+        add_column_if_not_exists(conn, "concierge_patients", "age_verified", "BOOLEAN DEFAULT FALSE")
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_patients_age_verified ON concierge_patients(age_verified)"))
-        conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR"))
-        conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS age_verified BOOLEAN DEFAULT FALSE"))
-        conn.execute(text("ALTER TABLE concierge_patient_intake ADD COLUMN IF NOT EXISTS age_verified_at TIMESTAMP"))
+        add_column_if_not_exists(conn, "concierge_patient_intake", "date_of_birth", "VARCHAR")
+        add_column_if_not_exists(conn, "concierge_patient_intake", "age_verified", "BOOLEAN DEFAULT FALSE")
+        add_column_if_not_exists(conn, "concierge_patient_intake", "age_verified_at", "TIMESTAMP")
 
         # ─── Patient meditation prescriptions ────────────────────────
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS physician_id INTEGER"))
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS physician_note VARCHAR DEFAULT ''"))
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS frequency VARCHAR DEFAULT 'one_time'"))
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS next_send_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS played_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"))
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS is_completed BOOLEAN DEFAULT FALSE"))
-        conn.execute(text("ALTER TABLE concierge_meditation_assignments ADD COLUMN IF NOT EXISTS notification_sent BOOLEAN DEFAULT FALSE"))
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "physician_id", "INTEGER")
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "physician_note", "VARCHAR DEFAULT ''")
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "frequency", "VARCHAR DEFAULT 'one_time'")
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "next_send_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "played_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "completed_at", "TIMESTAMP")
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "is_completed", "BOOLEAN DEFAULT FALSE")
+        add_column_if_not_exists(conn, "concierge_meditation_assignments", "notification_sent", "BOOLEAN DEFAULT FALSE")
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditation_assignments_is_completed ON concierge_meditation_assignments(is_completed)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditation_assignments_frequency ON concierge_meditation_assignments(frequency)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_concierge_meditation_assignments_next_send_at ON concierge_meditation_assignments(next_send_at)"))
