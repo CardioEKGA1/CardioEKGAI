@@ -1386,6 +1386,40 @@ _APP_URL = os.getenv("APP_URL", "https://soulmd.us")
 _failed_totp_attempts: dict[str, list[float]] = {}  # in-memory rate limit window
 
 
+# ─── TOTP boot-time self-test ───────────────────────────────────────
+# Exercises the full POST /api/auth/totp/setup pipeline (provisioning
+# URI → QR PNG → base64) at boot. If any step explodes the deploy log
+# names the exact failure mode instead of waiting for the user to
+# click into the wizard. Never raises — boot must complete regardless.
+print("TOTP key present:", bool(os.getenv("TOTP_ENCRYPTION_KEY")))
+try:
+    if _pyotp is None:
+        print("TOTP self-test: SKIPPED — pyotp not importable")
+    elif _qrcode is None:
+        print("TOTP self-test: SKIPPED — qrcode not importable")
+    elif _Fernet is None:
+        print("TOTP self-test: SKIPPED — cryptography not importable")
+    elif not _TOTP_ENC_KEY_RAW:
+        print("TOTP self-test: SKIPPED — TOTP_ENCRYPTION_KEY missing/empty")
+    else:
+        _selftest_fernet = _Fernet(_TOTP_ENC_KEY_RAW)
+        _selftest_secret = _pyotp.random_base32()
+        _selftest_uri = _pyotp.TOTP(_selftest_secret).provisioning_uri(
+            name="selftest@soulmd.us", issuer_name="SoulMD",
+        )
+        _selftest_img = _qrcode.make(_selftest_uri)
+        import io as _selftest_io  # noqa: WPS433
+        _selftest_buf = _selftest_io.BytesIO()
+        _selftest_img.save(_selftest_buf, format="PNG")
+        _selftest_b64 = base64.b64encode(_selftest_buf.getvalue()).decode()
+        # Roundtrip the secret through Fernet so we catch malformed key.
+        _selftest_fernet.decrypt(_selftest_fernet.encrypt(_selftest_secret.encode()))
+        print(f"TOTP self-test: OK — qr_png_bytes={_selftest_buf.tell()} b64_len={len(_selftest_b64)}")
+except Exception as _ste:  # noqa: BLE001
+    # Boot must succeed. Print loudly so the deploy log surfaces it.
+    print(f"TOTP self-test FAILED: {type(_ste).__name__}: {_ste}")
+
+
 def _fernet() -> "_Fernet | None":
     """Returns a Fernet instance built from TOTP_ENCRYPTION_KEY, or None
     when the dependency / env var are missing. Endpoints that hard-require

@@ -1152,47 +1152,83 @@ try:
 except Exception as e:  # never let seed failure block boot
     print(f"ScheduleMD seed skipped: {e}")
 
-# ─── One-shot owner TOTP reset ────────────────────────────────────────
-# When the practice owner's TOTP secret falls out of sync with their
-# authenticator app (e.g. the row was generated against a stale
-# TOTP_ENCRYPTION_KEY before the env var was rotated), the only way
-# back is to wipe the existing TOTPCredential row and re-enroll.
-# Gated on RESET_OWNER_TOTP=true so this never runs by accident:
-# set the env var on Railway, deploy, watch for the boot log,
-# then unset the env var. Idempotent — running the block with the
-# row already deleted just no-ops with `deleted=0`.
+# ─── Sentinel-tracked one-shot migrations ────────────────────────────
+# soulmd_one_shot_migrations records the name of every one-shot
+# migration that has run on this deploy's database. On subsequent
+# boots, the migration block looks up its own name; if present, it
+# skips. This eliminates the env-var-gated activation flow (which
+# silently no-op'd if the env var didn't actually land in the running
+# process) and guarantees the migration runs exactly once.
 import os as _os_smd
 try:
-    _reset_flag = (_os_smd.getenv("RESET_OWNER_TOTP") or "").strip().lower() in ("1", "true", "yes", "on")
-    if _reset_flag:
-        # Always log the configured key length so this same migration
-        # surface doubles as the "is the env var the right shape"
-        # diagnostic the spec asked for. Never logs the key value.
-        print(f"TOTP key length: {len(_os_smd.getenv('TOTP_ENCRYPTION_KEY', ''))}")
-        _owner_email = "anderson@soulmd.us"
-        _reset_db = SessionLocal()
-        try:
-            _user_row = _reset_db.query(User).filter(User.email == _owner_email).first()
-            if not _user_row:
-                print(f"RESET_OWNER_TOTP: no user row for {_owner_email} — nothing to delete.")
-            else:
-                _deleted = _reset_db.query(TOTPCredential).filter(
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soulmd_one_shot_migrations (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                applied_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+except Exception as e:
+    print(f"one_shot_migrations table init skipped: {e}")
+
+# Always log key presence at boot — the user spec asks for this exact
+# format so it's grep-able across deploy logs. Length-only fingerprint
+# never leaks the value. Pairs with the boot-time self-test in main.py
+# that exercises the Fernet+pyotp roundtrip.
+print("TOTP key present:", bool(_os_smd.getenv("TOTP_ENCRYPTION_KEY")))
+print(f"TOTP key length: {len(_os_smd.getenv('TOTP_ENCRYPTION_KEY', ''))}")
+
+# Migration: reset_owner_totp_2026_05_v1
+# Clears the practice owner's TOTPCredential row so a fresh PingID
+# enrollment can complete. Runs once; the sentinel row in
+# soulmd_one_shot_migrations prevents re-running on future deploys
+# (which would otherwise wipe a fresh enrollment).
+_MIGRATION_NAME = "reset_owner_totp_2026_05_v1"
+try:
+    _migration_db = SessionLocal()
+    try:
+        _already = _migration_db.execute(
+            text("SELECT 1 FROM soulmd_one_shot_migrations WHERE name = :n LIMIT 1"),
+            {"n": _MIGRATION_NAME},
+        ).first()
+        if _already:
+            print(f"OneShotMigration {_MIGRATION_NAME}: already applied — skipping.")
+        else:
+            _owner_email = "anderson@soulmd.us"
+            _user_row = _migration_db.query(User).filter(User.email == _owner_email).first()
+            if _user_row:
+                _deleted = _migration_db.query(TOTPCredential).filter(
                     TOTPCredential.user_id == _user_row.id,
                 ).delete(synchronize_session=False)
-                _reset_db.commit()
-                _remaining = _reset_db.query(TOTPCredential).filter(
+                _migration_db.execute(
+                    text("INSERT INTO soulmd_one_shot_migrations (name) VALUES (:n)"),
+                    {"n": _MIGRATION_NAME},
+                )
+                _migration_db.commit()
+                _remaining = _migration_db.query(TOTPCredential).filter(
                     TOTPCredential.user_id == _user_row.id,
                 ).count()
                 print(
-                    f"RESET_OWNER_TOTP: deleted {_deleted} TOTPCredential row(s) "
+                    f"OneShotMigration {_MIGRATION_NAME}: deleted {_deleted} TOTPCredential row(s) "
                     f"for {_owner_email} (user_id={_user_row.id}); remaining={_remaining}"
                 )
                 if _remaining != 0:
-                    print(f"RESET_OWNER_TOTP WARNING: expected remaining=0, got {_remaining}")
-        finally:
-            _reset_db.close()
+                    print(f"OneShotMigration {_MIGRATION_NAME} WARNING: expected remaining=0, got {_remaining}")
+            else:
+                # User row didn't exist yet (rare — magic-link bootstrap
+                # creates it on first sign-in). Mark the migration as
+                # applied anyway so we don't keep trying every boot.
+                _migration_db.execute(
+                    text("INSERT INTO soulmd_one_shot_migrations (name) VALUES (:n)"),
+                    {"n": _MIGRATION_NAME},
+                )
+                _migration_db.commit()
+                print(f"OneShotMigration {_MIGRATION_NAME}: no user row for {_owner_email}; marked applied.")
+    finally:
+        _migration_db.close()
 except Exception as e:  # never let migration failure block boot
-    print(f"RESET_OWNER_TOTP migration skipped: {e}")
+    print(f"OneShotMigration {_MIGRATION_NAME} skipped: {e}")
 
 def get_db():
     db = SessionLocal()
