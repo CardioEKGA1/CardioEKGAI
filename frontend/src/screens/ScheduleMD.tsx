@@ -261,6 +261,7 @@ const ScheduleMD: React.FC<Props> = ({
           onConcierge={onNavigateConciergeAccess || (() => { window.location.href = '/concierge-access'; })}
           onMarketing={onNavigateMarketing || (() => { window.location.href = '/admin/marketing'; })}
           onScheduleMD={() => { /* already here */ }}
+          onAllowlist={() => { window.location.href = '/settings/allowlist'; }}
         />
       </div>
 

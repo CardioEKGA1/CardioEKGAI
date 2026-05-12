@@ -32,6 +32,7 @@ import MarketingAgent from './screens/MarketingAgent';
 import ScheduleMD from './screens/ScheduleMD';
 import ScheduleMDPortal from './screens/ScheduleMDPortal';
 import AuthVerify from './screens/AuthVerify';
+import AllowlistManager from './screens/AllowlistManager';
 import SoulMDLogo from './SoulMDLogo';
 import ChoKuRei from './screens/concierge/ChoKuRei';
 import MeditateApp from './screens/meditate/MeditateApp';
@@ -100,6 +101,7 @@ type Screen =
   | 'marketing_admin'
   | 'meditate'
   | 'auth_verify'           // /auth/verify — magic-link landing → backend hand-off
+  | 'allowlist'             // /settings/allowlist — superuser-only allowlist manager
   | 'schedulemd'            // hospital scheduling admin at /schedulemd (superuser-only)
   | 'schedulemd_portal'     // physician portal at /schedulemd/portal?token=XXX (token-gated)
   | 'welcome'               // /welcome — public shareable rich landing (ConciergeLandingPage)
@@ -147,6 +149,7 @@ const pathToScreen = (path: string): Screen | null => {
           path.startsWith('/admin') ||
           path === '/login' ||
           path === '/auth/verify' ||
+          path === '/settings/allowlist' ||
           path === '/concierge' || path.startsWith('/concierge/') ||
           path === '/concierge-medicine' ||
           path === '/welcome' ||
@@ -201,6 +204,7 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/welcome')           return 'welcome';
   if (path === '/login')             return 'auth';
   if (path === '/auth/verify')       return 'auth_verify';
+  if (path === '/settings/allowlist') return 'allowlist';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
     const candidate = `tool_${slug}` as Screen;
@@ -242,6 +246,7 @@ const screenToPath = (s: Screen): string => {
   if (s === 'schedulemd_portal')   return '/schedulemd/portal';
   if (s === 'welcome')             return '/welcome';
   if (s === 'auth_verify')         return '/auth/verify';
+  if (s === 'allowlist')           return '/settings/allowlist';
   // public_splash has no canonical path — it's the lockdown destination
   // for any URL not in the allowlist. Preserve whatever the user typed
   // so the address bar still reflects their intent.
@@ -509,6 +514,7 @@ const App: React.FC = () => {
       schedulemd:          `ScheduleMD · ${brand}`,
       schedulemd_portal:   'ScheduleMD Portal · SoulMD',
       auth_verify:         'Verifying… · SoulMD',
+      allowlist:           'Sign-in allowlist · SoulMD',
       welcome:             'SoulMD — Concierge Medicine by Dr. Neysi Anderson',
       public_splash:       'SoulMD — Where Science Meets the Soul',
       not_found:           `Page not found · ${brand}`,
@@ -533,7 +539,7 @@ const App: React.FC = () => {
     const PROTECTED: Screen[] = [
       'dashboard', 'concierge', 'patient_pwa', 'patient_terms', 'patient_intake',
       'meditations_library', 'concierge_access', 'marketing_admin', 'meditate',
-      'schedulemd',
+      'schedulemd', 'allowlist',
       'tool_nephroai', 'tool_rxcheck', 'tool_antibioticai', 'tool_clinicalnote',
       'tool_xrayread', 'tool_cerebralai', 'tool_palliativemd', 'tool_anticoag',
       'tool_labread', 'tool_cliniscore',
@@ -728,6 +734,18 @@ const App: React.FC = () => {
     }
   }, [screen, user, token, navigate]);
 
+  // /settings/allowlist — owner-only allowlist manager. Same superuser
+  // gate shape as /schedulemd above.
+  useEffect(() => {
+    if (screen !== 'allowlist') return;
+    if (!token) { navigate('auth'); return; }
+    if (!user) return;
+    if (!user.is_superuser) {
+      try { window.history.replaceState({}, '', '/'); } catch {}
+      setScreen('public_splash');
+    }
+  }, [screen, user, token, navigate]);
+
   if (isAdminRoute) {
     return (
       <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#dce8fb 0%,#ede8fb 100%)',fontFamily:'-apple-system,BlinkMacSystemFont,sans-serif'}}>
@@ -905,6 +923,18 @@ const App: React.FC = () => {
         />
       )}
       {screen==='auth_verify' && <AuthVerify API={API}/>}
+      {screen==='allowlist' && user && user.is_superuser && (
+        <AllowlistManager
+          API={API}
+          token={token}
+          onBack={() => navigate('concierge')}
+          onNavigateDashboard={() => navigate('dashboard')}
+          onNavigateMeditations={() => navigate('meditations_library')}
+          onNavigateConciergeAccess={() => navigate('concierge_access')}
+          onNavigateMarketing={() => navigate('marketing_admin')}
+          onNavigateScheduleMD={() => navigate('schedulemd')}
+        />
+      )}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}
       {screen==='results' && result && <Results result={result} imageUrl={imageUrl} onChat={()=>navigate('chat')} onBack={goBack}/>}
       {screen==='chat' && result && <Chat result={result} API={API} token={token} onBack={goBack}/>}

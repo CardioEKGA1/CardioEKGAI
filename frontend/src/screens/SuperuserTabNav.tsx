@@ -8,12 +8,13 @@
 import React from 'react';
 
 interface Props {
-  active: 'dashboard' | 'meditations' | 'concierge' | 'marketing' | 'schedulemd';
+  active: 'dashboard' | 'meditations' | 'concierge' | 'marketing' | 'schedulemd' | 'allowlist';
   onDashboard: () => void;
   onMeditations: () => void;
   onConcierge: () => void;
   onMarketing?: () => void;       // optional so existing callers don't break
   onScheduleMD?: () => void;      // optional — ScheduleMD tab shown only when wired
+  onAllowlist?: () => void;       // optional — magic-link allowlist manager
   show?: boolean;
 }
 
@@ -24,7 +25,7 @@ const BORDER     = 'rgba(83,74,183,0.14)';
 const GOLD       = '#C9A84C';
 const GOLD_BG    = 'rgba(201,168,76,0.14)';
 
-const SuperuserTabNav: React.FC<Props> = ({ active, onDashboard, onMeditations, onConcierge, onMarketing, onScheduleMD, show = true }) => {
+const SuperuserTabNav: React.FC<Props> = ({ active, onDashboard, onMeditations, onConcierge, onMarketing, onScheduleMD, onAllowlist, show = true }) => {
   if (!show) return null;
   return (
     <nav style={{
@@ -37,6 +38,9 @@ const SuperuserTabNav: React.FC<Props> = ({ active, onDashboard, onMeditations, 
       <Tab label="Concierge"   isActive={active === 'concierge'}   onClick={onConcierge}/>
       {onScheduleMD && (
         <Tab label="ScheduleMD" isActive={active === 'schedulemd'} onClick={onScheduleMD}/>
+      )}
+      {onAllowlist && (
+        <Tab label="Allowlist" isActive={active === 'allowlist'} onClick={onAllowlist}/>
       )}
       {onMarketing && (
         <Tab label="Marketing" isActive={active === 'marketing'} onClick={onMarketing} accent="gold"/>
