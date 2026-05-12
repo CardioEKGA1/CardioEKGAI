@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import (
     get_db, User, ToolUsage, Subscription, ToolFeedback, ClinicalCase, DeletedAccount, MagicLinkAttempt,
-    MagicLinkToken, TOTPCredential,
+    MagicLinkToken, MagicLinkAllowlist,
     ConciergePatient, ConciergeMessage, ConciergeAppointment, ConciergeMembership, ConciergeInvoice,
     ConciergeCoachingModule, ConciergeModuleAssignment, ConciergeMeditation, ConciergeMeditationAssignment,
     ConciergeHabit, ConciergeHabitCheckin, UserStyleProfile,
@@ -1334,56 +1334,18 @@ def verify_token(request: Request, data: TokenVerify, db: Session = Depends(get_
 import secrets as _auth_secrets
 import base64 as _auth_base64
 import io as _auth_io
-try:
-    import pyotp as _pyotp
-except Exception:  # noqa: BLE001
-    _pyotp = None
-try:
-    import qrcode as _qrcode
-except Exception:  # noqa: BLE001
-    _qrcode = None
-try:
-    from cryptography.fernet import Fernet as _Fernet, InvalidToken as _FernetInvalidToken
-except Exception:  # noqa: BLE001
-    _Fernet = None  # type: ignore
-    _FernetInvalidToken = Exception  # type: ignore
 
-try:
-    import bcrypt as _bcrypt
-except Exception:  # noqa: BLE001
-    _bcrypt = None
+# TOTP support was removed; the totp_credentials table is retained in
+# the schema (orphaned) per the security-review decision. Magic-link
+# is the only auth surface now, gated on the magic_link_allowlist table.
 
-# Startup log — explicit boolean check so the Railway log shows
-# whether the env var made it into the process at all. Length-only
-# fingerprint (never the value) makes "wrong key set" diagnosable
-# from the deploy log without leaking the secret. We also exercise
-# the Fernet constructor here so a malformed key surfaces at boot
-# instead of on the first /api/auth/totp/setup call.
-print(f"TOTP_ENCRYPTION_KEY loaded: {bool(os.getenv('TOTP_ENCRYPTION_KEY'))} "
-      f"length={len((os.getenv('TOTP_ENCRYPTION_KEY') or '').strip())}")
-print(f"TOTP libs available: pyotp={_pyotp is not None} "
-      f"qrcode={_qrcode is not None} cryptography={_Fernet is not None}")
-try:
-    _TOTP_ENC_KEY_RAW = (os.getenv("TOTP_ENCRYPTION_KEY") or "").strip().encode() or None
-    if _TOTP_ENC_KEY_RAW and _Fernet is not None:
-        try:
-            _Fernet(_TOTP_ENC_KEY_RAW)
-            print("TOTP_ENCRYPTION_KEY validated against Fernet ✓")
-        except Exception as _fe:  # noqa: BLE001
-            print(f"TOTP_ENCRYPTION_KEY present but invalid Fernet format: {type(_fe).__name__}: {_fe}")
-except Exception as _e:  # noqa: BLE001
-    print(f"TOTP key load skipped: {_e}")
-    _TOTP_ENC_KEY_RAW = None
 _SOULMD_OWNER_EMAIL = "anderson@soulmd.us"
 _MAGIC_LINK_TTL_MINUTES = 15
 _MAGIC_LINK_RATE_LIMIT_PER_15MIN = 3
-_TOTP_FAILURE_LIMIT_PER_15MIN = 5
 _SESSION_COOKIE = "soulmd_session"
 _SESSION_COOKIE_TTL_DAYS = 7
 _FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@soulmd.us")
 _APP_URL = os.getenv("APP_URL", "https://soulmd.us")
-
-_failed_totp_attempts: dict[str, list[float]] = {}  # in-memory rate limit window
 
 # Boot log so the deploy log shows exactly which domain the magic-link
 # emails are pointing at. If APP_URL accidentally falls back to a
@@ -1393,67 +1355,11 @@ print(f"AUTH_APP_URL={_APP_URL!r} (magic-link emails and verify-redirect target)
 print(f"AUTH_FROM_EMAIL={_FROM_EMAIL!r}")
 
 
-# ─── TOTP boot-time self-test ───────────────────────────────────────
-# Exercises the full POST /api/auth/totp/setup pipeline (provisioning
-# URI → QR PNG → base64) at boot. If any step explodes the deploy log
-# names the exact failure mode instead of waiting for the user to
-# click into the wizard. Never raises — boot must complete regardless.
-print("TOTP key present:", bool(os.getenv("TOTP_ENCRYPTION_KEY")))
-try:
-    if _pyotp is None:
-        print("TOTP self-test: SKIPPED — pyotp not importable")
-    elif _qrcode is None:
-        print("TOTP self-test: SKIPPED — qrcode not importable")
-    elif _Fernet is None:
-        print("TOTP self-test: SKIPPED — cryptography not importable")
-    elif not _TOTP_ENC_KEY_RAW:
-        print("TOTP self-test: SKIPPED — TOTP_ENCRYPTION_KEY missing/empty")
-    else:
-        _selftest_fernet = _Fernet(_TOTP_ENC_KEY_RAW)
-        _selftest_secret = _pyotp.random_base32()
-        _selftest_uri = _pyotp.TOTP(_selftest_secret).provisioning_uri(
-            name="selftest@soulmd.us", issuer_name="SoulMD",
-        )
-        _selftest_img = _qrcode.make(_selftest_uri)
-        import io as _selftest_io  # noqa: WPS433
-        _selftest_buf = _selftest_io.BytesIO()
-        _selftest_img.save(_selftest_buf, format="PNG")
-        _selftest_b64 = base64.b64encode(_selftest_buf.getvalue()).decode()
-        # Roundtrip the secret through Fernet so we catch malformed key.
-        _selftest_fernet.decrypt(_selftest_fernet.encrypt(_selftest_secret.encode()))
-        print(f"TOTP self-test: OK — qr_png_bytes={_selftest_buf.tell()} b64_len={len(_selftest_b64)}")
-except Exception as _ste:  # noqa: BLE001
-    # Boot must succeed. Print loudly so the deploy log surfaces it.
-    print(f"TOTP self-test FAILED: {type(_ste).__name__}: {_ste}")
-
-
-def _fernet() -> "_Fernet | None":
-    """Returns a Fernet instance built from TOTP_ENCRYPTION_KEY, or None
-    when the dependency / env var are missing. Endpoints that hard-require
-    encryption raise 503 with a specific error so the front-end can
-    surface 'TOTP unavailable on this deploy' to the operator."""
-    if _Fernet is None or not _TOTP_ENC_KEY_RAW:
-        return None
-    try:
-        return _Fernet(_TOTP_ENC_KEY_RAW)
-    except Exception as e:  # noqa: BLE001
-        print(f"TOTP fernet init error: {e}")
-        return None
-
-
-def _hash_backup_code(code: str) -> str:
-    if not _bcrypt:
-        raise HTTPException(status_code=503, detail="bcrypt unavailable")
-    return _bcrypt.hashpw(code.encode(), _bcrypt.gensalt(rounds=10)).decode()
-
-
-def _verify_backup_code(code: str, hashed: str) -> bool:
-    if not _bcrypt or not hashed or hashed.startswith("USED:"):
-        return False
-    try:
-        return _bcrypt.checkpw(code.encode(), hashed.encode())
-    except Exception:  # noqa: BLE001
-        return False
+def _verify_backup_code(_code: str, _hashed: str) -> bool:
+    """Stub left behind after TOTP removal so any stray import doesn't
+    crash boot. Always returns False — there are no backup codes to
+    verify any more."""
+    return False
 
 
 def _now_utc() -> datetime:
@@ -1531,11 +1437,6 @@ class _SecMagicLinkIn(BaseModel):
     email: str
     destination: str | None = None
 
-class _SecTOTPLoginIn(BaseModel):
-    email: str
-    totp_code: str
-
-
 @app.post("/api/auth/magic-link")
 @limiter.limit("10/minute")
 def sec_magic_link_request(
@@ -1568,6 +1469,15 @@ def sec_magic_link_request(
 
     if not email or "@" not in email:
         print(f"MAGIC_LINK_INVALID_EMAIL email={email!r} (silent 200)")
+        return {"ok": True}
+
+    # Allowlist gate. Non-allowlisted emails get the same 200 response
+    # the success path returns, so the blocklist itself isn't
+    # observable. Allowlist membership is owner-managed via
+    # /api/admin/allowlist.
+    allowed = db.query(MagicLinkAllowlist).filter(MagicLinkAllowlist.email == email).first()
+    if not allowed:
+        print(f"MAGIC_LINK_NOT_ALLOWLISTED email={email!r} (silent 200)")
         return {"ok": True}
 
     user = db.query(User).filter(User.email == email).first()
@@ -1685,12 +1595,8 @@ def sec_magic_link_verify(token: str, request: Request, db: Session = Depends(ge
     """Single-use token consumer. On success: issues a JWT, stores it
     in the soulmd_session httpOnly cookie, and 302-redirects to the
     destination. Errors redirect to /login with an ?error= query param.
-
-    First-time-superuser routing: when anderson@soulmd.us verifies a
-    magic link AND has no TOTPCredential row yet, override the stored
-    destination and send them to /settings/authenticator. The UI
-    there can require them to enroll a TOTP authenticator on first
-    sign-in. If a credential exists, the stored destination wins."""
+    Owner default lands on /concierge; everyone else on the stored
+    destination."""
     from fastapi.responses import RedirectResponse  # noqa: WPS433
     ip = _client_ip(request)
     row = db.query(MagicLinkToken).filter(MagicLinkToken.token == token).first()
@@ -1710,20 +1616,12 @@ def sec_magic_link_verify(token: str, request: Request, db: Session = Depends(ge
     row.used_at = _now_utc()
     db.commit()
 
-    # Owner-specific routing: route to /settings/authenticator on first
-    # sign-in (no TOTP credential yet) so enrollment can complete before
-    # the next sign-in. After enrollment, the stored destination wins.
     final_destination = row.destination or "/dashboard"
     if (user.email or "").strip().lower() == _SOULMD_OWNER_EMAIL:
-        has_totp = db.query(TOTPCredential).filter(TOTPCredential.user_id == user.id).first() is not None
-        if not has_totp:
-            final_destination = "/settings/authenticator"
-            print(f"MAGIC_LINK_VERIFY: owner {user.email!r} has no TOTP — routing to /settings/authenticator")
-        else:
-            # Owner with TOTP enrolled: stored destination, defaulting
-            # to /concierge if nothing more specific was requested.
-            if final_destination in ("/", "/dashboard"):
-                final_destination = "/concierge"
+        # Owner default: /concierge unless a more specific stored
+        # destination was requested at link-issue time.
+        if final_destination in ("/", "/dashboard"):
+            final_destination = "/concierge"
 
     access_token = create_token({"sub": user.email})
     absolute = _absolute_redirect_target(final_destination)
@@ -1734,222 +1632,6 @@ def sec_magic_link_verify(token: str, request: Request, db: Session = Depends(ge
     return resp
 
 
-# ─── TOTP (PingID / Google Authenticator / Authy compatible) ─────────
-@app.get("/api/auth/totp/status")
-def sec_totp_status(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Sign in required")
-    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
-        raise HTTPException(status_code=404, detail="Not found")
-    cred = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
-    if not cred:
-        return {"enabled": False, "last_used_at": None}
-    return {
-        "enabled": True,
-        "last_used_at": cred.last_used_at.isoformat() if cred.last_used_at else None,
-    }
-
-
-@app.get("/api/auth/totp/diagnostics")
-def sec_totp_diagnostics(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Owner-only preflight reporting which preconditions for TOTP setup
-    are met on this deploy. Surfaces the three "503-class" failure modes
-    (missing libs, missing key, malformed key) plus the 409 case (stale
-    credential) without leaking any secrets. The setup wizard calls
-    this on mount so the user sees exactly what's wrong before clicking
-    Next, instead of getting an opaque error inside the flow."""
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Sign in required")
-    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
-        raise HTTPException(status_code=404, detail="Not found")
-
-    raw_key = os.getenv("TOTP_ENCRYPTION_KEY") or ""
-    fernet_ok = False
-    fernet_error: str | None = None
-    if not raw_key.strip():
-        fernet_error = "TOTP_ENCRYPTION_KEY env var is empty or unset"
-    elif _Fernet is None:
-        fernet_error = "cryptography package not installed"
-    else:
-        try:
-            _Fernet(raw_key.strip().encode())
-            fernet_ok = True
-        except Exception as e:  # noqa: BLE001
-            # Don't leak the key. Just the failure shape.
-            fernet_error = f"TOTP_ENCRYPTION_KEY invalid Fernet format ({type(e).__name__})"
-
-    cred = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
-    return {
-        "pyotp_installed": _pyotp is not None,
-        "qrcode_installed": _qrcode is not None,
-        "cryptography_installed": _Fernet is not None,
-        "totp_key_present": bool(raw_key.strip()),
-        "totp_key_length": len(raw_key.strip()),  # Fernet keys are 44 chars
-        "fernet_init_ok": fernet_ok,
-        "fernet_error": fernet_error,
-        "existing_credential": bool(cred),
-        "existing_credential_enabled_at": cred.enabled_at.isoformat() if cred and cred.enabled_at else None,
-        "ready_for_setup": (
-            _pyotp is not None and _qrcode is not None
-            and fernet_ok and not cred
-        ),
-    }
-
-
-@app.post("/api/auth/totp/setup")
-def sec_totp_setup(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Sign in required")
-    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
-        raise HTTPException(status_code=404, detail="Not found")
-    if _pyotp is None or _qrcode is None:
-        raise HTTPException(status_code=503, detail="TOTP libraries unavailable on this build (pyotp / qrcode missing — check requirements.txt deploy)")
-    raw_key = (os.getenv("TOTP_ENCRYPTION_KEY") or "").strip()
-    if not raw_key:
-        raise HTTPException(status_code=503, detail="TOTP_ENCRYPTION_KEY not configured")
-    if _Fernet is None:
-        raise HTTPException(status_code=503, detail="cryptography package missing — check requirements.txt deploy")
-    try:
-        fernet = _Fernet(raw_key.encode())
-    except _FernetInvalidToken as e:
-        raise HTTPException(status_code=500, detail=f"TOTP_ENCRYPTION_KEY is set but not a valid Fernet key: {e}")
-    except Exception as e:  # noqa: BLE001
-        # Fernet's own ValueError on wrong-length keys lands here.
-        raise HTTPException(status_code=500, detail=f"TOTP_ENCRYPTION_KEY format error ({type(e).__name__}): {e}")
-
-    existing = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="TOTP already enrolled. Disable it first to re-enroll.")
-
-    secret = _pyotp.random_base32()
-    totp = _pyotp.TOTP(secret)
-    uri = totp.provisioning_uri(name=current_user.email, issuer_name="SoulMD")
-    img = _qrcode.make(uri)
-    buf = _auth_io.BytesIO()
-    img.save(buf, format="PNG")
-    qr_b64 = _auth_base64.b64encode(buf.getvalue()).decode()
-
-    plaintext_codes = [_auth_secrets.token_hex(4).upper() for _ in range(8)]
-    hashed_codes = [_hash_backup_code(c) for c in plaintext_codes]
-
-    cred = TOTPCredential(
-        user_id=current_user.id,
-        totp_secret=fernet.encrypt(secret.encode()).decode(),
-        backup_codes=hashed_codes,
-    )
-    db.add(cred)
-    db.commit()
-
-    _sentry_event("totp_setup_completed", email=current_user.email)
-    return {
-        "qr_code_base64": qr_b64,
-        "backup_codes": plaintext_codes,
-        "secret": secret,
-    }
-
-
-@app.delete("/api/auth/totp/disable")
-def sec_totp_disable(current_user: User | None = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Sign in required")
-    if (current_user.email or "").strip().lower() != _SOULMD_OWNER_EMAIL:
-        raise HTTPException(status_code=404, detail="Not found")
-    cred = db.query(TOTPCredential).filter(TOTPCredential.user_id == current_user.id).first()
-    if cred:
-        db.delete(cred)
-        db.commit()
-        _sentry_event("totp_disabled", email=current_user.email)
-    return {"ok": True}
-
-
-@app.post("/api/auth/totp/login")
-def sec_totp_login(
-    body: _SecTOTPLoginIn,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    """Owner-only TOTP fast-path. Accepts either a 6-digit code from the
-    authenticator app or one of the 8 backup codes. Sets the session
-    cookie on success."""
-    from fastapi.responses import JSONResponse  # noqa: WPS433
-    email = (body.email or "").strip().lower()
-    ip = _client_ip(request)
-    if email != _SOULMD_OWNER_EMAIL:
-        _sentry_event("totp_login_failed", reason="bad_email", ip=ip)
-        raise HTTPException(status_code=401, detail="Invalid code")
-
-    # Sliding-window lockout: 5 fails per 15 min per IP.
-    now_ts = datetime.utcnow().timestamp()
-    window = 15 * 60
-    bucket = _failed_totp_attempts.setdefault(ip, [])
-    bucket[:] = [t for t in bucket if now_ts - t < window]
-    if len(bucket) >= _TOTP_FAILURE_LIMIT_PER_15MIN:
-        _sentry_event("totp_login_locked", ip=ip)
-        raise HTTPException(status_code=429, detail="Too many attempts. Please wait 15 minutes.")
-
-    cred = db.query(TOTPCredential).join(User, User.id == TOTPCredential.user_id).filter(User.email == email).first()
-    if not cred:
-        # Distinct 400 so the Login UI can render the "Authenticator
-        # not set up yet" message + magic-link CTA instead of treating
-        # this as a bad-code attempt. Acceptable info leak since TOTP
-        # login is owner-scoped (the email check above already
-        # 401s anyone else with "Invalid code"), so this only tells
-        # the owner — who already knows their own enrollment state.
-        raise HTTPException(status_code=400, detail="TOTP_NOT_SET_UP")
-    fernet = _fernet()
-    if fernet is None:
-        raise HTTPException(status_code=503, detail="TOTP_ENCRYPTION_KEY not configured on this deploy")
-
-    code = (body.totp_code or "").strip()
-    if not code:
-        bucket.append(now_ts)
-        raise HTTPException(status_code=401, detail="Invalid code")
-
-    ok = False
-    used_backup_index = -1
-    # Try TOTP first.
-    digit_only = code.replace(" ", "")
-    if digit_only.isdigit() and len(digit_only) == 6 and _pyotp is not None:
-        try:
-            secret = fernet.decrypt(cred.totp_secret.encode()).decode()
-            ok = _pyotp.TOTP(secret).verify(digit_only, valid_window=1)
-        except _FernetInvalidToken:
-            ok = False
-    # Fall back to backup codes (8-hex-char alpha-numeric).
-    if not ok:
-        codes_list = list(cred.backup_codes or [])
-        for i, h in enumerate(codes_list):
-            if _verify_backup_code(code.upper(), h):
-                ok = True
-                used_backup_index = i
-                break
-        if used_backup_index >= 0:
-            codes_list[used_backup_index] = "USED:" + codes_list[used_backup_index]
-            cred.backup_codes = codes_list
-            db.commit()
-
-    if not ok:
-        bucket.append(now_ts)
-        _sentry_event("totp_login_failed", email=email, ip=ip, reason="bad_code")
-        raise HTTPException(status_code=401, detail="Invalid code")
-
-    cred.last_used_at = _now_utc()
-    db.commit()
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        # Defensive — shouldn't happen given the join above succeeded.
-        raise HTTPException(status_code=401, detail="Invalid code")
-    access_token = create_token({"sub": user.email})
-    body_out = {
-        "redirect": "/concierge",
-        "access_token": access_token,        # legacy frontends pick this up too
-        "email": user.email,
-        "is_superuser": True,
-    }
-    resp = JSONResponse(body_out)
-    _set_session_cookie(resp, access_token)
-    _sentry_event("totp_login_success", email=email, ip=ip, used_backup=(used_backup_index >= 0))
-    return resp
 
 
 @app.get("/api/auth/session")
@@ -1976,6 +1658,76 @@ def sec_logout(request: Request):
     _clear_session_cookie(resp)
     _sentry_event("user_logged_out", ip=_client_ip(request))
     return resp
+
+
+# ─── Magic-link allowlist admin (owner-only) ─────────────────────────
+# CRUD over the magic_link_allowlist table. Every endpoint funnels
+# through verify_concierge_owner, which 404s anyone who isn't the
+# practice owner (or a superuser) — keeping the existence of the
+# allowlist surface hidden from anonymous probing. POST is idempotent
+# on `email` (re-adding an existing entry just updates the label).
+
+class _AllowlistEntryIn(BaseModel):
+    email: str
+    label: str | None = None
+
+
+def _ser_allowlist(row: MagicLinkAllowlist) -> dict:
+    return {
+        "id": row.id,
+        "email": row.email,
+        "label": row.label,
+        "added_at": row.added_at.isoformat() if row.added_at else None,
+    }
+
+
+@app.get("/api/admin/allowlist")
+def admin_allowlist_list(
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    rows = db.query(MagicLinkAllowlist).order_by(MagicLinkAllowlist.added_at.asc()).all()
+    return {"entries": [_ser_allowlist(r) for r in rows]}
+
+
+@app.post("/api/admin/allowlist")
+def admin_allowlist_add(
+    body: _AllowlistEntryIn,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="email must be a valid address")
+    label = (body.label or "").strip() or None
+    existing = db.query(MagicLinkAllowlist).filter(MagicLinkAllowlist.email == email).first()
+    if existing:
+        # Idempotent: re-adding just updates the label. No 409 — the
+        # admin UI uses the same POST for both first-add and rename.
+        existing.label = label
+        db.commit()
+        db.refresh(existing)
+        print(f"ALLOWLIST_UPDATE email={email!r} label={label!r}")
+        return _ser_allowlist(existing)
+    row = MagicLinkAllowlist(email=email, label=label)
+    db.add(row); db.commit(); db.refresh(row)
+    print(f"ALLOWLIST_ADD email={email!r} label={label!r}")
+    return _ser_allowlist(row)
+
+
+@app.delete("/api/admin/allowlist/{email}")
+def admin_allowlist_remove(
+    email: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(verify_concierge_owner),
+):
+    target = (email or "").strip().lower()
+    row = db.query(MagicLinkAllowlist).filter(MagicLinkAllowlist.email == target).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="email not on allowlist")
+    db.delete(row); db.commit()
+    print(f"ALLOWLIST_REMOVE email={target!r}")
+    return {"ok": True, "email": target}
 
 
 @app.post("/auth/delete-account")

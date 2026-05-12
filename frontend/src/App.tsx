@@ -31,7 +31,6 @@ import PatientIntake from './screens/PatientIntake';
 import MarketingAgent from './screens/MarketingAgent';
 import ScheduleMD from './screens/ScheduleMD';
 import ScheduleMDPortal from './screens/ScheduleMDPortal';
-import TOTPSetup from './screens/TOTPSetup';
 import AuthVerify from './screens/AuthVerify';
 import SoulMDLogo from './SoulMDLogo';
 import ChoKuRei from './screens/concierge/ChoKuRei';
@@ -100,7 +99,6 @@ type Screen =
   | 'meditations_public'    // public landing at /meditations
   | 'marketing_admin'
   | 'meditate'
-  | 'totp_setup'            // /settings/authenticator — superuser-only TOTP wizard
   | 'auth_verify'           // /auth/verify — magic-link landing → backend hand-off
   | 'schedulemd'            // hospital scheduling admin at /schedulemd (superuser-only)
   | 'schedulemd_portal'     // physician portal at /schedulemd/portal?token=XXX (token-gated)
@@ -122,7 +120,6 @@ const pathToScreen = (path: string): Screen | null => {
   //   /admin*              admin token console
   //   /login               magic-link + TOTP sign-in surface
   //   /auth/verify         GET token-consumer that 302s on success
-  //   /settings/authenticator  TOTP setup wizard (post-auth)
   //   /concierge           superuser dashboard (incl. ?view=patient,
   //                        and /concierge/* subpaths)
   //   /concierge-medicine  superuser-gated rich landing
@@ -150,7 +147,6 @@ const pathToScreen = (path: string): Screen | null => {
           path.startsWith('/admin') ||
           path === '/login' ||
           path === '/auth/verify' ||
-          path === '/settings/authenticator' ||
           path === '/concierge' || path.startsWith('/concierge/') ||
           path === '/concierge-medicine' ||
           path === '/welcome' ||
@@ -205,7 +201,6 @@ const pathToScreen = (path: string): Screen | null => {
   if (path === '/welcome')           return 'welcome';
   if (path === '/login')             return 'auth';
   if (path === '/auth/verify')       return 'auth_verify';
-  if (path === '/settings/authenticator') return 'totp_setup';
   if (path.startsWith('/tool/')) {
     const slug = path.slice('/tool/'.length).replace(/\/$/, '');
     const candidate = `tool_${slug}` as Screen;
@@ -246,7 +241,6 @@ const screenToPath = (s: Screen): string => {
   if (s === 'schedulemd')          return '/schedulemd';
   if (s === 'schedulemd_portal')   return '/schedulemd/portal';
   if (s === 'welcome')             return '/welcome';
-  if (s === 'totp_setup')          return '/settings/authenticator';
   if (s === 'auth_verify')         return '/auth/verify';
   // public_splash has no canonical path — it's the lockdown destination
   // for any URL not in the allowlist. Preserve whatever the user typed
@@ -514,7 +508,6 @@ const App: React.FC = () => {
       meditate:            'SoulMD Meditate',
       schedulemd:          `ScheduleMD · ${brand}`,
       schedulemd_portal:   'ScheduleMD Portal · SoulMD',
-      totp_setup:          'Authenticator setup · SoulMD',
       auth_verify:         'Verifying… · SoulMD',
       welcome:             'SoulMD — Concierge Medicine by Dr. Neysi Anderson',
       public_splash:       'SoulMD — Where Science Meets the Soul',
@@ -540,7 +533,7 @@ const App: React.FC = () => {
     const PROTECTED: Screen[] = [
       'dashboard', 'concierge', 'patient_pwa', 'patient_terms', 'patient_intake',
       'meditations_library', 'concierge_access', 'marketing_admin', 'meditate',
-      'schedulemd', 'totp_setup',
+      'schedulemd',
       'tool_nephroai', 'tool_rxcheck', 'tool_antibioticai', 'tool_clinicalnote',
       'tool_xrayread', 'tool_cerebralai', 'tool_palliativemd', 'tool_anticoag',
       'tool_labread', 'tool_cliniscore',
@@ -910,9 +903,6 @@ const App: React.FC = () => {
             catch { return ''; }
           })()}
         />
-      )}
-      {screen==='totp_setup' && user && user.is_superuser && (
-        <TOTPSetup API={API} token={token} onDone={() => navigate('concierge')}/>
       )}
       {screen==='auth_verify' && <AuthVerify API={API}/>}
       {screen==='upload' && <Upload API={API} token={token} user={user} onResult={(r,url)=>{setResult(r);setImageUrl(url);navigate('results');}} onPaywall={()=>navigate('paywall')} onLogout={handleLogout} onSignUp={()=>navigate('auth')}/>}

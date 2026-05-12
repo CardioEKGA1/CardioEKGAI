@@ -1,31 +1,23 @@
 # Copyright 2026 SoulMD, LLC. All Rights Reserved.
 # Unauthorized copying, modification, distribution or use of this software is strictly prohibited.
 
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, JSON, Enum as SAEnum, text, inspect as _sa_inspect
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, JSON, Enum as SAEnum, text
 
 
 def add_column_if_not_exists(conn, table: str, column: str, col_type: str) -> None:
-    """Idempotent ALTER TABLE ADD COLUMN that works on PostgreSQL (Railway
-    prod) and SQLite (local dev / tests). The previous in-file pattern
-    used `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, which crashes on
-    older Postgres builds and on SQLite — both surfaces the user hit.
-    SQLAlchemy's inspect() abstracts the cross-dialect introspection
-    so a single call site works everywhere. Idempotent: re-running the
-    block on a deploy where the column already exists is a no-op."""
+    """Idempotent ALTER TABLE ADD COLUMN. Uses information_schema.columns
+    for the existence check — PostgreSQL on Railway is the production
+    target. Each ALTER is wrapped so a failure on one column (e.g.
+    missing parent table) doesn't abort the whole migration batch."""
     try:
-        existing = {c["name"] for c in _sa_inspect(conn).get_columns(table)}
+        result = conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ), {"t": table, "c": column})
+        if result.fetchone() is None:
+            conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {col_type}'))
     except Exception as e:
-        # Table doesn't exist yet (or some other introspection failure).
-        # Caller invariant assumes the table is already present, so log
-        # and skip rather than crash the boot for an optional migration.
-        print(f"add_column_if_not_exists: introspect failed for {table}.{column}: {e}")
-        return
-    if column in existing:
-        return
-    try:
-        conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {col_type}'))
-    except Exception as e:
-        print(f"add_column_if_not_exists: ALTER failed for {table}.{column}: {e}")
+        print(f"add_column_if_not_exists: {table}.{column} skipped: {e}")
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -866,13 +858,29 @@ class MagicLinkToken(Base):
 # setup, each consumable once; the bcrypt hash flips to a sentinel
 # "USED:..." prefix on consumption so we never store cleartext).
 class TOTPCredential(Base):
+    """Retained per spec — the table stays in the schema after TOTP
+    removal so historical migrations don't error on the missing
+    target. No code path writes to it any more; it sits empty."""
     __tablename__ = "totp_credentials"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, unique=True, nullable=False, index=True)  # FK users.id (no ondelete here for cross-DB compat)
-    totp_secret = Column(String, nullable=False)        # Fernet ciphertext
+    user_id = Column(Integer, unique=True, nullable=False, index=True)
+    totp_secret = Column(String, nullable=False)
     backup_codes = Column(JSON, nullable=False, default=list)
     enabled_at = Column(DateTime, default=datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
+
+
+# Magic-link allowlist. Only emails in this table can request a
+# sign-in link via POST /api/auth/magic-link. Non-allowlisted emails
+# get the same silent enumeration-resistant 200 response so the
+# blocklist itself doesn't leak. Admins add / remove via
+# /api/admin/allowlist (owner-only).
+class MagicLinkAllowlist(Base):
+    __tablename__ = "magic_link_allowlist"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    label = Column(String, nullable=True)              # e.g. "Superuser", "Test patient"
+    added_at = Column(DateTime, default=datetime.utcnow)
 
 
 Base.metadata.create_all(bind=engine)
@@ -1178,6 +1186,35 @@ try:
     _seed_db.close()
 except Exception as e:  # never let seed failure block boot
     print(f"ScheduleMD seed skipped: {e}")
+
+# Seed the magic-link allowlist on first boot. Idempotent — every
+# INSERT is wrapped in its own try/except so a duplicate seed (or a
+# unique-constraint violation from a prior run) doesn't abort the
+# remaining inserts. Adds two known emails: the practice owner and
+# the test patient used in dev sign-in flows.
+try:
+    _allow_seed_db = SessionLocal()
+    try:
+        for _seed_email, _seed_label in [
+            ("anderson@soulmd.us", "Superuser"),
+            ("spicymolecule@gmail.com", "Test patient"),
+        ]:
+            existing = _allow_seed_db.query(MagicLinkAllowlist).filter(
+                MagicLinkAllowlist.email == _seed_email,
+            ).first()
+            if existing:
+                continue
+            try:
+                _allow_seed_db.add(MagicLinkAllowlist(email=_seed_email, label=_seed_label))
+                _allow_seed_db.commit()
+                print(f"MagicLinkAllowlist seeded: {_seed_email} ({_seed_label})")
+            except Exception as _e:  # noqa: BLE001
+                _allow_seed_db.rollback()
+                print(f"MagicLinkAllowlist seed skipped for {_seed_email}: {_e}")
+    finally:
+        _allow_seed_db.close()
+except Exception as e:  # never let seed failure block boot
+    print(f"MagicLinkAllowlist seed skipped: {e}")
 
 # ─── Sentinel-tracked one-shot migrations ────────────────────────────
 # soulmd_one_shot_migrations records the name of every one-shot

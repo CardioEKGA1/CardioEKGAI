@@ -17,6 +17,6 @@ Pillow
 numpy
 sentry-sdk[fastapi]==2.18.0
 pywebpush==2.0.0
-pyotp==2.9.0
-qrcode[pil]==7.4.2
-cryptography>=42.0.0
+# TOTP support removed; pyotp / qrcode / standalone cryptography
+# pin were dropped here. (python-jose[cryptography] above still
+# pulls cryptography transitively for JWT signing.)
